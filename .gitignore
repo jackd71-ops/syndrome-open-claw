@@ -1,5 +1,29 @@
+# Python
 __pycache__/
 *.pyc
 *.pyo
-scripts/manifest-providers-backup.sql
+
+# Database and SQL
 *.sql
+*.db
+*.sqlite
+*.sqlite3
+
+# Backups
+*backup*
+*-backup*
+*.bak
+
+# Logs
+*.log
+logs/
+
+# Sensitive data
+*.env
+.env*
+secrets.json
+*.secrets
+
+# Progress/cache files (scraper working data)
+data/stic/*progress*.json
+data/stic/*cache*.json
