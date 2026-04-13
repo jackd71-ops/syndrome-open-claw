@@ -130,7 +130,7 @@ async def save_recipe(email: str, password: str, recipe: dict) -> None:
     except ImportError:
         sys.exit(
             "Error: cookidoo-api not installed. Run: python3.12 -m pip install cookidoo-api\n"
-            "Or rebuild the Docker image: sudo docker build -t openclaw-lokivault:latest /opt/openclaw/"
+            "Or rebuild the Docker image: sudo docker build -t openclaw-OpenClaw:latest /opt/openclaw/"
         )
 
     print(f"Connecting to Cookidoo as {email}...")

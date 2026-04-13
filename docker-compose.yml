@@ -1,7 +1,7 @@
 version: '3.8'
 services:
   openclaw:
-    image: openclaw-lokivault:latest
+    image: openclaw-custom:latest
     container_name: openclaw
     restart: unless-stopped
     ports:
