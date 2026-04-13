@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LokiVault Daily Cost Summary
+OpenClaw Daily Cost Summary
 -----------------------------
 Queries the Manifest SQLite DB for today's and month-to-date token usage
 and cost, broken down by model, then sends a Telegram summary.
@@ -333,7 +333,7 @@ def budget_check_only() -> None:
 # ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description='LokiVault Daily Cost Summary')
+    parser = argparse.ArgumentParser(description='OpenClaw Daily Cost Summary')
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument('--summary', action='store_true',
                        help='Send daily summary via Telegram')

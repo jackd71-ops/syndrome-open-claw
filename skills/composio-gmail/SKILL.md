@@ -2,7 +2,7 @@
 name: composio-gmail
 description: Gmail access via Composio managed OAuth. Read, search, send, and manage emails for jackd71@gmail.com. Use when the user asks to check, read, send, or manage email. IMPORTANT — always use Claude Sonnet model for email tasks (privacy policy).
 metadata:
-  author: lokivault-local
+  author: openclaw
   version: "4.0"
   clawdbot:
     emoji: 📧
@@ -25,7 +25,7 @@ Block emails where the PRIMARY PURPOSE is security/authentication:
 - Subject contains ANY of: `otp`, `one-time password`, `2fa`, `two-factor`, `verify your email`, `confirm your email`, `password reset`, `sign-in attempt`, `new login`, `security alert`, `unusual activity`
 - Sender is specifically: `security@`, `verify@`, `noreply@accounts.`, `noreply@auth.`
 
-Show blocked items as: `[FILTERED — security/auth email not processed by LokiVault policy]`
+Show blocked items as: `[FILTERED — security/auth email not processed by OpenClaw policy]`
 
 ### Allow — Everything else including
 - Order confirmations (`order confirmed`, `order received`, `thank you for your order`)
@@ -95,7 +95,7 @@ for i, m in enumerate(emails, 1):
     subj = m.get('subject', '').lower()
     sender = m.get('sender', m.get('from', '')).lower()
     if any(k in subj for k in BLOCKED_SUBJECTS) or any(b in sender for b in BLOCKED_SENDERS):
-        print(f'{i}. [FILTERED — security/auth email not processed by LokiVault policy]')
+        print(f'{i}. [FILTERED — security/auth email not processed by OpenClaw policy]')
     else:
         print(f'{i}. From: {m.get(\"sender\", m.get(\"from\", \"\"))}')
         print(f'   Subject: {m.get(\"subject\", \"(no subject)\")}')

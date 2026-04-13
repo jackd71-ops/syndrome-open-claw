@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-LokiVault Gmail Pre-Filter
+OpenClaw Gmail Pre-Filter
 --------------------------
-Applies the LokiVault email security policy to a list of email objects from
+Applies the OpenClaw email security policy to a list of email objects from
 Composio's GMAIL_FETCH_EMAILS / GMAIL_SEARCH_EMAILS response before they are
 returned to the LLM.
 
@@ -73,7 +73,7 @@ BLOCKED_SENDER_PATTERNS = [
     re.compile(r'reset@', re.I),
 ]
 
-FILTER_NOTICE = "[FILTERED — security-sensitive email blocked by LokiVault policy. Content not processed.]"
+FILTER_NOTICE = "[FILTERED — security-sensitive email blocked by OpenClaw policy. Content not processed.]"
 
 
 def _check_blocked(email: dict) -> str | None:
@@ -129,7 +129,7 @@ def apply_prefilter(emails: list) -> list:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='LokiVault email pre-filter')
+    parser = argparse.ArgumentParser(description='OpenClaw email pre-filter')
     parser.add_argument('file', nargs='?', help='JSON file to filter (default: stdin)')
     parser.add_argument('--stdin', action='store_true', help='Read from stdin')
     args = parser.parse_args()

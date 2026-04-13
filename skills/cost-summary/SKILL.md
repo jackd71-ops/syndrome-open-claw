@@ -2,7 +2,7 @@
 name: cost-summary
 description: Daily AI cost reporting and budget monitoring. Query the Manifest DB for today's and month-to-date LLM spend broken down by model, send a Telegram summary at 11pm UK time, and alert immediately if monthly spend exceeds 90% of the £30 budget. Use when asked about costs, usage, or budget status.
 metadata:
-  author: lokivault-local
+  author: openclaw
   version: "1.0"
   clawdbot:
     emoji: 📊
