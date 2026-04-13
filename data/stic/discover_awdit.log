@@ -1,0 +1,764 @@
+[2026-04-11 16:15:03] Starting AWD-IT URL discovery
+[2026-04-11 16:15:03] Loaded 492 products to match
+[2026-04-11 16:15:04] 
+--- Phase 1: Discovering category URLs from navigation ---
+[2026-04-11 16:15:08] Nav links found: 40
+[2026-04-11 16:15:08]   Gaming PCs                               → https://www.awd-it.co.uk/gaming-pc.html
+[2026-04-11 16:15:08]   Gaming PCs                               → https://www.awd-it.co.uk/gaming-pc.html
+[2026-04-11 16:15:08]   Gaming PC Bundles                        → https://www.awd-it.co.uk/gaming-pc/gaming-pc-bundle.html
+[2026-04-11 16:15:08]   White Gaming PCs                         → https://www.awd-it.co.uk/gaming-pc/white-gaming-pc.html
+[2026-04-11 16:15:08]   Pre-Built Gaming PCs                     → https://www.awd-it.co.uk/gaming-pc/prebuilt-gaming-pc.html
+[2026-04-11 16:15:08]   NVIDIA RTX Gaming PCs                    → https://www.awd-it.co.uk/gaming-pc/by-gpu/nvidia-geforce-gam
+[2026-04-11 16:15:08]   MSI Gaming PCs                           → https://www.awd-it.co.uk/powered-by-msi
+[2026-04-11 16:15:08]   Corsair ICUE Gaming PCs                  → https://www.awd-it.co.uk/corsair-icue-certified-gaming-pcs.h
+[2026-04-11 16:15:08]   ASUS Gaming PCs                          → https://www.awd-it.co.uk/gaming-pc/asus-gaming-pcs.html
+[2026-04-11 16:15:08]   AMD Gaming PCs                           → https://www.awd-it.co.uk/amd-radeon-ryzen-gaming-pcs.html
+[2026-04-11 16:15:08]   Next Day PCs                             → https://www.awd-it.co.uk/gaming-pc/next-day-gaming-pc.html
+[2026-04-11 16:15:08]   Next Day Gaming PCs                      → https://www.awd-it.co.uk/gaming-pc/next-day-gaming-pc.html
+[2026-04-11 16:15:08]   Next Day Business PCs                    → https://www.awd-it.co.uk/business-pcs.html
+[2026-04-11 16:15:08]   Pre-Built PCs                            → https://www.awd-it.co.uk/gaming-pc/prebuilt-gaming-pc.html
+[2026-04-11 16:15:08]   Pre-Built Gaming PCs                     → https://www.awd-it.co.uk/gaming-pc/prebuilt-gaming-pc.html
+[2026-04-11 16:15:08]   Brands                                   → https://www.awd-it.co.uk/#
+[2026-04-11 16:15:08]   NVIDIA                                   → https://www.awd-it.co.uk/brands/nvidia.html
+[2026-04-11 16:15:08]   CORSAIR                                  → https://www.awd-it.co.uk/brands/corsair.html
+[2026-04-11 16:15:08]   MSI                                      → https://www.awd-it.co.uk/brands/msi.html
+[2026-04-11 16:15:08]   COOLER MASTER                            → https://www.awd-it.co.uk/brands/cooler-master.html
+[2026-04-11 16:15:08]   WESTERN DIGITAL                          → https://www.awd-it.co.uk/brands/western-digital.html
+[2026-04-11 16:15:08]   AMD                                      → https://www.awd-it.co.uk/brands/amd.html
+[2026-04-11 16:15:08]   ASUS                                     → https://www.awd-it.co.uk/brands/asus.html
+[2026-04-11 16:15:08]   GIGABYTE                                 → https://www.awd-it.co.uk/brands/gigabyte.html
+[2026-04-11 16:15:08]   NZXT                                     → https://www.awd-it.co.uk/brands/nzxt.html
+[2026-04-11 16:15:08]   PCs by Game                              → https://www.awd-it.co.uk/pc-by-game
+[2026-04-11 16:15:08]   Choose Your Game                         → https://www.awd-it.co.uk/pc-by-game
+[2026-04-11 16:15:08]   Valorant                                 → https://www.awd-it.co.uk/valorant
+[2026-04-11 16:15:08]   Fortnite                                 → https://www.awd-it.co.uk/fortnite
+[2026-04-11 16:15:08]   League of Legends                        → https://www.awd-it.co.uk/league-of-legends
+[2026-04-11 16:15:08]   Call of Duty: Warzone 2                  → https://www.awd-it.co.uk/warzone
+[2026-04-11 16:15:08]   Minecraft                                → https://www.awd-it.co.uk/minecraft
+[2026-04-11 16:15:08]   Monitors                                 → https://www.awd-it.co.uk/gaming-monitors.html
+[2026-04-11 16:15:08]   All Monitors                             → https://www.awd-it.co.uk/gaming-monitors.html
+[2026-04-11 16:15:08]   OLED Monitors                            → https://www.awd-it.co.uk/gaming-monitors/oled-monitors.html
+[2026-04-11 16:15:08]   Curved Gaming Monitors                   → https://www.awd-it.co.uk/gaming-monitors/curved-gaming-monit
+[2026-04-11 16:15:08]   4K Gaming Monitors                       → https://www.awd-it.co.uk/gaming-monitors/4k-gaming-monitors.
+[2026-04-11 16:15:08]   Ultrawide Gaming Monitors                → https://www.awd-it.co.uk/gaming-monitors/ultrawide-gaming-mo
+[2026-04-11 16:15:08]   Cheap Gaming Monitors                    → https://www.awd-it.co.uk/gaming-monitors/cheap-gaming-monito
+[2026-04-11 16:15:08]   Upgrade Bundles                          → https://www.awd-it.co.uk/components/motherboard-and-cpu-bund
+[2026-04-11 16:15:08] 
+--- Phase 2: Scraping 16 category pages ---
+[2026-04-11 16:15:08] 
+Category: https://www.awd-it.co.uk/networking.html
+[2026-04-11 16:15:08]   Fetching page 1: https://www.awd-it.co.uk/networking.html
+[2026-04-11 16:15:17]   Found 88 products on this page (total: 88)
+[2026-04-11 16:15:17]   Fetching page 2: https://www.awd-it.co.uk/components/networking.html?p=2
+[2026-04-11 16:15:25]   Found 48 products on this page (total: 136)
+[2026-04-11 16:15:30] 
+Category: https://www.awd-it.co.uk/gaming-monitors/cheap-gaming-monitors.html
+[2026-04-11 16:15:30]   Fetching page 1: https://www.awd-it.co.uk/gaming-monitors/cheap-gaming-monitors.html
+[2026-04-11 16:15:38]   Found 88 products on this page (total: 88)
+[2026-04-11 16:15:38]   Fetching page 2: https://www.awd-it.co.uk/gaming-monitors/cheap-gaming-monitors.html?p=2
+[2026-04-11 16:15:48]   Found 46 products on this page (total: 134)
+[2026-04-11 16:15:52] 
+Category: https://www.awd-it.co.uk/components/motherboards.html
+[2026-04-11 16:15:52]   Fetching page 1: https://www.awd-it.co.uk/components/motherboards.html
+[2026-04-11 16:16:00]   Found 88 products on this page (total: 88)
+[2026-04-11 16:16:00]   Fetching page 2: https://www.awd-it.co.uk/components/motherboards.html?p=2
+[2026-04-11 16:16:08]   Found 88 products on this page (total: 176)
+[2026-04-11 16:16:08]   Fetching page 3: https://www.awd-it.co.uk/components/motherboards.html?p=3
+[2026-04-11 16:16:15]   Found 88 products on this page (total: 264)
+[2026-04-11 16:16:15]   Fetching page 4: https://www.awd-it.co.uk/components/motherboards.html?p=4
+[2026-04-11 16:16:23]   Found 88 products on this page (total: 352)
+[2026-04-11 16:16:23]   Fetching page 5: https://www.awd-it.co.uk/components/motherboards.html?p=5
+[2026-04-11 16:16:32]   Found 88 products on this page (total: 440)
+[2026-04-11 16:16:32]   Fetching page 6: https://www.awd-it.co.uk/components/motherboards.html?p=6
+[2026-04-11 16:16:41]   Found 88 products on this page (total: 528)
+[2026-04-11 16:16:41]   Fetching page 7: https://www.awd-it.co.uk/components/motherboards.html?p=7
+[2026-04-11 16:16:47]   Found 88 products on this page (total: 616)
+[2026-04-11 16:16:47]   Fetching page 8: https://www.awd-it.co.uk/components/motherboards.html?p=8
+[2026-04-11 16:16:57]   Found 88 products on this page (total: 704)
+[2026-04-11 16:16:57]   Fetching page 9: https://www.awd-it.co.uk/components/motherboards.html?p=9
+[2026-04-11 16:17:07]   Found 88 products on this page (total: 792)
+[2026-04-11 16:17:07]   Fetching page 10: https://www.awd-it.co.uk/components/motherboards.html?p=10
+[2026-04-11 16:17:15]   Found 88 products on this page (total: 880)
+[2026-04-11 16:17:15]   Fetching page 11: https://www.awd-it.co.uk/components/motherboards.html?p=11
+[2026-04-11 16:17:23]   Found 88 products on this page (total: 968)
+[2026-04-11 16:17:23]   Fetching page 12: https://www.awd-it.co.uk/components/motherboards.html?p=12
+[2026-04-11 16:17:30]   Found 56 products on this page (total: 1024)
+[2026-04-11 16:17:35] 
+Category: https://www.awd-it.co.uk/components/graphics-cards/amd-graphics-cards.html
+[2026-04-11 16:17:35]   Fetching page 1: https://www.awd-it.co.uk/components/graphics-cards/amd-graphics-cards.html
+[2026-04-11 16:17:40]   Found 24 products on this page (total: 24)
+[2026-04-11 16:17:45] 
+Category: https://www.awd-it.co.uk/components/motherboards/amd-motherboards.html
+[2026-04-11 16:17:45]   Fetching page 1: https://www.awd-it.co.uk/components/motherboards/amd-motherboards.html
+[2026-04-11 16:17:53]   Found 88 products on this page (total: 88)
+[2026-04-11 16:17:53]   Fetching page 2: https://www.awd-it.co.uk/components/motherboards/amd-motherboards.html?p=2
+[2026-04-11 16:18:01]   Found 88 products on this page (total: 176)
+[2026-04-11 16:18:01]   Fetching page 3: https://www.awd-it.co.uk/components/motherboards/amd-motherboards.html?p=3
+[2026-04-11 16:18:09]   Found 88 products on this page (total: 264)
+[2026-04-11 16:18:09]   Fetching page 4: https://www.awd-it.co.uk/components/motherboards/amd-motherboards.html?p=4
+[2026-04-11 16:18:18]   Found 88 products on this page (total: 352)
+[2026-04-11 16:18:18]   Fetching page 5: https://www.awd-it.co.uk/components/motherboards/amd-motherboards.html?p=5
+[2026-04-11 16:18:26]   Found 88 products on this page (total: 440)
+[2026-04-11 16:18:26]   Fetching page 6: https://www.awd-it.co.uk/components/motherboards/amd-motherboards.html?p=6
+[2026-04-11 16:18:36]   Found 88 products on this page (total: 528)
+[2026-04-11 16:18:36]   Fetching page 7: https://www.awd-it.co.uk/components/motherboards/amd-motherboards.html?p=7
+[2026-04-11 16:18:42]   Found 44 products on this page (total: 572)
+[2026-04-11 16:18:47] 
+Category: https://www.awd-it.co.uk/components/graphics-cards/nvidia-graphics-cards.html
+[2026-04-11 16:18:47]   Fetching page 1: https://www.awd-it.co.uk/components/graphics-cards/nvidia-graphics-cards.html
+[2026-04-11 16:18:53]   Found 24 products on this page (total: 24)
+[2026-04-11 16:18:58] 
+Category: https://www.awd-it.co.uk/components/memory.html
+[2026-04-11 16:18:58]   Fetching page 1: https://www.awd-it.co.uk/components/memory.html
+[2026-04-11 16:19:07]   Found 88 products on this page (total: 88)
+[2026-04-11 16:19:07]   Fetching page 2: https://www.awd-it.co.uk/components/memory.html?p=2
+[2026-04-11 16:19:14]   Found 88 products on this page (total: 176)
+[2026-04-11 16:19:14]   Fetching page 3: https://www.awd-it.co.uk/components/memory.html?p=3
+[2026-04-11 16:19:23]   Found 88 products on this page (total: 264)
+[2026-04-11 16:19:23]   Fetching page 4: https://www.awd-it.co.uk/components/memory.html?p=4
+[2026-04-11 16:19:31]   Found 64 products on this page (total: 328)
+[2026-04-11 16:19:35] 
+Category: https://www.awd-it.co.uk/gaming-monitors/4k-gaming-monitors.html
+[2026-04-11 16:19:35]   Fetching page 1: https://www.awd-it.co.uk/gaming-monitors/4k-gaming-monitors.html
+[2026-04-11 16:19:44]   Found 60 products on this page (total: 60)
+[2026-04-11 16:19:48] 
+Category: https://www.awd-it.co.uk/gaming-monitors/ultrawide-gaming-monitors.html
+[2026-04-11 16:19:48]   Fetching page 1: https://www.awd-it.co.uk/gaming-monitors/ultrawide-gaming-monitors.html
+[2026-04-11 16:19:57]   Found 44 products on this page (total: 44)
+[2026-04-11 16:20:01] 
+Category: https://www.awd-it.co.uk/gaming-monitors.html
+[2026-04-11 16:20:01]   Fetching page 1: https://www.awd-it.co.uk/gaming-monitors.html
+[2026-04-11 16:20:08]   Found 88 products on this page (total: 88)
+[2026-04-11 16:20:08]   Fetching page 2: https://www.awd-it.co.uk/gaming-monitors.html?p=2
+[2026-04-11 16:20:17]   Found 88 products on this page (total: 176)
+[2026-04-11 16:20:17]   Fetching page 3: https://www.awd-it.co.uk/gaming-monitors.html?p=3
+[2026-04-11 16:20:26]   Found 88 products on this page (total: 264)
+[2026-04-11 16:20:26]   Fetching page 4: https://www.awd-it.co.uk/gaming-monitors.html?p=4
+[2026-04-11 16:20:34]   Found 32 products on this page (total: 296)
+[2026-04-11 16:20:39] 
+Category: https://www.awd-it.co.uk/gaming-monitors/oled-monitors.html
+[2026-04-11 16:20:39]   Fetching page 1: https://www.awd-it.co.uk/gaming-monitors/oled-monitors.html
+[2026-04-11 16:20:47]   Found 64 products on this page (total: 64)
+[2026-04-11 16:20:51] 
+Category: https://www.awd-it.co.uk/components.html
+[2026-04-11 16:20:51]   Fetching page 1: https://www.awd-it.co.uk/components.html
+[2026-04-11 16:20:55]   Found 88 products on this page (total: 88)
+[2026-04-11 16:20:55]   Fetching page 2: https://www.awd-it.co.uk/components.html?p=2
+[2026-04-11 16:21:04]   Found 88 products on this page (total: 176)
+[2026-04-11 16:21:04]   Fetching page 3: https://www.awd-it.co.uk/components.html?p=3
+[2026-04-11 16:21:12]   Found 88 products on this page (total: 264)
+[2026-04-11 16:21:12]   Fetching page 4: https://www.awd-it.co.uk/components.html?p=4
+[2026-04-11 16:21:20]   Found 88 products on this page (total: 352)
+[2026-04-11 16:21:20]   Fetching page 5: https://www.awd-it.co.uk/components.html?p=5
+[2026-04-11 16:21:32]   Found 88 products on this page (total: 440)
+[2026-04-11 16:21:32]   Fetching page 6: https://www.awd-it.co.uk/components.html?p=6
+[2026-04-11 16:21:41]   Found 88 products on this page (total: 528)
+[2026-04-11 16:21:41]   Fetching page 7: https://www.awd-it.co.uk/components.html?p=7
+[2026-04-11 16:21:52]   Found 88 products on this page (total: 616)
+[2026-04-11 16:21:52]   Fetching page 8: https://www.awd-it.co.uk/components.html?p=8
+[2026-04-11 16:22:01]   Found 88 products on this page (total: 704)
+[2026-04-11 16:22:01]   Fetching page 9: https://www.awd-it.co.uk/components.html?p=9
+[2026-04-11 16:22:11]   Found 88 products on this page (total: 792)
+[2026-04-11 16:22:11]   Fetching page 10: https://www.awd-it.co.uk/components.html?p=10
+[2026-04-11 16:22:18]   Found 88 products on this page (total: 880)
+[2026-04-11 16:22:18]   Fetching page 11: https://www.awd-it.co.uk/components.html?p=11
+[2026-04-11 16:22:28]   Found 88 products on this page (total: 968)
+[2026-04-11 16:22:28]   Fetching page 12: https://www.awd-it.co.uk/components.html?p=12
+[2026-04-11 16:22:37]   Found 88 products on this page (total: 1056)
+[2026-04-11 16:22:37]   Fetching page 13: https://www.awd-it.co.uk/components.html?p=13
+[2026-04-11 16:22:47]   Found 88 products on this page (total: 1144)
+[2026-04-11 16:22:47]   Fetching page 14: https://www.awd-it.co.uk/components.html?p=14
+[2026-04-11 16:22:56]   Found 88 products on this page (total: 1232)
+[2026-04-11 16:22:56]   Fetching page 15: https://www.awd-it.co.uk/components.html?p=15
+[2026-04-11 16:23:07]   Found 88 products on this page (total: 1320)
+[2026-04-11 16:23:07]   Fetching page 16: https://www.awd-it.co.uk/components.html?p=16
+[2026-04-11 16:23:17]   Found 88 products on this page (total: 1408)
+[2026-04-11 16:23:17]   Fetching page 17: https://www.awd-it.co.uk/components.html?p=17
+[2026-04-11 16:23:26]   Found 88 products on this page (total: 1496)
+[2026-04-11 16:23:26]   Fetching page 18: https://www.awd-it.co.uk/components.html?p=18
+[2026-04-11 16:23:34]   Found 88 products on this page (total: 1584)
+[2026-04-11 16:23:34]   Fetching page 19: https://www.awd-it.co.uk/components.html?p=19
+[2026-04-11 16:23:42]   Found 88 products on this page (total: 1672)
+[2026-04-11 16:23:42]   Fetching page 20: https://www.awd-it.co.uk/components.html?p=20
+[2026-04-11 16:23:51]   Found 88 products on this page (total: 1760)
+[2026-04-11 16:23:51]   Fetching page 21: https://www.awd-it.co.uk/components.html?p=21
+[2026-04-11 16:23:59]   Found 88 products on this page (total: 1848)
+[2026-04-11 16:23:59]   Fetching page 22: https://www.awd-it.co.uk/components.html?p=22
+[2026-04-11 16:24:09]   Found 88 products on this page (total: 1936)
+[2026-04-11 16:24:09]   Fetching page 23: https://www.awd-it.co.uk/components.html?p=23
+[2026-04-11 16:24:17]   Found 88 products on this page (total: 2024)
+[2026-04-11 16:24:17]   Fetching page 24: https://www.awd-it.co.uk/components.html?p=24
+[2026-04-11 16:24:24]   Found 88 products on this page (total: 2112)
+[2026-04-11 16:24:24]   Fetching page 25: https://www.awd-it.co.uk/components.html?p=25
+[2026-04-11 16:24:33]   Found 88 products on this page (total: 2200)
+[2026-04-11 16:24:33]   Fetching page 26: https://www.awd-it.co.uk/components.html?p=26
+[2026-04-11 16:24:40]   Found 88 products on this page (total: 2288)
+[2026-04-11 16:24:40]   Fetching page 27: https://www.awd-it.co.uk/components.html?p=27
+[2026-04-11 16:24:48]   Found 88 products on this page (total: 2376)
+[2026-04-11 16:24:48]   Fetching page 28: https://www.awd-it.co.uk/components.html?p=28
+[2026-04-11 16:24:59]   Found 88 products on this page (total: 2464)
+[2026-04-11 16:24:59]   Fetching page 29: https://www.awd-it.co.uk/components.html?p=29
+[2026-04-11 16:25:08]   Found 88 products on this page (total: 2552)
+[2026-04-11 16:25:08]   Fetching page 30: https://www.awd-it.co.uk/components.html?p=30
+[2026-04-11 16:25:17]   Found 88 products on this page (total: 2640)
+[2026-04-11 16:25:17]   Fetching page 31: https://www.awd-it.co.uk/components.html?p=31
+[2026-04-11 16:25:27]   Found 88 products on this page (total: 2728)
+[2026-04-11 16:25:27]   Fetching page 32: https://www.awd-it.co.uk/components.html?p=32
+[2026-04-11 16:25:35]   Found 88 products on this page (total: 2816)
+[2026-04-11 16:25:35]   Fetching page 33: https://www.awd-it.co.uk/components.html?p=33
+[2026-04-11 16:25:46]   Found 88 products on this page (total: 2904)
+[2026-04-11 16:25:46]   Fetching page 34: https://www.awd-it.co.uk/components.html?p=34
+[2026-04-11 16:25:56]   Found 88 products on this page (total: 2992)
+[2026-04-11 16:25:56]   Fetching page 35: https://www.awd-it.co.uk/components.html?p=35
+[2026-04-11 16:26:05]   Found 88 products on this page (total: 3080)
+[2026-04-11 16:26:05]   Fetching page 36: https://www.awd-it.co.uk/components.html?p=36
+[2026-04-11 16:26:12]   Found 88 products on this page (total: 3168)
+[2026-04-11 16:26:12]   Fetching page 37: https://www.awd-it.co.uk/components.html?p=37
+[2026-04-11 16:26:23]   Found 88 products on this page (total: 3256)
+[2026-04-11 16:26:23]   Fetching page 38: https://www.awd-it.co.uk/components.html?p=38
+[2026-04-11 16:26:32]   Found 88 products on this page (total: 3344)
+[2026-04-11 16:26:32]   Fetching page 39: https://www.awd-it.co.uk/components.html?p=39
+[2026-04-11 16:26:42]   Found 88 products on this page (total: 3432)
+[2026-04-11 16:26:42]   Fetching page 40: https://www.awd-it.co.uk/components.html?p=40
+[2026-04-11 16:26:50]   Found 88 products on this page (total: 3520)
+[2026-04-11 16:26:50]   Fetching page 41: https://www.awd-it.co.uk/components.html?p=41
+[2026-04-11 16:26:59]   Found 88 products on this page (total: 3608)
+[2026-04-11 16:26:59]   Fetching page 42: https://www.awd-it.co.uk/components.html?p=42
+[2026-04-11 16:27:07]   Found 88 products on this page (total: 3696)
+[2026-04-11 16:27:07]   Fetching page 43: https://www.awd-it.co.uk/components.html?p=43
+[2026-04-11 16:27:15]   Found 88 products on this page (total: 3784)
+[2026-04-11 16:27:15]   Fetching page 44: https://www.awd-it.co.uk/components.html?p=44
+[2026-04-11 16:27:25]   Found 88 products on this page (total: 3872)
+[2026-04-11 16:27:25]   Fetching page 45: https://www.awd-it.co.uk/components.html?p=45
+[2026-04-11 16:27:33]   Found 88 products on this page (total: 3960)
+[2026-04-11 16:27:33]   Fetching page 46: https://www.awd-it.co.uk/components.html?p=46
+[2026-04-11 16:27:41]   Found 88 products on this page (total: 4048)
+[2026-04-11 16:27:41]   Fetching page 47: https://www.awd-it.co.uk/components.html?p=47
+[2026-04-11 16:27:51]   Found 88 products on this page (total: 4136)
+[2026-04-11 16:27:51]   Fetching page 48: https://www.awd-it.co.uk/components.html?p=48
+[2026-04-11 16:28:02]   Found 88 products on this page (total: 4224)
+[2026-04-11 16:28:02]   Fetching page 49: https://www.awd-it.co.uk/components.html?p=49
+[2026-04-11 16:28:11]   Found 88 products on this page (total: 4312)
+[2026-04-11 16:28:11]   Fetching page 50: https://www.awd-it.co.uk/components.html?p=50
+[2026-04-11 16:28:21]   Found 88 products on this page (total: 4400)
+[2026-04-11 16:28:21]   Fetching page 51: https://www.awd-it.co.uk/components.html?p=51
+[2026-04-11 16:28:30]   Found 88 products on this page (total: 4488)
+[2026-04-11 16:28:30]   Fetching page 52: https://www.awd-it.co.uk/components.html?p=52
+[2026-04-11 16:28:38]   Found 88 products on this page (total: 4576)
+[2026-04-11 16:28:38]   Fetching page 53: https://www.awd-it.co.uk/components.html?p=53
+[2026-04-11 16:28:46]   Found 88 products on this page (total: 4664)
+[2026-04-11 16:28:46]   Fetching page 54: https://www.awd-it.co.uk/components.html?p=54
+[2026-04-11 16:28:56]   Found 88 products on this page (total: 4752)
+[2026-04-11 16:28:56]   Fetching page 55: https://www.awd-it.co.uk/components.html?p=55
+[2026-04-11 16:29:05]   Found 88 products on this page (total: 4840)
+[2026-04-11 16:29:05]   Fetching page 56: https://www.awd-it.co.uk/components.html?p=56
+[2026-04-11 16:29:12]   Found 88 products on this page (total: 4928)
+[2026-04-11 16:29:12]   Fetching page 57: https://www.awd-it.co.uk/components.html?p=57
+[2026-04-11 16:29:23]   Found 88 products on this page (total: 5016)
+[2026-04-11 16:29:23]   Fetching page 58: https://www.awd-it.co.uk/components.html?p=58
+[2026-04-11 16:29:31]   Found 88 products on this page (total: 5104)
+[2026-04-11 16:29:31]   Fetching page 59: https://www.awd-it.co.uk/components.html?p=59
+[2026-04-11 16:29:41]   Found 88 products on this page (total: 5192)
+[2026-04-11 16:29:41]   Fetching page 60: https://www.awd-it.co.uk/components.html?p=60
+[2026-04-11 16:29:49]   Found 88 products on this page (total: 5280)
+[2026-04-11 16:29:49]   Fetching page 61: https://www.awd-it.co.uk/components.html?p=61
+[2026-04-11 16:29:58]   Found 88 products on this page (total: 5368)
+[2026-04-11 16:29:58]   Fetching page 62: https://www.awd-it.co.uk/components.html?p=62
+[2026-04-11 16:30:06]   Found 88 products on this page (total: 5456)
+[2026-04-11 16:30:06]   Fetching page 63: https://www.awd-it.co.uk/components.html?p=63
+[2026-04-11 16:30:13]   Found 88 products on this page (total: 5544)
+[2026-04-11 16:30:13]   Fetching page 64: https://www.awd-it.co.uk/components.html?p=64
+[2026-04-11 16:30:21]   Found 88 products on this page (total: 5632)
+[2026-04-11 16:30:21]   Fetching page 65: https://www.awd-it.co.uk/components.html?p=65
+[2026-04-11 16:30:31]   Found 88 products on this page (total: 5720)
+[2026-04-11 16:30:31]   Fetching page 66: https://www.awd-it.co.uk/components.html?p=66
+[2026-04-11 16:30:41]   Found 88 products on this page (total: 5808)
+[2026-04-11 16:30:41]   Fetching page 67: https://www.awd-it.co.uk/components.html?p=67
+[2026-04-11 16:30:50]   Found 88 products on this page (total: 5896)
+[2026-04-11 16:30:50]   Fetching page 68: https://www.awd-it.co.uk/components.html?p=68
+[2026-04-11 16:30:59]   Found 88 products on this page (total: 5984)
+[2026-04-11 16:30:59]   Fetching page 69: https://www.awd-it.co.uk/components.html?p=69
+[2026-04-11 16:31:07]   Found 88 products on this page (total: 6072)
+[2026-04-11 16:31:07]   Fetching page 70: https://www.awd-it.co.uk/components.html?p=70
+[2026-04-11 16:31:16]   Found 88 products on this page (total: 6160)
+[2026-04-11 16:31:16]   Fetching page 71: https://www.awd-it.co.uk/components.html?p=71
+[2026-04-11 16:31:24]   Found 88 products on this page (total: 6248)
+[2026-04-11 16:31:24]   Fetching page 72: https://www.awd-it.co.uk/components.html?p=72
+[2026-04-11 16:31:33]   Found 88 products on this page (total: 6336)
+[2026-04-11 16:31:33]   Fetching page 73: https://www.awd-it.co.uk/components.html?p=73
+[2026-04-11 16:31:43]   Found 88 products on this page (total: 6424)
+[2026-04-11 16:31:43]   Fetching page 74: https://www.awd-it.co.uk/components.html?p=74
+[2026-04-11 16:31:52]   Found 88 products on this page (total: 6512)
+[2026-04-11 16:31:52]   Fetching page 75: https://www.awd-it.co.uk/components.html?p=75
+[2026-04-11 16:32:00]   Found 86 products on this page (total: 6598)
+[2026-04-11 16:32:00]   Fetching page 76: https://www.awd-it.co.uk/components.html?p=76
+[2026-04-11 16:32:08]   Found 88 products on this page (total: 6686)
+[2026-04-11 16:32:08]   Fetching page 77: https://www.awd-it.co.uk/components.html?p=77
+[2026-04-11 16:32:18]   Found 88 products on this page (total: 6774)
+[2026-04-11 16:32:18]   Fetching page 78: https://www.awd-it.co.uk/components.html?p=78
+[2026-04-11 16:32:28]   Found 88 products on this page (total: 6862)
+[2026-04-11 16:32:28]   Fetching page 79: https://www.awd-it.co.uk/components.html?p=79
+[2026-04-11 16:32:37]   Found 88 products on this page (total: 6950)
+[2026-04-11 16:32:37]   Fetching page 80: https://www.awd-it.co.uk/components.html?p=80
+[2026-04-11 16:32:47]   Found 88 products on this page (total: 7038)
+[2026-04-11 16:32:47]   Fetching page 81: https://www.awd-it.co.uk/components.html?p=81
+[2026-04-11 16:32:54]   Found 50 products on this page (total: 7088)
+[2026-04-11 16:32:54]   Fetching page 82: https://www.awd-it.co.uk/components.html?p=82
+[2026-04-11 16:33:03]   Found 48 products on this page (total: 7136)
+[2026-04-11 16:33:03]   Fetching page 83: https://www.awd-it.co.uk/components.html?p=83
+[2026-04-11 16:33:11]   Found 46 products on this page (total: 7182)
+[2026-04-11 16:33:17] 
+Category: https://www.awd-it.co.uk/components/motherboards/intel-motherboards.html
+[2026-04-11 16:33:17]   Fetching page 1: https://www.awd-it.co.uk/components/motherboards/intel-motherboards.html
+[2026-04-11 16:33:26]   Found 88 products on this page (total: 88)
+[2026-04-11 16:33:26]   Fetching page 2: https://www.awd-it.co.uk/components/motherboards/intel-motherboards.html?p=2
+[2026-04-11 16:33:33]   Found 88 products on this page (total: 176)
+[2026-04-11 16:33:33]   Fetching page 3: https://www.awd-it.co.uk/components/motherboards/intel-motherboards.html?p=3
+[2026-04-11 16:33:42]   Found 88 products on this page (total: 264)
+[2026-04-11 16:33:42]   Fetching page 4: https://www.awd-it.co.uk/components/motherboards/intel-motherboards.html?p=4
+[2026-04-11 16:33:50]   Found 84 products on this page (total: 348)
+[2026-04-11 16:33:56] 
+Category: https://www.awd-it.co.uk/gaming-monitors/curved-gaming-monitors.html
+[2026-04-11 16:33:56]   Fetching page 1: https://www.awd-it.co.uk/gaming-monitors/curved-gaming-monitors.html
+[2026-04-11 16:34:04]   Found 58 products on this page (total: 58)
+[2026-04-11 16:34:09] 
+Category: https://www.awd-it.co.uk/components/graphics-cards.html
+[2026-04-11 16:34:09]   Fetching page 1: https://www.awd-it.co.uk/components/graphics-cards.html
+[2026-04-11 16:34:20]   Found 88 products on this page (total: 88)
+[2026-04-11 16:34:20]   Fetching page 2: https://www.awd-it.co.uk/components/graphics-cards.html?p=2
+[2026-04-11 16:34:28]   Found 88 products on this page (total: 176)
+[2026-04-11 16:34:28]   Fetching page 3: https://www.awd-it.co.uk/components/graphics-cards.html?p=3
+[2026-04-11 16:34:35]   Found 88 products on this page (total: 264)
+[2026-04-11 16:34:35]   Fetching page 4: https://www.awd-it.co.uk/components/graphics-cards.html?p=4
+[2026-04-11 16:34:44]   Found 88 products on this page (total: 352)
+[2026-04-11 16:34:44]   Fetching page 5: https://www.awd-it.co.uk/components/graphics-cards.html?p=5
+[2026-04-11 16:34:54]   Found 88 products on this page (total: 440)
+[2026-04-11 16:34:54]   Fetching page 6: https://www.awd-it.co.uk/components/graphics-cards.html?p=6
+[2026-04-11 16:35:01]   Found 88 products on this page (total: 528)
+[2026-04-11 16:35:01]   Fetching page 7: https://www.awd-it.co.uk/components/graphics-cards.html?p=7
+[2026-04-11 16:35:12]   Found 88 products on this page (total: 616)
+[2026-04-11 16:35:12]   Fetching page 8: https://www.awd-it.co.uk/components/graphics-cards.html?p=8
+[2026-04-11 16:35:20]   Found 50 products on this page (total: 666)
+[2026-04-11 16:35:24] 
+Category: https://www.awd-it.co.uk/components/storage.html
+[2026-04-11 16:35:24]   Fetching page 1: https://www.awd-it.co.uk/components/storage.html
+[2026-04-11 16:35:30]   Found 24 products on this page (total: 24)
+[2026-04-11 16:35:33] 
+--- Phase 3: Matching 2649 catalog items against 492 products ---
+[2026-04-11 16:35:33] Catalog saved to /opt/openclaw/data/stic/awdit_catalog.json
+[2026-04-11 16:35:33]   ✅ A520M K V2                          → Gigabyte A520M K V2 Micro ATX Motherboard
+[2026-04-11 16:35:33]   ✅ A520M-A PRO                         → MSI A520M-A PRO AMD Ryzen DDR4 M-ATX Motherboard -
+[2026-04-11 16:35:33]   ✅ A520M S2H                           → Gigabyte A520M S2H AMD A520 Micro ATX Motherboard 
+[2026-04-11 16:35:33]   ✅ H610M S2H V3 DDR4                   → Gigabyte H610M S2H V3 DDR4 Socket AM4 LGA1700 Moth
+[2026-04-11 16:35:33]   ✅ A520M DS3H V2                       → Gigabyte A520M DS3H V2 mATX Motherboard
+[2026-04-11 16:35:33]   ✅ H610M H V3 DDR4                     → Gigabyte H610M S2H V3 DDR4 Socket AM4 LGA1700 Moth
+[2026-04-11 16:35:33]   ✅ PRO H610M-E DDR4                    → MSI PRO H610M-G DDR4 Intel Micro ATX Motherboard -
+[2026-04-11 16:35:33]   ✅ PRIME A520M-A II/CSM                → Asus PRIME A520M-A II CSM Micro ATX Motherboard - 
+[2026-04-11 16:35:33]   ✅ H610M H V2                          → Intel Core i5 14400F 10 Core 4.7GHz, Gigabyte H610
+[2026-04-11 16:35:33]   ✅ PRO H610M-G WIFI DDR4               → MSI B550M PRO-VDH WIFI Motherboard mATX, AM4, DDR4
+[2026-04-11 16:35:33]   ✅ PRO H610M-G DDR4                    → MSI PRO H610M-G DDR4 Intel Micro ATX Motherboard -
+[2026-04-11 16:35:33]   ✅ A520M PRO                           → MSI A520M-A PRO AMD Ryzen DDR4 M-ATX Motherboard -
+[2026-04-11 16:35:33]   ✅ PRO A620M-E                         → MSI PRO A620M-E AMD Ryzen DDR5 Micro ATX Motherboa
+[2026-04-11 16:35:33]   ✅ H610M S2H V2                        → Intel Core i5 14400F 10 Core 4.7GHz, Gigabyte H610
+[2026-04-11 16:35:33]   ✅ PRIME A520M-K                       → ASUS PRIME A520M-K AMD A520 Micro ATX Motherboard 
+[2026-04-11 16:35:33]   ✅ PRIME H610M-K D4                    → Asus PRIME H610M-A WIFI D4 Intel DDR4 Micro ATX Mo
+[2026-04-11 16:35:33]   ✅ B760M H DDR4                        → Gigabyte B760M DS3H DDR4 Intel Micro ATX Motherboa
+[2026-04-11 16:35:33]   ✅ GT730-SL-2GD5-BRK                   → Asus GeForce GT 730 2GB GDDR5 Low Profile Graphics
+[2026-04-11 16:35:33]   ✅ PRO H610M-E                         → MSI PRO H610M-G DDR4 Intel Micro ATX Motherboard -
+[2026-04-11 16:35:33]   ✅ B550M DS3H R2                       → Gigabyte B550M DS3H AC R2 AMD AM4 Ryzen B550 Micro
+[2026-04-11 16:35:33]   ✅ GT730-4H-SL-2GD5                    → Asus GeForce GT 730 2GB GDDR5 Low Profile Graphics
+[2026-04-11 16:35:33]   ✅ TUF GAMING A520M-PLUS WIFI          → ASUS TUF GAMING B650M-PLUS WIFI AMD Ryzen DDR5 Mic
+[2026-04-11 16:35:33]   ✅ PRIME B550M-K ARGB                  → Asus Prime B550M-K ARGB AMD B550 DDR4 Micro ATX Mo
+[2026-04-11 16:35:33]   ✅ PRO H610M-G                         → MSI PRO H610M-G DDR4 Intel Micro ATX Motherboard -
+[2026-04-11 16:35:33]   ✅ PRIME H610M-A WIFI D4               → Asus PRIME H610M-A WIFI D4 Intel DDR4 Micro ATX Mo
+[2026-04-11 16:35:33]   ✅ PRIME A620AM-K                      → ASUS PRIME A620AM-K AMD Micro ATX DDR5 Motherboard
+[2026-04-11 16:35:33]   ✅ B550M AORUS ELITE                   → Gigabyte B550M AORUS ELITE AMD Ryzen B550 Micro AT
+[2026-04-11 16:35:33]   ✅ PRIME H610M-A D4-CSM                → Asus PRIME H610M-A WIFI D4 Intel DDR4 Micro ATX Mo
+[2026-04-11 16:35:33]   ✅ B650M S2H                           → Gigabyte B650M S2H AMD B650 Chipset, AM5, DDR5, Mi
+[2026-04-11 16:35:33]   ✅ GEFORCE GT 1030 2GHD4 LP OC         → MSI Nvidia GeForce GT 1030 2GHD4 LP OC 2GB DDR4 Gr
+[2026-04-11 16:35:33]   ✅ PRO B840M-B                         → MSI PRO B840M-B AM5 DDR5 MATX Motherboard
+[2026-04-11 16:35:33]   ✅ B550M PRO-VDH                       → MSI B550M PRO-VDH AMD DDR4 Micro ATX Motherboard -
+[2026-04-11 16:35:33]   ✅ GT1030-2G-BRK                       → Asus Nvidia GeForce GT 1030 Silent Low Profile 2GB
+[2026-04-11 16:35:33]   ✅ A520I AC                            → Gigabyte A520I AC AMD A520 Mini ITX Motherboard - 
+[2026-04-11 16:35:33]   ✅ PRO B760M-P DDR4                    → MSI PRO B760M-P DDR4 Intel Micro ATX Motherboard -
+[2026-04-11 16:35:33]   ✅ PRIME H610M-A WIFI                  → Asus PRIME H610M-A WIFI D4 Intel DDR4 Micro ATX Mo
+[2026-04-11 16:35:33]   ✅ B550M DS3H AC R2                    → Gigabyte B550M DS3H AC R2 AMD AM4 Ryzen B550 Micro
+[2026-04-11 16:35:33]   ✅ PRIME A620M-K                       → Asus PRIME A620M-K AMD Ryzen AM5 Micro ATX Motherb
+[2026-04-11 16:35:33]   ✅ GEFORCE GT 1030 4GHD4 LP OC         → MSI Nvidia GeForce GT 1030 2GHD4 LP OC 2GB DDR4 Gr
+[2026-04-11 16:35:33]   ✅ B550 GAMING X V2                    → Gigabyte B550 Gaming X V2 AMD Ryzen B550 ATX DDR4 
+[2026-04-11 16:35:33]   ✅ PRO B760M-P                         → MSI PRO B760M-P DDR4 Intel Micro ATX Motherboard -
+[2026-04-11 16:35:33]   ✅ B650M D3HP                          → Gigabyte B650M D3HP AM5 DDR5 Micro ATX Motherboard
+[2026-04-11 16:35:33]   ✅ PRIME B550M-K                       → Asus Prime B550M-K ARGB AMD B550 DDR4 Micro ATX Mo
+[2026-04-11 16:35:33]   ✅ B760 DS3H DDR4                      → Gigabyte B760M DS3H DDR4 Intel Micro ATX Motherboa
+[2026-04-11 16:35:33]   ✅ B550 EAGLE WIFI6                    → Gigabyte B550 EAGLE WIFI6 AMD DDR4 ATX Motherboard
+[2026-04-11 16:35:33]   ✅ PRIME B840M-R                       → Asus PRIME B840M-A WIFI AMD Ryzen AM5 DDR5 Micro A
+[2026-04-11 16:35:33]   ✅ PRIME H610I-PLUS D4-CSM             → ASUS PRIME H610I-PLUS D4-CSM LGA 1700 DDR4 Mini IT
+[2026-04-11 16:35:33]   ✅ B550M PRO-VDH WIFI                  → MSI B550M PRO-VDH AMD DDR4 Micro ATX Motherboard -
+[2026-04-11 16:35:33]   ✅ B550-A PRO                          → MSI B550M PRO-VDH AMD DDR4 Micro ATX Motherboard -
+[2026-04-11 16:35:33]   ✅ B550 AORUS ELITE V2                 → Gigabyte B550M AORUS ELITE AMD Ryzen B550 Micro AT
+[2026-04-11 16:35:33]   ✅ PRIME B760M-F WIFI                  → ASUS PRIME B760M-A WIFI Intel Micro ATX Wifi Mothe
+[2026-04-11 16:35:33]   ✅ MPG B550 GAMING PLUS                → MSI MPG B550 GAMING PLUS AMD Ryzen B550 ATX DDR4 M
+[2026-04-11 16:35:33]   ✅ TUF GAMING A620AM-PLUS              → ASUS TUF GAMING B650M-PLUS WIFI AMD Ryzen DDR5 Mic
+[2026-04-11 16:35:33]   ✅ PRIME B840M-K                       → Asus PRIME B840M-A WIFI AMD Ryzen AM5 DDR5 Micro A
+[2026-04-11 16:35:33]   ✅ A620I AX                            → Gigabyte A620I AX AMD Ryzen DDR5 Mini ITX Motherbo
+[2026-04-11 16:35:33]   ✅ PRIME B550M-A WIFI II               → ASUS PRIME B650M-A WIFI II AMD Ryzen AM5 DDR5 Micr
+[2026-04-11 16:35:33]   ✅ TUF GAMING B550-PLUS                → ASUS TUF GAMING B650M-PLUS WIFI AMD Ryzen DDR5 Mic
+[2026-04-11 16:35:33]   ✅ B650 EAGLE                          → Gigabyte B650 Eagle AX AMD Ryzen DDR5 ATX WIFI Mot
+[2026-04-11 16:35:33]   ✅ B760 DS3H AX DDR4                   → Gigabyte B760M DS3H DDR4 Intel Micro ATX Motherboa
+[2026-04-11 16:35:33]   ✅ B850M D3HP                          → Gigabyte B850M D3HP AMD Ryzen AM5 DDR5 mATX Mother
+[2026-04-11 16:35:33]   ✅ PRIME B840M-A WIFI                  → Asus PRIME B840M-A WIFI AMD Ryzen AM5 DDR5 Micro A
+[2026-04-11 16:35:33]   ✅ PRIME B760M-A WIFI                  → ASUS PRIME B760M-A WIFI Intel Micro ATX Wifi Mothe
+[2026-04-11 16:35:33]   ✅ PRIME B550M-A                       → Asus Prime B550M-K ARGB AMD B550 DDR4 Micro ATX Mo
+[2026-04-11 16:35:33]   ✅ TUF GAMING A620AM-PLUS WIFI         → ASUS TUF GAMING B650M-PLUS WIFI AMD Ryzen DDR5 Mic
+[2026-04-11 16:35:33]   ✅ PRIME B760-PLUS D4                  → ASUS PRIME H610I-PLUS D4-CSM LGA 1700 DDR4 Mini IT
+[2026-04-11 16:35:33]   ✅ PRIME B650M-A WIFI II               → ASUS PRIME B650M-A WIFI II AMD Ryzen AM5 DDR5 Micr
+[2026-04-11 16:35:33]   ✅ PRIME B550-PLUS                     → ASUS PRIME B550-PLUS AMD B550 DDR4 ATX Motherboard
+[2026-04-11 16:35:33]   ✅ PRIME B850M-K                       → ASUS PRIME B850M-A WIFI AMD RYZEN DDR5 mATX Mother
+[2026-04-11 16:35:33]   ✅ TUF GAMING B550-PLUS WIFI II        → ASUS TUF GAMING B550-PLUS WIFI II AMD B550 DDR4 AT
+[2026-04-11 16:35:33]   ✅ TUF GAMING B550M-PLUS               → ASUS TUF GAMING B650M-PLUS WIFI AMD Ryzen DDR5 Mic
+[2026-04-11 16:35:33]   ✅ TUF GAMING B550M-PLUS WIFI II       → ASUS TUF GAMING B550-PLUS WIFI II AMD B550 DDR4 AT
+[2026-04-11 16:35:33]   ✅ B760 GAMING PLUS WIFI DDR4          → MSI B760 GAMING PLUS WIFI DDR5 Intel ATX Motherboa
+[2026-04-11 16:35:33]   ✅ PRO B840M-P WIFI6E                  → MSI PRO B840M-P WIFI6E AM5 DDR5 MATX Motherboard
+[2026-04-11 16:35:33]   ✅ B760M GAMING PLUS WIFI              → MSI B850M GAMING PLUS WIFI6E AM5 DDR5 ATX Ryzen Mo
+[2026-04-11 16:35:33]   ✅ B760M PROJECT ZERO                  → MSI B760M PROJECT ZERO Intel LGA 1700 Back-Connect
+[2026-04-11 16:35:33]   ✅ B850M DS3H                          → Gigabyte B850M DS3H AMD Ryzen AM5 DDR5 mATX Mother
+[2026-04-11 16:35:33]   ✅ PRIME B760M-A WIFI D4               → Asus PRIME H610M-A WIFI D4 Intel DDR4 Micro ATX Mo
+[2026-04-11 16:35:33]   ✅ PRO B760-P WIFI DDR4                → MSI B550M PRO-VDH WIFI Motherboard mATX, AM4, DDR4
+[2026-04-11 16:35:33]   ✅ B650M GAMING PLUS WIFI              → MSI B850M GAMING PLUS WIFI6E AM5 DDR5 ATX Ryzen Mo
+[2026-04-11 16:35:33]   ✅ B650 EAGLE AX                       → Gigabyte B650 Eagle AX AMD Ryzen DDR5 ATX WIFI Mot
+[2026-04-11 16:35:33]   ✅ PRO B840-P WIFI                     → MSI PRO B840-P WIFI AMD Ryzen AM5 DDR5 ATX Motherb
+[2026-04-11 16:35:33]   ✅ B650 GAMING PLUS WIFI               → MSI B850M GAMING PLUS WIFI6E AM5 DDR5 ATX Ryzen Mo
+[2026-04-11 16:35:33]   ✅ B840M GAMING PLUS WIFI6E            → MSI B850M GAMING PLUS WIFI6E AM5 DDR5 ATX Ryzen Mo
+[2026-04-11 16:35:33]   ✅ PRIME B850M-A WIFI                  → ASUS PRIME B850M-A WIFI AMD RYZEN DDR5 mATX Mother
+[2026-04-11 16:35:33]   ✅ B860M DS3H WIFI6E                   → Gigabyte B860M DS3H WIFI6E Intel Core Ultra LGA 18
+[2026-04-11 16:35:33]   ✅ PRO B840-S EVO WIFI6E               → MSI PRO B840M-P WIFI6E AM5 DDR5 MATX Motherboard
+[2026-04-11 16:35:33]   ✅ B650I AX                            → Gigabyte B650I AX Wifi DDR5 AM5 Mini-ITX Motherboa
+[2026-04-11 16:35:33]   ✅ B550I AORUS PRO AX                  → Gigabyte B550I AORUS PRO AX AMD Ryzen B550 Mini IT
+[2026-04-11 16:35:33]   ✅ PRIME B650-PLUS WIFI                → ASUS PRIME B650M-A WIFI II AMD Ryzen AM5 DDR5 Micr
+[2026-04-11 16:35:33]   ✅ B850M GAMING PLUS WIFI6E            → MSI B850M GAMING PLUS WIFI6E AM5 DDR5 ATX Ryzen Mo
+[2026-04-11 16:35:33]   ✅ B860 DS3H WIFI6E                    → Gigabyte B860M DS3H WIFI6E Intel Core Ultra LGA 18
+[2026-04-11 16:35:33]   ✅ PRO B850-S WIFI6E                   → MSI PRO B850-S WIFI6E AM5 DDR5 ATX Ryzen Motherboa
+[2026-04-11 16:35:33]   ✅ ROG STRIX B550-A GAMING             → ASUS 27" ROG Strix XG27ACS-W 2560 x 1440 QHD 1ms I
+[2026-04-11 16:35:33]   ✅ MAG B550 TOMAHAWK MAX WIFI          → MSI MAG B550 TOMAHAWK MAX WIFI Motherboard - AM4
+[2026-04-11 16:35:33]   ✅ B760 GAMING PLUS WIFI               → MSI B850M GAMING PLUS WIFI6E AM5 DDR5 ATX Ryzen Mo
+[2026-04-11 16:35:33]   ✅ B650 GAMING X AX V2                 → Gigabyte B650 GAMING X AX V2 AMD Ryzen DDR5 ATX WI
+[2026-04-11 16:35:33]   ✅ B840M AORUS ELITE WIFI6E            → Gigabyte B860M AORUS ELITE WIFI6E ICE Intel Core U
+[2026-04-11 16:35:33]   ✅ TUF GAMING B650-E WIFI              → AMD Ryzen 7 7800X3D Eight Core 5.0GHz, ASUS ROG ST
+[2026-04-11 16:35:33]   ✅ B840 GAMING PLUS WIFI               → MSI B850M GAMING PLUS WIFI6E AM5 DDR5 ATX Ryzen Mo
+[2026-04-11 16:35:33]   ✅ B850M EAGLE WIFI6E                  → Gigabyte B850M EAGLE WIFI6E ICE AMD Ryzen AM5 DDR5
+[2026-04-11 16:35:33]   ✅ B850 GAMING PLUS WIFI6E             → MSI B850M GAMING PLUS WIFI6E AM5 DDR5 ATX Ryzen Mo
+[2026-04-11 16:35:33]   ✅ B850M GAMING PLUS WIFI              → MSI B850M GAMING PLUS WIFI6E AM5 DDR5 ATX Ryzen Mo
+[2026-04-11 16:35:33]   ✅ PRO B850M-P WIFI                    → MSI PRO B850M-P WIFI AM5 DDR5 Micro ATX Ryzen Moth
+[2026-04-11 16:35:33]   ✅ TUF GAMING B760-PLUS WIFI           → ASUS TUF GAMING B650M-PLUS WIFI AMD Ryzen DDR5 Mic
+[2026-04-11 16:35:33]   ✅ B650M AORUS ELITE AX ICE            → Gigabyte B650M Aorus Elite AX Ice AM5 DDR5 Micro A
+[2026-04-11 16:35:33]   ✅ ROG STRIX B550-F GAMING             → ASUS 27" ROG Strix XG27ACS-W 2560 x 1440 QHD 1ms I
+[2026-04-11 16:35:33]   ✅ TUF GAMING B650-PLUS WIFI           → ASUS TUF GAMING B650M-PLUS WIFI AMD Ryzen DDR5 Mic
+[2026-04-11 16:35:33]   ✅ B850M EAGLE WIFI6E ICE              → Gigabyte B850M EAGLE WIFI6E ICE AMD Ryzen AM5 DDR5
+[2026-04-11 16:35:33]   ✅ ROG STRIX B550-F GAMING WI-FI II    → AMD Ryzen 7 7800X3D Eight Core 5.0GHz, ASUS ROG ST
+[2026-04-11 16:35:33]   ✅ PRO B860M-A WIFI                    → MSI PRO B860M-A WIFI Intel Core Ultra LGA 1851 DDR
+[2026-04-11 16:35:33]   ✅ B650 AORUS ELITE AX ICE             → Gigabyte B650M Aorus Elite AX Ice AM5 DDR5 Micro A
+[2026-04-11 16:35:33]   ✅ Z890M GAMING X                      → Gigabyte Z890M GAMING X Intel LGA 1851 DDR5 Micro 
+[2026-04-11 16:35:33]   ✅ B860M GAMING X WIFI6E               → Gigabyte B860M GAMING X WIFI6E Intel Core Ultra LG
+[2026-04-11 16:35:33]   ✅ MAG B760 TOMAHAWK WIFI              → MSI MAG B550 TOMAHAWK MAX WIFI Motherboard - AM4
+[2026-04-11 16:35:33]   ✅ B850 EAGLE ICE                      → Gigabyte B850M EAGLE WIFI6E ICE AMD Ryzen AM5 DDR5
+[2026-04-11 16:35:33]   ✅ PRIME B850-PLUS-CSM                 → ASUS PRIME B850M-A-CSM AMD RYZEN DDR5 mATX Motherb
+[2026-04-11 16:35:33]   ✅ B650E MAX GAMING WIFI               → ASUS ROG STRIX B650E-E GAMING WIFI AMD Ryzen DDR5 
+[2026-04-11 16:35:33]   ✅ B850 EAGLE WIFI6E                   → Gigabyte B850M EAGLE WIFI6E ICE AMD Ryzen AM5 DDR5
+[2026-04-11 16:35:33]   ✅ B850 GAMING PRO WIFI6E              → MSI B850M GAMING PLUS WIFI6E AM5 DDR5 ATX Ryzen Mo
+[2026-04-11 16:35:33]   ✅ B860 GAMING X WIFI6E                → Gigabyte B860M GAMING X WIFI6E Intel Core Ultra LG
+[2026-04-11 16:35:33]   ✅ B850 EAGLE WIFI7 ICE                → Gigabyte B850 AORUS ELITE WIFI7 ICE AMD Ryzen AM5 
+[2026-04-11 16:35:33]   ✅ PRO B850-S EVO WIFI                 → MSI PRO B850-S WIFI6E AM5 DDR5 ATX Ryzen Motherboa
+[2026-04-11 16:35:33]   ✅ PRO Z790-P WIFI                     → MSI PRO Z790-P WIFI Intel DDR5 PCIe 5.0 ATX Mother
+[2026-04-11 16:35:33]   ✅ ROG STRIX B650-A GAMING WIFI        → AMD Ryzen 7 7800X3D Eight Core 5.0GHz, ASUS ROG ST
+[2026-04-11 16:35:33]   ✅ B850M GAMING X WIFI6E               → Gigabyte B850M GAMING X WIFI6E AMD Ryzen AM5 DDR5 
+[2026-04-11 16:35:33]   ✅ Z790 GAMING PLUS WIFI               → MSI B850M GAMING PLUS WIFI6E AM5 DDR5 ATX Ryzen Mo
+[2026-04-11 16:35:33]   ✅ TUF GAMING B650M-PLUS WIFI          → ASUS TUF GAMING B650M-PLUS WIFI AMD Ryzen DDR5 Mic
+[2026-04-11 16:35:33]   ✅ B850 GAMING PLUS WIFI               → MSI B850M GAMING PLUS WIFI6E AM5 DDR5 ATX Ryzen Mo
+[2026-04-11 16:35:33]   ✅ PRO B850-P WIFI                     → MSI PRO B850-S WIFI6E AM5 DDR5 ATX Ryzen Motherboa
+[2026-04-11 16:35:33]   ✅ TUF GAMING B850M-PLUS II            → ASUS TUF GAMING B550-PLUS WIFI II AMD B550 DDR4 AT
+[2026-04-11 16:35:33]   ✅ B850 GAMING X WIFI6E                → Gigabyte B850 GAMING X WIFI6E AMD Ryzen AM5 DDR5 A
+[2026-04-11 16:35:33]   ✅ X870 GAMING WIFI6                   → Gigabyte X870 GAMING WIFI6 AMD Ryzen DDR5 WIFI Mot
+[2026-04-11 16:35:33]   ✅ TUF GAMING B650-PLUS                → ASUS TUF GAMING B650M-PLUS WIFI AMD Ryzen DDR5 Mic
+[2026-04-11 16:35:33]   ✅ B850M AORUS ELITE WIFI6E ICE        → Gigabyte B860M AORUS ELITE WIFI6E ICE Intel Core U
+[2026-04-11 16:35:33]   ✅ B850M AORUS ELITE WIFI6E            → Gigabyte B860M AORUS ELITE WIFI6E ICE Intel Core U
+[2026-04-11 16:35:33]   ✅ Z890 UD WIFI6E                      → Gigabyte Z890 UD WIFI6E Intel LGA 1851 DDR5 ATX Mo
+[2026-04-11 16:35:33]   ✅ TUF GAMING B850-E WIFI              → ASUS TUF GAMING B850-E WIFI AMD RYZEN DDR5 WIFI 6E
+[2026-04-11 16:35:33]   ✅ PRIME B840-PLUS WIFI                → Asus PRIME B840-PLUS WIFI AMD Ryzen AM5 DDR5 ATX M
+[2026-04-11 16:35:33]   ✅ PRIME B850-PLUS WIFI                → Asus PRIME B840-PLUS WIFI AMD Ryzen AM5 DDR5 ATX M
+[2026-04-11 16:35:33]   ✅ ROG STRIX B760-I GAMING WIFI        → AMD Ryzen 7 7800X3D Eight Core 5.0GHz, ASUS ROG ST
+[2026-04-11 16:35:33]   ✅ B860M AORUS ELITE WIFI6E ICE        → Gigabyte B860M AORUS ELITE WIFI6E ICE Intel Core U
+[2026-04-11 16:35:33]   ✅ B860M AORUS ELITE WIFI6E            → Gigabyte B860M AORUS ELITE WIFI6E ICE Intel Core U
+[2026-04-11 16:35:33]   ✅ X870 EAGLE WIFI7                    → Gigabyte X870 EAGLE WIFI7 AMD Ryzen DDR5 WIFI Moth
+[2026-04-11 16:35:33]   ✅ MPG B760I EDGE WIFI                 → MSI MPG B850 EDGE TI WIFI AMD Ryzen AM5 DDR5 ATX M
+[2026-04-11 16:35:33]   ✅ PRIME Z790-P WIFI                   → ASUS PRIME Z790-P WIFI Intel DDR5 PCIe 5.0 ATX Mot
+[2026-04-11 16:35:34]   ✅ PRO B850M-A WIFI PZ                 → MSI PRO B850M-P WIFI AM5 DDR5 Micro ATX Ryzen Moth
+[2026-04-11 16:35:34]   ✅ MAG Z790 TOMAHAWK WIFI              → MSI MAG B550 TOMAHAWK MAX WIFI Motherboard - AM4
+[2026-04-11 16:35:34]   ✅ TUF GAMING B850M-E WIFI             → ASUS TUF GAMING B850-E WIFI AMD RYZEN DDR5 WIFI 6E
+[2026-04-11 16:35:34]   ✅ ROG STRIX B650E-F GAMING WIFI       → AMD Ryzen 7 7800X3D Eight Core 5.0GHz, ASUS ROG ST
+[2026-04-11 16:35:34]   ✅ MAG B850M MORTAR WIFI               → MSI MAG B850M MORTAR WIFI AM5 DDR5 MATX Motherboar
+[2026-04-11 16:35:34]   ✅ B850 MAX GAMING WIFI                → ASUS TUF GAMING B850-E WIFI AMD RYZEN DDR5 WIFI 6E
+[2026-04-11 16:35:34]   ✅ B850 MAX GAMING WIFI W              → ASUS TUF GAMING B850-E WIFI AMD RYZEN DDR5 WIFI 6E
+[2026-04-11 16:35:34]   ✅ Z790 AORUS ELITE AX                 → GIGABYTE Z790 AORUS ELITE AX Intel DDR5 PCIe 5.0 A
+[2026-04-11 16:35:34]   ✅ MPG B860I EDGE TI WIFI              → MSI MPG B850 EDGE TI WIFI AMD Ryzen AM5 DDR5 ATX M
+[2026-04-11 16:35:34]   ✅ B860 AORUS ELITE WIFI7 ICE          → Gigabyte B850 AORUS ELITE WIFI7 ICE AMD Ryzen AM5 
+[2026-04-11 16:35:34]   ✅ B850 AORUS ELITE WIFI7              → Gigabyte B850 AORUS ELITE WIFI7 ICE AMD Ryzen AM5 
+[2026-04-11 16:35:34]   ✅ MPG B850 EDGE TI WIFI               → MSI MPG B850 EDGE TI WIFI AMD Ryzen AM5 DDR5 ATX M
+[2026-04-11 16:35:34]   ✅ MAG B850 TOMAHAWK WIFI              → MSI MAG B550 TOMAHAWK MAX WIFI Motherboard - AM4
+[2026-04-11 16:35:34]   ✅ GV-N3050WF2OCV2-6GD                 → GIGABYTE GeForce RTX 3050 WINDFORCE OC V2 6GB GDDR
+[2026-04-11 16:35:34]   ✅ B850 AORUS ELITE WIFI7 ICE          → Gigabyte B850 AORUS ELITE WIFI7 ICE AMD Ryzen AM5 
+[2026-04-11 16:35:34]   ✅ TUF GAMING B850M-PLUS WIFI7 W       → Asus TUF GAMING B850M-PLUS WIFI AMD Ryzen AM5 DDR5
+[2026-04-11 16:35:34]   ✅ PRIME B860-PLUS WIFI                → Asus PRIME B840-PLUS WIFI AMD Ryzen AM5 DDR5 ATX M
+[2026-04-11 16:35:34]   ✅ MAG B850 TOMAHAWK MAX WIFI          → MSI MAG B550 TOMAHAWK MAX WIFI Motherboard - AM4
+[2026-04-11 16:35:34]   ✅ MAG B860 TOMAHAWK WIFI              → MSI MAG B550 TOMAHAWK MAX WIFI Motherboard - AM4
+[2026-04-11 16:35:34]   ✅ Z890 EAGLE WIFI7                    → Gigabyte Z890 EAGLE WIFI7 Intel LGA 1851 DDR5 ATX 
+[2026-04-11 16:35:34]   ✅ ROG STRIX B760-A GAMING WIFI        → AMD Ryzen 7 7800X3D Eight Core 5.0GHz, ASUS ROG ST
+[2026-04-11 16:35:34]   ✅ TUF GAMING B850M-PLUS WIFI7         → Asus TUF GAMING B850M-PLUS WIFI AMD Ryzen AM5 DDR5
+[2026-04-11 16:35:34]   ✅ PRO Z890-S WIFI                     → MSI PRO Z890-P WIFI Intel DDR5 PCIE 5.0 LGA 1851 A
+[2026-04-11 16:35:34]   ✅ Z890 GAMING X WIFI7                 → Gigabyte Z890 GAMING X WIFI7 Intel LGA 1851 DDR5 A
+[2026-04-11 16:35:34]   ✅ PRIME Z890-P                        → ASUS PRIME Z890M-PLUS WIFI Intel DDR5 PCIE 5.0 LGA
+[2026-04-11 16:35:34]   ✅ B850 GAMING PLUS WIFI PZ            → MSI B850M GAMING PLUS WIFI6E AM5 DDR5 ATX Ryzen Mo
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 3050 LP E 6G OC         → MSI GEFORCE RTX 3050 LP 6G OC GDDR6 Graphics Card
+[2026-04-11 16:35:34]   ✅ X870 GAMING X WIFI7                 → Gigabyte X870 GAMING X WIFI7 AMD Ryzen DDR5 WIFI M
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 3050 VENTUS 2X E 6G OC  → MSI GeForce RTX 3050 VENTUS 2X XS WHITE 8G OC Dual
+[2026-04-11 16:35:34]   ✅ PRO Z890-P WIFI                     → MSI PRO Z890-P WIFI Intel DDR5 PCIE 5.0 LGA 1851 A
+[2026-04-11 16:35:34]   ✅ ROG STRIX B860-A GAMING WIFI        → AMD Ryzen 7 7800X3D Eight Core 5.0GHz, ASUS ROG ST
+[2026-04-11 16:35:34]   ✅ TUF GAMING B860M-PLUS WIFI          → ASUS TUF GAMING B650M-PLUS WIFI AMD Ryzen DDR5 Mic
+[2026-04-11 16:35:34]   ✅ DUAL-RTX3050-O6G                    → ASUS Dual GeForce RTX 3050 6GB GDDR6 Graphics Card
+[2026-04-11 16:35:34]   ✅ PRO X870E-P WIFI                    → MSI PRO X870E-P WIFI AM5 DDR5 ATX Motherboard
+[2026-04-11 16:35:34]   ✅ PRO X870E-S EVO WIFI                → MSI PRO X870E-P WIFI AM5 DDR5 ATX Motherboard
+[2026-04-11 16:35:34]   ✅ Z890 GAMING WIFI                    → MSI Z890 GAMING PLUS WIFI Intel DDR5 PCIE 5.0 LGA 
+[2026-04-11 16:35:34]   ✅ PRIME Z890-P WIFI                   → ASUS PRIME Z890M-PLUS WIFI Intel DDR5 PCIE 5.0 LGA
+[2026-04-11 16:35:34]   ✅ TUF GAMING Z890-PLUS WIFI           → ASUS TUF GAMING B650M-PLUS WIFI AMD Ryzen DDR5 Mic
+[2026-04-11 16:35:34]   ✅ B850I AORUS PRO                     → Gigabyte B850I AORUS PRO AMD Ryzen AM5 DDR5 ITX Mo
+[2026-04-11 16:35:34]   ✅ TUF GAMING B850-PRO WIFI7 W NEO     → ASUS TUF Gaming X870-PRO WIFI7 NEO ATX Motherboard
+[2026-04-11 16:35:34]   ✅ X870E GAMING PLUS WIFI              → MSI B850M GAMING PLUS WIFI6E AM5 DDR5 ATX Ryzen Mo
+[2026-04-11 16:35:34]   ✅ PRIME X870-P                        → Asus PRIME X870-P AMD Ryzen DDR5 Motherboard - Soc
+[2026-04-11 16:35:34]   ✅ ROG STRIX B850-G GAMING WIFI        → AMD Ryzen 7 7800X3D Eight Core 5.0GHz, ASUS ROG ST
+[2026-04-11 16:35:34]   ✅ ROG STRIX B760-F GAMING WIFI        → AMD Ryzen 7 7800X3D Eight Core 5.0GHz, ASUS ROG ST
+[2026-04-11 16:35:34]   ✅ DUAL-RTX3060-O8G                    → Asus Nvidia DUAL OC GeForce RTX 3060 OC V2 8GB GDD
+[2026-04-11 16:35:34]   ✅ Z890 GAMING PLUS WIFI               → MSI B850M GAMING PLUS WIFI6E AM5 DDR5 ATX Ryzen Mo
+[2026-04-11 16:35:34]   ✅ X870M AORUS ELITE WIFI7             → Gigabyte B850 AORUS ELITE WIFI7 ICE AMD Ryzen AM5 
+[2026-04-11 16:35:34]   ✅ TUF GAMING B850-PLUS WIFI           → ASUS TUF GAMING B850-E WIFI AMD RYZEN DDR5 WIFI 6E
+[2026-04-11 16:35:34]   ✅ ROG STRIX B650E-I GAMING WIFI       → AMD Ryzen 7 7800X3D Eight Core 5.0GHz, ASUS ROG ST
+[2026-04-11 16:35:34]   ✅ TUF GAMING B850M-PLUS WIFI          → ASUS TUF GAMING B650M-PLUS WIFI AMD Ryzen DDR5 Mic
+[2026-04-11 16:35:34]   ✅ PRIME X870-P WIFI                   → Asus PRIME X870-P WIFI AMD Ryzen DDR5 Motherboard 
+[2026-04-11 16:35:34]   ✅ PRO Z890-S WIFI PZ                  → MSI PRO Z890-P WIFI Intel DDR5 PCIE 5.0 LGA 1851 A
+[2026-04-11 16:35:34]   ✅ MPG B850I EDGE TI WIFI              → MSI MPG B850 EDGE TI WIFI AMD Ryzen AM5 DDR5 ATX M
+[2026-04-11 16:35:34]   ✅ GV-N3060WF2OC-12GD V2               → Gigabyte NVIDIA GeForce RTX 3060 Windforce OC 12GB
+[2026-04-11 16:35:34]   ✅ ROG STRIX B650E-E GAMING WIFI       → AMD Ryzen 7 7800X3D Eight Core 5.0GHz, ASUS ROG ST
+[2026-04-11 16:35:34]   ✅ ROG STRIX B850-A GAMING WIFI7 NEO   → ASUS ROG STRIX B850-A Gaming WIFI7 NEO ATX Motherb
+[2026-04-11 16:35:34]   ✅ X870 A ELITE WIFI7                  → Gigabyte X870 AORUS ELITE WIFI7 ICE AMD Ryzen DDR5
+[2026-04-11 16:35:34]   ✅ MAG X870 TOMAHAWK WIFI              → MSI MAG B550 TOMAHAWK MAX WIFI Motherboard - AM4
+[2026-04-11 16:35:34]   ✅ MAG B850 TOMAHAWK MAX WIFI II       → MSI MAG B850 TOMAHAWK MAX WIFI AMD Ryzen AM5 DDR5 
+[2026-04-11 16:35:34]   ✅ X870 A ELITE WIFI7 ICE              → Gigabyte B850 AORUS ELITE WIFI7 ICE AMD Ryzen AM5 
+[2026-04-11 16:35:34]   ✅ Z890 AORUS ELITE WIFI7              → Gigabyte B850 AORUS ELITE WIFI7 ICE AMD Ryzen AM5 
+[2026-04-11 16:35:34]   ✅ X870 A ELITE X ICE                  → Gigabyte X870 AORUS ELITE WIFI7 ICE AMD Ryzen DDR5
+[2026-04-11 16:35:34]   ✅ TUF GAMING B850-BTF WIFI W          → ASUS TUF GAMING B850-E WIFI AMD RYZEN DDR5 WIFI 6E
+[2026-04-11 16:35:34]   ✅ GV-N5050WF2OC-8GD                   → Gigabyte GeForce RTX 5050 WINDFORCE OC 8GB GDDR6 G
+[2026-04-11 16:35:34]   ✅ Z890 AORUS ELITE WIFI7 ICE          → Gigabyte B850 AORUS ELITE WIFI7 ICE AMD Ryzen AM5 
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 3060 VENTUS 2X 12G OC   → MSI GeForce RTX 3050 VENTUS 2X XS WHITE 8G OC Dual
+[2026-04-11 16:35:34]   ✅ B850 AORUS STEALTH                  → Gigabyte B850 AORUS Stealth AMD AM5 ATX DDR5 Gamin
+[2026-04-11 16:35:34]   ✅ X870I AORUS PRO ICE                 → Gigabyte X870I AORUS PRO ICE AMD AM5 Socket DDR5 P
+[2026-04-11 16:35:34]   ✅ ROG STRIX B850-F GAMING WIFI        → AMD Ryzen 7 7800X3D Eight Core 5.0GHz, ASUS ROG ST
+[2026-04-11 16:35:34]   ✅ X870E A ELITE WIFI7 ICE             → Gigabyte B850 AORUS ELITE WIFI7 ICE AMD Ryzen AM5 
+[2026-04-11 16:35:34]   ✅ NE65050019P1-GB2070F                → Palit GeForce RTX 5050 StormX 8GB GDDR6 Graphics C
+[2026-04-11 16:35:34]   ✅ ROG STRIX B850-F GAMING WIFI7 NEO   → ASUS ROG STRIX B850-A Gaming WIFI7 NEO ATX Motherb
+[2026-04-11 16:35:34]   ✅ MAG Z890 TOMAHAWK WIFI              → MSI MAG B550 TOMAHAWK MAX WIFI Motherboard - AM4
+[2026-04-11 16:35:34]   ✅ X870E AORUS ELITE WIFI7             → Gigabyte B850 AORUS ELITE WIFI7 ICE AMD Ryzen AM5 
+[2026-04-11 16:35:34]   ✅ ROG STRIX B850-A GAMING WIFI        → AMD Ryzen 7 7800X3D Eight Core 5.0GHz, ASUS ROG ST
+[2026-04-11 16:35:34]   ✅ Z890 AORUS PRO ICE                  → Gigabyte X870I AORUS PRO ICE AMD AM5 Socket DDR5 P
+[2026-04-11 16:35:34]   ✅ GV-N5050OC-8GL                      → Gigabyte GeForce RTX 5050 OC Low Profile 8GB GDDR6
+[2026-04-11 16:35:34]   ✅ NE65050019P1-GB2070D                → Palit GeForce RTX 5050 DUAL 8GB GDDR6 Graphics Car
+[2026-04-11 16:35:34]   ✅ GV-N5050GAMING OC-8GD               → Gigabyte Nvidia GeForce RTX 3050 Windforce OC 8GB 
+[2026-04-11 16:35:34]   ✅ X870 MAX GAMING WIFI7               → ASUS X870 MAX GAMING WIFI7 W AMD AM5 DDR5 ATX Moth
+[2026-04-11 16:35:34]   ✅ X870 MAX GAMING WIFI7 W             → ASUS X870 MAX GAMING WIFI7 W AMD AM5 DDR5 ATX Moth
+[2026-04-11 16:35:34]   ✅ TUF GAMING X870-PLUS WIFI           → ASUS TUF GAMING B650M-PLUS WIFI AMD Ryzen DDR5 Mic
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5050 8G SHADOW 2X OC    → MSI GeForce RTX 3050 VENTUS 2X XS WHITE 8G OC Dual
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5050 8G VENTUS 2X OC    → MSI GeForce RTX 3050 VENTUS 2X XS WHITE 8G OC Dual
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5050 8G SHADOW 2X OC BULK → MSI GeForce RTX 5050 8G VENTUS 2X OC 8GB GDDR6 Gra
+[2026-04-11 16:35:34]   ✅ MAG X870E TOMAHAWK WIFI             → MSI MAG B550 TOMAHAWK MAX WIFI Motherboard - AM4
+[2026-04-11 16:35:34]   ✅ X870 AORUS STEALTH                  → GIGABYTE X870 AORUS STEALTH ATX AMD Ryzen DDR5 WIF
+[2026-04-11 16:35:34]   ✅ NE75060019P1-GB2063D                → Palit GeForce RTX 5060 DUAL 8GB GDDR7 Graphics Car
+[2026-04-11 16:35:34]   ✅ X870E AORUS PRO                     → Gigabyte X870E AORUS PRO AMD Ryzen DDR5 WIFI Mothe
+[2026-04-11 16:35:34]   ✅ X870E A ELITE X                     → Gigabyte X870E AORUS ELITE WIFI7 AMD Ryzen DDR5 WI
+[2026-04-11 16:35:34]   ✅ X870 AORUS STEALTH ICE              → Gigabyte AORUS GeForce RTX 5090 STEALTH ICE 32G GD
+[2026-04-11 16:35:34]   ✅ TUF GAMING X870E-PLUS WIFI7         → ASUS TUF GAMING X870E-PLUS WIFI7 AMD RYZEN DDR5 WI
+[2026-04-11 16:35:34]   ✅ ROG STRIX B860-F GAMING WIFI        → AMD Ryzen 7 7800X3D Eight Core 5.0GHz, ASUS ROG ST
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5050 8G GAMING OC       → MSI GeForce RTX 5060 8G GAMING OC 8GB GDDR7 Graphi
+[2026-04-11 16:35:34]   ✅ GV-N5060EAGLE OC-8GD                → Gigabyte Nvidia GeForce RTX 3050 Windforce OC 8GB 
+[2026-04-11 16:35:34]   ✅ GV-N5060WF2OC-8GD                   → GIGABYTE GeForce RTX 5060 WINDFORCE OC 8GB GDDR7 G
+[2026-04-11 16:35:34]   ✅ NE75060T19P1-GB2063S                → Palit GeForce RTX 5060 Infinity 3 OC 8GB GDDR7 Gra
+[2026-04-11 16:35:34]   ✅ NE75060019P1-GB2063S                → Palit GeForce RTX 5060 Infinity 3 8GB GDDR7 Graphi
+[2026-04-11 16:35:34]   ✅ GV-N5060WF2MAX OC-8GD               → Gigabyte Nvidia GeForce RTX 3050 Windforce OC 8GB 
+[2026-04-11 16:35:34]   ✅ TUF GAMING Z890-PRO WIFI            → Asus TUF GAMING A620-PRO WIFI AMD Ryzen ATX Mother
+[2026-04-11 16:35:34]   ✅ ROG STRIX B850-I GAMING WIFI        → AMD Ryzen 7 7800X3D Eight Core 5.0GHz, ASUS ROG ST
+[2026-04-11 16:35:34]   ✅ GV-N5060EAGLEOC ICE-8GD             → GIGABYTE GeForce RTX 5060 EAGLE OC ICE 8GB GDDR7 G
+[2026-04-11 16:35:34]   ✅ GV-N5060EAGLEMAX OC-8GD             → Gigabyte Nvidia GeForce RTX 3050 Windforce OC 8GB 
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5060 8G INSPIRE 2X OC   → MSI GeForce RTX 3050 VENTUS 2X XS WHITE 8G OC Dual
+[2026-04-11 16:35:34]   ✅ MAG X870E TOMAHAWK MAX WIFI         → MSI MAG B550 TOMAHAWK MAX WIFI Motherboard - AM4
+[2026-04-11 16:35:34]   ✅ TUF GAMING X870-PRO WIFI7 W NEO     → ASUS TUF Gaming X870-PRO WIFI7 NEO ATX Motherboard
+[2026-04-11 16:35:34]   ✅ ROG STRIX B850-E GAMING WIFI        → AMD Ryzen 7 7800X3D Eight Core 5.0GHz, ASUS ROG ST
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5060 8G SHADOW 2X OC BULK → MSI GeForce RTX 5060 8G VENTUS 2X OC 8GB GDDR7 Gra
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5060 8G VENTUS 2X OC    → MSI GeForce RTX 3050 VENTUS 2X XS WHITE 8G OC Dual
+[2026-04-11 16:35:34]   ✅ X870E A PRO X ICE                   → Gigabyte X870E AORUS PRO X3D ICE AMD Ryzen AM5 ATX
+[2026-04-11 16:35:34]   ✅ GV-N5060AERO OC-8GD                 → Gigabyte Nvidia GeForce RTX 3050 Windforce OC 8GB 
+[2026-04-11 16:35:34]   ✅ MPG X870E EDGE TI WIFI              → MSI MPG B850 EDGE TI WIFI AMD Ryzen AM5 DDR5 ATX M
+[2026-04-11 16:35:34]   ✅ GV-N5060GAMING OC-8GD               → Gigabyte Nvidia GeForce RTX 3050 Windforce OC 8GB 
+[2026-04-11 16:35:34]   ✅ ROG STRIX X870E-H GAMING WIFI7      → Asus ROG Strix X870E-E Gaming Wifi AMD Ryzen DDR5 
+[2026-04-11 16:35:34]   ✅ MPG Z890I EDGE TI WIFI              → MSI MPG B850 EDGE TI WIFI AMD Ryzen AM5 DDR5 ATX M
+[2026-04-11 16:35:34]   ✅ B850 AI TOP                         → Gigabyte B850 AI TOP AMD Ryzen AM5 DDR5 ATX Mother
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5060 8G GAMING OC       → MSI GeForce RTX 5060 8G VENTUS 2X OC 8GB GDDR7 Gra
+[2026-04-11 16:35:34]   ✅ NE7506TS19P1-GB2062S                → Palit GeForce RTX 5060 Ti INFINITY OC 8GB GDDR7 Gr
+[2026-04-11 16:35:34]   ✅ X870E AERO X3D WOOD                 → Gigabyte X870E AERO X3D WOOD AMD Ryzen DDR5 ATX Mo
+[2026-04-11 16:35:34]   ✅ ROG STRIX X870-A GAMING WIFI        → AMD Ryzen 7 7800X3D Eight Core 5.0GHz, ASUS ROG ST
+[2026-04-11 16:35:34]   ✅ NE7506TU19P1-GB2062M                → Palit GeForce RTX 5060 Ti White OC 8GB GDDR7 PCI-E
+[2026-04-11 16:35:34]   ✅ NE7506T019P1-GB2062D                → Palit GeForce RTX 5060 Ti DUAL 8GB GDDR7 Graphics 
+[2026-04-11 16:35:34]   ✅ ROG STRIX X870E-A GAMING NEO        → Asus ROG Strix X870E-E Gaming Wifi AMD Ryzen DDR5 
+[2026-04-11 16:35:34]   ✅ NE7506TT19P1-GB2062D                → Palit GeForce RTX 5060 Ti DUAL OC 8GB GDDR7 Graphi
+[2026-04-11 16:35:34]   ✅ GV-N506TWF2OC-8GD                   → Gigabyte GeForce RTX 5060 Ti WINDFORCE OC 8GB Grap
+[2026-04-11 16:35:34]   ✅ X870E AORUS MASTER                  → Gigabyte X870E AORUS MASTER AMD Ryzen DDR5 WIFI Mo
+[2026-04-11 16:35:34]   ✅ ROG STRIX Z890-F GAMING WIFI        → AMD Ryzen 7 7800X3D Eight Core 5.0GHz, ASUS ROG ST
+[2026-04-11 16:35:34]   ✅ GV-N506TWF2MAX OC-8GD               → Gigabyte Nvidia GeForce RTX 3050 Windforce OC 8GB 
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5060 TI 16G VENTUS 2X OC PLUS → MSI GeForce RTX 5060 Ti 8G VENTUS 2X OC PLUS 8GB G
+[2026-04-11 16:35:34]   ✅ RX9060 XT 16G-A                     → PowerColor Radeon RX 9060 XT Reaper GDDR6 16GB PCI
+[2026-04-11 16:35:34]   ✅ GV-N506TEAGLE OC-8GD                → Gigabyte Nvidia GeForce RTX 3050 Windforce OC 8GB 
+[2026-04-11 16:35:34]   ✅ ROG STRIX X870-F GAMING WIFI        → AMD Ryzen 7 7800X3D Eight Core 5.0GHz, ASUS ROG ST
+[2026-04-11 16:35:34]   ✅ GV-N506TEAGLEOC ICE-8GD             → GIGABYTE GeForce RTX 5060 EAGLE OC ICE 8GB GDDR7 G
+[2026-04-11 16:35:34]   ✅ ROG STRIX X870-I GAMING WIFI        → AMD Ryzen 7 7800X3D Eight Core 5.0GHz, ASUS ROG ST
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5060 TI 8G VENTUS 2X OC PLUS → MSI GeForce RTX 5060 8G VENTUS 2X OC 8GB GDDR7 Gra
+[2026-04-11 16:35:34]   ✅ GV-N506TEAGLEMAX OC-8GD             → Gigabyte Nvidia GeForce RTX 3050 Windforce OC 8GB 
+[2026-04-11 16:35:34]   ✅ GV-N506TGAMING OC-8GD               → Gigabyte Nvidia GeForce RTX 3050 Windforce OC 8GB 
+[2026-04-11 16:35:34]   ✅ ROG STRIX Z890-A GAMING WIFI        → AMD Ryzen 7 7800X3D Eight Core 5.0GHz, ASUS ROG ST
+[2026-04-11 16:35:34]   ✅ RX9060 XT 16G-L/OC                  → PowerColor Radeon RX 9060 XT Reaper GDDR6 16GB PCI
+[2026-04-11 16:35:34]   ✅ GV-N506TAERO OC-8GD                 → Gigabyte Nvidia GeForce RTX 3050 Windforce OC 8GB 
+[2026-04-11 16:35:34]   ✅ GV-R9060XTGAMING OC-16GD            → Gigabyte Radeon RX 9060 XT GAMING OC 16G GDDR6 16G
+[2026-04-11 16:35:34]   ✅ GV-R906XGAMINGOCICE-16GD            → Gigabyte Radeon RX 9060 XT GAMING OC ICE 16G GDDR6
+[2026-04-11 16:35:34]   ✅ MPG X870E CARBON WIFI               → MSI MPG X870E CARBON WIFI AMD Ryzen DDR5 WIFI Moth
+[2026-04-11 16:35:34]   ✅ MPG Z890 CARBON WIFI                → MSI MPG X870E CARBON WIFI AMD Ryzen DDR5 WIFI Moth
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5060 TI 16G VENTUS 3X OC → MSI GeForce RTX 5070 Ti 16G VENTUS 3X OC 16G GDDR7
+[2026-04-11 16:35:34]   ✅ Z890 AORUS MASTER                   → Gigabyte Z890 AORUS MASTER Intel LGA 1851 DDR5 ATX
+[2026-04-11 16:35:34]   ✅ X870E AORUS MASTER X3D              → Gigabyte X870E AORUS MASTER AMD Ryzen DDR5 WIFI Mo
+[2026-04-11 16:35:34]   ✅ X870E A MASTER X ICE                → Gigabyte X870E AORUS MASTER X3D ICE AMD Ryzen AM5 
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5060 TI 8G GAMING TRIO OC → MSI GeForce RTX 5060 Ti 8G VENTUS 2X OC PLUS 8GB G
+[2026-04-11 16:35:34]   ✅ NE7506TU19T1-GB2061M                → Palit GeForce RTX 5060 Ti White OC 16GB GDDR7 Grap
+[2026-04-11 16:35:34]   ✅ PRIME-RX9060XT-O16G                 → ASUS Prime AMD Radeon RX 9060 XT OC Edition 16GB G
+[2026-04-11 16:35:34]   ✅ ROG STRIX X870E-E GAMING WIFI       → AMD Ryzen 7 7800X3D Eight Core 5.0GHz, ASUS ROG ST
+[2026-04-11 16:35:34]   ✅ DUAL-RX9060XT-16G-WHITE             → ASUS DUAL AMD Radeon RX 9060 XT White Edition 16GB
+[2026-04-11 16:35:34]   ✅ GV-N506TEAGLEOC ICE-16GD            → Gigabyte Radeon RX 9060 XT GAMING OC ICE 16G GDDR6
+[2026-04-11 16:35:34]   ✅ NE75070019K9-GB2050S                → Palit GeForce RTX 5070 INFINITY 3 12GB GDDR7 Graph
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5060 TI 8G VENTUS 2X OC WHITE → MSI GeForce RTX 3050 VENTUS 2X XS WHITE 8G OC Dual
+[2026-04-11 16:35:34]   ✅ NE7506TS19T1-GB2061S                → Palit GeForce RTX 5060 Ti INFINITY 3 OC 16GB GDDR7
+[2026-04-11 16:35:34]   ✅ GV-N506TGAMING OC-16GD              → Gigabyte Radeon RX 9060 XT GAMING OC 16G GDDR6 16G
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5060 Ti 16G SHADOW 2X OC PLUS BULK → MSI GeForce RTX 5060 Ti 8G VENTUS 2X OC PLUS 8GB G
+[2026-04-11 16:35:34]   ✅ NE7506T019T1-GB2061S                → Palit GeForce RTX 5060 Ti INFINITY 3 16GB GDDR7 Gr
+[2026-04-11 16:35:34]   ✅ ROG STRIX Z890-E GAMING WIFI        → AMD Ryzen 7 7800X3D Eight Core 5.0GHz, ASUS ROG ST
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5070 12G SHADOW 2X OC   → MSI GeForce RTX 5070 12GB GAMING TRIO OC GDDR7 Gra
+[2026-04-11 16:35:34]   ✅ ROG CROSSHAIR X870E HERO            → ASUS ROG Crosshair X870E Dark Hero Motherboard – A
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5070 12G VENTUS 2X OC WHITE → MSI GeForce RTX 3050 VENTUS 2X XS WHITE 8G OC Dual
+[2026-04-11 16:35:34]   ✅ NE75070S19K9-GB2050S                → Palit GeForce RTX 5070 INFINITY 3 OC 12GB GDDR7 Gr
+[2026-04-11 16:35:34]   ✅ RX9070 16G-A                        → PowerColor RX 9070 XT OC 16GB Reaper GDDR6 Graphic
+[2026-04-11 16:35:34]   ✅ RX9070 16G-E/OC                     → PowerColor RX 9070 XT OC 16GB Reaper GDDR6 Graphic
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5070 12G SHADOW 2X OC BULK → MSI GeForce RTX 5070 12GB VENTUS 2X OC GDDR7 Graph
+[2026-04-11 16:35:34]   ✅ PRIME-RTX5070-O12G                  → ASUS PRIME NVIDIA GeForce RTX 5070 12GB GDDR7 OC E
+[2026-04-11 16:35:34]   ✅ TUF-RTX5060TI-O16G-GAMING           → ASUS TUF Gaming Radeon RX 9070 OC Edition 16GB GDD
+[2026-04-11 16:35:34]   ✅ GV-N5070WF3OC-12GD                  → Gigabyte GeForce RTX 5070 WINDFORCE OC SFF 12G GDD
+[2026-04-11 16:35:34]   ✅ GV-R9070GAMING OC-16GD              → Gigabyte Radeon RX 9060 XT GAMING OC 16G GDDR6 16G
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5070 12G VENTUS 2X OC   → MSI GeForce RTX 3050 VENTUS 2X XS WHITE 8G OC Dual
+[2026-04-11 16:35:34]   ✅ ROG CROSSHAIR X870E DARK HERO       → ASUS ROG Crosshair X870E Dark Hero Motherboard – A
+[2026-04-11 16:35:34]   ✅ RX9070 16G-L/OC                     → PowerColor RX 9070 XT OC 16GB Reaper GDDR6 Graphic
+[2026-04-11 16:35:34]   ✅ GV-N5070EAGLE OC-12GD               → Gigabyte GeForce RTX 5070 WINDFORCE OC SFF 12G GDD
+[2026-04-11 16:35:34]   ✅ ROG CROSSHAIR X870E HERO BTF        → ASUS ROG Crosshair X870E Dark Hero Motherboard – A
+[2026-04-11 16:35:34]   ✅ GV-N5070EAGLEOC ICE-12GD            → Gigabyte GeForce RTX 5070 EAGLE OC ICE SFF 12G GDD
+[2026-04-11 16:35:34]   ✅ GV-N5070GAMING OC-12GD              → Gigabyte GeForce RTX 5070 WINDFORCE OC SFF 12G GDD
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5070 12G GAMING TRIO OC WHITE → MSI GeForce RTX 5070 12GB GAMING TRIO OC GDDR7 Gra
+[2026-04-11 16:35:34]   ✅ GV-N5070AERO OC-12GD                → Gigabyte GeForce RTX 5070 WINDFORCE OC SFF 12G GDD
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5070 12G GAMING TRIO OC → MSI GeForce RTX 5070 12GB GAMING TRIO OC GDDR7 Gra
+[2026-04-11 16:35:34]   ✅ ROG CROSSHAIR X870E APEX            → ASUS ROG Crosshair X870E Dark Hero Motherboard – A
+[2026-04-11 16:35:34]   ✅ PRIME-RX9070-O16G-EVO               → ASUS Prime Radeon RX 9070 OC Edition 16GB GDDR6 - 
+[2026-04-11 16:35:34]   ✅ RX9070XT 16G-L/OC/REVA              → PowerColor RX 9070 XT OC 16GB Reaper GDDR6 Graphic
+[2026-04-11 16:35:34]   ✅ ROG MAXIMUS Z890 HERO BTF           → ASUS ROG MAXIMUS Z890 HERO Intel DDR5 PCIE 5.0 LGA
+[2026-04-11 16:35:34]   ✅ PRIME-RX9070-O16G                   → ASUS Prime Radeon RX 9070 OC Edition 16GB GDDR6 - 
+[2026-04-11 16:35:34]   ✅ RX9070XT 16G-A                      → PowerColor RX 9070 XT OC 16GB Reaper GDDR6 Graphic
+[2026-04-11 16:35:34]   ✅ PRIME-RTX5070-O12G-WHITE            → ASUS PRIME NVIDIA GeForce RTX 5070 12GB GDDR7 OC E
+[2026-04-11 16:35:34]   ✅ GV-R9070XTGAMING OC-16GD            → Gigabyte Radeon RX 9060 XT GAMING OC 16G GDDR6 16G
+[2026-04-11 16:35:34]   ✅ ROG MAXIMUS Z890 HERO               → ASUS ROG MAXIMUS Z890 HERO Intel DDR5 PCIE 5.0 LGA
+[2026-04-11 16:35:34]   ✅ GV-R9070XTGAMING-16GD               → Gigabyte Radeon RX 9070 XT GAMING 16G GDDR6 16GB G
+[2026-04-11 16:35:34]   ✅ RX9070XT 16G-L/OC                   → PowerColor RX 9070 XT OC 16GB Reaper GDDR6 Graphic
+[2026-04-11 16:35:34]   ✅ TUF-RTX5070-O12G-GAMING             → ASUS TUF Gaming NVIDIA GeForce RTX 5070 12GB GDDR7
+[2026-04-11 16:35:34]   ✅ ROG MAXIMUS Z890 APEX               → ASUS ROG MAXIMUS Z890 HERO Intel DDR5 PCIE 5.0 LGA
+[2026-04-11 16:35:34]   ✅ RX9070XT 16G-L/OC/WHITE             → PowerColor RX 9070 XT OC 16GB Reaper GDDR6 Graphic
+[2026-04-11 16:35:34]   ✅ GV-R9070XTAORUS E-16GD              → Gigabyte AORUS Radeon RX 9070 XT ELITE 16G GDDR6 1
+[2026-04-11 16:35:34]   ✅ RX9070XT 16G-E/OC                   → PowerColor RX 9070 XT OC 16GB Reaper GDDR6 Graphic
+[2026-04-11 16:35:34]   ✅ GV-N5070AORUS M-12GD                → Gigabyte AORUS GeForce RTX 5070 MASTER 12G GDDR7 G
+[2026-04-11 16:35:34]   ✅ RX9070XT 16G-E/OC/WHITE             → PowerColor RX 9070 XT OC 16GB Reaper GDDR6 Graphic
+[2026-04-11 16:35:34]   ✅ TUF-RX9070XT-O16G-GAMING            → ASUS TUF Gaming Radeon RX 9070 OC Edition 16GB GDD
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5070 TI 16G VENTUS 3X OC → MSI GeForce RTX 5070 Ti 16G VENTUS 3X OC 16G GDDR7
+[2026-04-11 16:35:34]   ✅ GV-N507TWF3OC-16GD                  → Gigabyte GeForce RTX 5070 Ti WINDFORCE OC SFF 16G 
+[2026-04-11 16:35:34]   ✅ GV-N507TEAGLE OC-16GD               → Gigabyte Radeon RX 9060 XT GAMING OC 16G GDDR6 16G
+[2026-04-11 16:35:34]   ✅ GV-N507TEAGLEOC ICE-16GD            → Gigabyte Radeon RX 9060 XT GAMING OC ICE 16G GDDR6
+[2026-04-11 16:35:34]   ✅ ROG CROSSHAIR X870E GLACIAL         → ASUS ROG Crosshair X870E Dark Hero Motherboard – A
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5070 TI 16G GAMING TRIO OC → MSI GeForce RTX 5070 Ti 16G VENTUS 3X OC 16G GDDR7
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5070 TI 16G GAMING TRIO OC WHITE → MSI GeForce RTX 5070 Ti 16G GAMING TRIO OC 16GB GD
+[2026-04-11 16:35:34]   ✅ GV-N507TGAMING OC-16GD              → Gigabyte Radeon RX 9060 XT GAMING OC 16G GDDR6 16G
+[2026-04-11 16:35:34]   ✅ GV-N507TAERO OC-16GD                → Gigabyte Radeon RX 9060 XT GAMING OC 16G GDDR6 16G
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5080 16G SHADOW 3X OC   → MSI GeForce RTX 5070 Ti 16G VENTUS 3X OC 16G GDDR7
+[2026-04-11 16:35:34]   ✅ ROG CROSSHAIR X870E EXTREME         → ASUS ROG Crosshair X870E Dark Hero Motherboard – A
+[2026-04-11 16:35:34]   ✅ TUF-RTX5070TI-O16G-GAMING           → ASUS TUF Gaming Radeon RX 9070 OC Edition 16GB GDD
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5080 16G VENTUS 3X OC   → MSI GeForce RTX 5070 Ti 16G VENTUS 3X OC 16G GDDR7
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5080 16G VENTUS 3X OC PLUS → MSI GeForce RTX 5070 Ti 16G VENTUS 3X OC 16G GDDR7
+[2026-04-11 16:35:34]   ✅ NE75080019T2-GB2031A                → Palit GeForce RTX 5080 GAMING PRO 16GB GDDR7 Graph
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5080 16G EXPERT OC      → MSI NVIDIA GeForce RTX 5080 16G GAMING TRIO OC GDD
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5080 16G VENTUS 3X OC WHITE → MSI GeForce RTX 5070 Ti 16G VENTUS 3X OC 16G GDDR7
+[2026-04-11 16:35:34]   ✅ GV-N5080WF3-16GD                    → Gigabyte GeForce RTX 5080 WINDFORCE SFF 16G GDDR7 
+[2026-04-11 16:35:34]   ✅ NE75080S19T2-GB2031A                → Palit GeForce RTX 5080 GAMINGPRO OC 16GB GDDR7 Gra
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5080 16G GAMING TRIO OC WHITE → MSI NVIDIA GeForce RTX 5080 16G GAMING TRIO OC GDD
+[2026-04-11 16:35:34]   ✅ GV-N5080WF3OC-16GD                  → Gigabyte GeForce RTX 5080 WINDFORCE OC SFF 16G GDD
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5080 16G GAMING TRIO OC → MSI GeForce RTX 5070 12GB GAMING TRIO OC GDDR7 Gra
+[2026-04-11 16:35:34]   ✅ GV-N5080GAMING OC-16GD              → Gigabyte Radeon RX 9060 XT GAMING OC 16G GDDR6 16G
+[2026-04-11 16:35:34]   ✅ GV-N5080AERO OC-16GD                → Gigabyte Radeon RX 9060 XT GAMING OC 16G GDDR6 16G
+[2026-04-11 16:35:34]   ✅ GV-N5080AORUSM ICE-16GD             → Gigabyte Radeon RX 9060 XT GAMING OC ICE 16G GDDR6
+[2026-04-11 16:35:34]   ✅ GV-N5080AORUS M-16GD                → Gigabyte AORUS GeForce RTX 5080 MASTER 16G GDDR7 G
+[2026-04-11 16:35:34]   ✅ TUF-RTX5080-O16G-GAMING             → ASUS TUF Gaming Radeon RX 9070 OC Edition 16GB GDD
+[2026-04-11 16:35:34]   ✅ GV-N5080AORUSX WB-16GD              → Gigabyte AORUS GeForce RTX 5080 XTREME WATERFORCE 
+[2026-04-11 16:35:34]   ✅ GV-N5080AORUSX W-16GD               → Gigabyte AORUS GeForce RTX 5080 XTREME WATERFORCE 
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5090 32G VENTUS 3X OC   → MSI GeForce RTX 5070 Ti 16G VENTUS 3X OC 16G GDDR7
+[2026-04-11 16:35:34]   ✅ GV-N5090WF3OC-32GD                  → Gigabyte GeForce RTX 5090 WINDFORCE OC 32G GDDR7 G
+[2026-04-11 16:35:34]   ✅ GV-N5090GAMING OC-32GD              → Gigabyte GeForce RTX 5090 GAMING OC 32G GDDR7 Grap
+[2026-04-11 16:35:34]   ✅ GV-N5090AORUSX WB-32GD              → Gigabyte AORUS GeForce RTX 5090 XTREME WATERFORCE 
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5090 32G GAMING TRIO OC → MSI GeForce RTX 5070 12GB GAMING TRIO OC GDDR7 Gra
+[2026-04-11 16:35:34]   ✅ GV-N5090AORUS M-32GD                → Gigabyte AORUS GeForce RTX 5090 STEALTH ICE 32G GD
+[2026-04-11 16:35:34]   ✅ GV-N5090AORUSM ICE-32GD             → Gigabyte AORUS GeForce RTX 5090 STEALTH ICE 32G GD
+[2026-04-11 16:35:34]   ✅ GEFORCE RTX 5090 32G SUPRIM SOC     → MSI NVIDIA GeForce RTX 5090 32GB SUPRIM LIQUID SOC
+[2026-04-11 16:35:34]   ✅ GV-N5090AORUSST ICE-32GD            → Gigabyte AORUS GeForce RTX 5090 STEALTH ICE 32G GD
+[2026-04-11 16:35:34]   ✅ TUF-RTX5090-32G-GAMING              → ASUS TUF Gaming NVIDIA GeForce RTX 5090 32GB GDDR7
+[2026-04-11 16:35:34]   ✅ GV-N5090AORUSX W-32GD               → Gigabyte AORUS GeForce RTX 5090 XTREME WATERFORCE 
+[2026-04-11 16:35:34]   ✅ NE75090S19R5-GB2020G                → Palit GeForce RTX 5090 GameRock OC 32 GB GDDR7 Gra
+[2026-04-11 16:35:34] 
+--- Results ---
+[2026-04-11 16:35:34] Matched:     387/492
+[2026-04-11 16:35:34] No match:    105
+[2026-04-11 16:35:34] 
+Unmatched products:
+[2026-04-11 16:35:34]   - HYPER M.2 X16 GEN 4 CARD
+[2026-04-11 16:35:34]   - H610M K DDR4 V2
+[2026-04-11 16:35:34]   - GT 710 2GD3H LP
+[2026-04-11 16:35:34]   - GT710-SL-2GD5-BRK-EVO
+[2026-04-11 16:35:34]   - A620M H
+[2026-04-11 16:35:34]   - B550M K
+[2026-04-11 16:35:34]   - PRO A620AM-B EVO
+[2026-04-11 16:35:34]   - H810M K
+[2026-04-11 16:35:34]   - B760M D3HP DDR4
+[2026-04-11 16:35:34]   - H610M H
+[2026-04-11 16:35:34]   - H810M H
+[2026-04-11 16:35:34]   - B760M E
+[2026-04-11 16:35:34]   - B840M D2H
+[2026-04-11 16:35:34]   - H810M S2H
+[2026-04-11 16:35:34]   - PRIME H810M-E-CSM
+[2026-04-11 16:35:34]   - PRIME B760M-K D4
+[2026-04-11 16:35:34]   - B760M D3HP
+[2026-04-11 16:35:34]   - PRO H810M-B
+[2026-04-11 16:35:34]   - B550M GAMING X WIFI6
+[2026-04-11 16:35:34]   - GV-N1030D4-2GL
+[2026-04-11 16:35:34] Wrote 387 URLs to Retailer_IDs sheet.
+[2026-04-11 16:35:34] Written to sheet: 387
+[2026-04-11 16:35:39] OneDrive sync: OK

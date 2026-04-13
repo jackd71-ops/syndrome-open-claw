@@ -1,0 +1,36 @@
+version: '3.8'
+services:
+  openclaw:
+    image: openclaw-lokivault:latest
+    container_name: openclaw
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:18789:18789"
+      - "127.0.0.1:3000:3000"
+      - "192.168.1.124:2099:2099"
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    volumes:
+      - /opt/openclaw/config:/home/node/.openclaw
+      - /opt/openclaw/workspace:/home/node/.openclaw/workspace
+      - /opt/openclaw/workspace-family:/home/node/.openclaw/workspace-family
+      - /opt/openclaw/logs:/tmp/openclaw
+      - /opt/openclaw/data:/home/node/.openclaw/workspace/data
+      - /opt/openclaw/ha-config:/mnt/homeassistant
+      - /opt/openclaw/secrets.json:/home/node/.openclaw/secrets.json:ro
+    env_file:
+      - /opt/openclaw/.env
+      - /opt/openclaw/.env.secrets
+    environment:
+      - MANIFEST_TRUST_LAN=true
+      - BIND_ADDRESS=0.0.0.0
+      - MANIFEST_PUBLIC_URL=http://192.168.1.124:2099
+    mem_limit: 4g
+    cpus: 2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:18789/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
