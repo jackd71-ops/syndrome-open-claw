@@ -7,7 +7,7 @@ for guaranteed accuracy; falls back to model-number search where no ID exists.
 Retailer status (2026-04):
   ✅ Amazon UK    — dp/{ASIN} direct page (homepage warm-up for cookies)
   ✅ Currys       — search by SKU → direct product redirect
-  ✅ Overclockers — model number search (no ID sheet)
+  ✅ Overclockers — OCUK code search via camoufox (code in col M of template)
   ❌ Argos        — 403 on all URLs (Akamai)
   ⚠️  Scan         — Cloudflare blocks direct; URLs discovered via Google UK search
   ❌ Box          — full JS render
@@ -39,6 +39,7 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill, Font
+import sys
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
@@ -49,6 +50,8 @@ LOG_PATH           = "/opt/openclaw/logs/retailer.log"
 SECRETS_PATH       = "/opt/openclaw/secrets.json"
 ONEDRIVE_DEST      = "onedrive:Documents/Retail Review/"
 AWDIT_CATALOG_PATH = "/opt/openclaw/data/stic/awdit_catalog.json"
+SCAN_SCRAPE_PATH   = "/opt/openclaw/data/stic/scan_scrape.py"
+VERY_SCRAPE_PATH   = "/opt/openclaw/data/stic/very_scrape.py"
 
 # ── AWD-IT category pages for URL discovery ───────────────────────────────────
 AWDIT_CATEGORIES = [
@@ -75,12 +78,12 @@ RETAILERS = [
     {"name": "Amazon UK",    "col": 10, "id_col": "Amazon ASIN", "blocked": False},
     {"name": "Currys",       "col": 11, "id_col": "Currys SKU",  "blocked": False},
     {"name": "Argos",        "col": 12, "id_col": "ARGOS  SKU",  "blocked": True, "reason": "403 Akamai"},
-    {"name": "Scan",         "col": 13, "id_col": None,          "blocked": True, "reason": "Cloudflare"},
+    {"name": "Scan",         "col": 13, "id_col": "Scan URL",    "blocked": False},
     {"name": "Overclockers", "col": 14, "id_col": None,          "blocked": False},
     {"name": "Box",          "col": 15, "id_col": None,          "blocked": True, "reason": "JS render"},
     {"name": "CCL Online",   "col": 16, "id_col": "CCL URL",     "blocked": False},
     {"name": "AWD-IT",       "col": 17, "id_col": "AWD-IT URL",  "blocked": False},
-    {"name": "Very",         "col": 18, "id_col": "Very SKU",    "blocked": True, "reason": "403 block"},
+    {"name": "Very",         "col": 18, "id_col": "Very URL",    "blocked": False},
 ]
 
 # ── Timing ────────────────────────────────────────────────────────────────────
@@ -90,10 +93,12 @@ LONG_PAUSE_MIN = 30
 LONG_PAUSE_MAX = 90
 
 # ── Styles ────────────────────────────────────────────────────────────────────
-RED_FILL  = PatternFill("solid", fgColor="FF0000")
-RED_FONT  = Font(color="FFFFFF", bold=True)
-GREY_FILL = PatternFill("solid", fgColor="D9D9D9")
-GREY_FONT = Font(color="808080", italic=True)
+RED_FILL    = PatternFill("solid", fgColor="FF0000")
+RED_FONT    = Font(color="FFFFFF", bold=True)
+GREY_FILL   = PatternFill("solid", fgColor="D9D9D9")
+GREY_FONT   = Font(color="808080", italic=True)
+ORANGE_FILL = PatternFill("solid", fgColor="FFA500")
+ORANGE_FONT = Font(color="FFFFFF", bold=True)
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 def log(msg):
@@ -223,6 +228,10 @@ def write_cell(date_str, excel_row, col, price, msrp, status=None):
         cell.value = "—"
         cell.fill  = GREY_FILL
         cell.font  = GREY_FONT
+    elif status == "OUT_OF_STOCK":
+        cell.value = "OOS"
+        cell.fill  = ORANGE_FILL
+        cell.font  = ORANGE_FONT
     elif price is not None:
         cell.value         = price
         cell.number_format = '£#,##0.00'
@@ -328,50 +337,98 @@ def scrape_awdit(page, url):
     }""")
     return float(price) if price and price > 0 else None
 
-# ── Overclockers scraper (search by model, no IDs) ───────────────────────────
-def is_relevant(title, model_no):
-    if not title or not model_no:
-        return False
-    title_l = title.lower()
-    tokens  = [t for t in re.split(r'[\s\-/]+', model_no.lower()) if len(t) >= 3]
-    if not tokens:
-        return True
-    return sum(1 for t in tokens if t in title_l) >= max(1, len(tokens) // 2)
+# ── Scan scraper (patchright + Xvfb subprocess) ──────────────────────────────
+def scrape_scan(url):
+    try:
+        result = subprocess.run(
+            ["xvfb-run", "--auto-servernum", "/usr/bin/python3", SCAN_SCRAPE_PATH, url],
+            capture_output=True, text=True, timeout=60
+        )
+        out = result.stdout.strip()
+        if out and out != "NOT_FOUND":
+            return float(out)
+    except (subprocess.TimeoutExpired, ValueError, Exception):
+        pass
+    return None
 
-def scrape_overclockers(page, query, model_no):
-    url = f"https://www.overclockers.co.uk/search?sSearch={query.replace(' ', '+')}"
-    page.goto(url, wait_until="domcontentloaded", timeout=20000)
-    time.sleep(random.uniform(3, 6))
-    pairs = page.evaluate("""() => {
-        const cards = [...document.querySelectorAll('.product-listing--list-item, article')];
-        if (!cards.length) {
-            const p = document.querySelector('span.price__amount:not(.price__amount--original)');
-            return p ? [{title:'', price: p.innerText.trim()}] : [];
-        }
-        return cards.slice(0,5).map(c => ({
-            title: (c.querySelector('h3,h2,.product-name')?.innerText || '').trim().substring(0,100),
-            price: (c.querySelector('span.price__amount:not(.price__amount--original)')?.innerText || '').trim()
-        })).filter(r => r.price);
-    }""")
-    for pair in pairs:
-        if not pair["title"] or is_relevant(pair["title"], model_no):
-            p = parse_price(pair["price"])
-            if p:
-                return p
+
+# ── Very scraper (patchright + Xvfb subprocess) ───────────────────────────────
+def scrape_very(url):
+    try:
+        result = subprocess.run(
+            ["xvfb-run", "--auto-servernum", "/usr/bin/python3", VERY_SCRAPE_PATH, url],
+            capture_output=True, text=True, timeout=90
+        )
+        out = result.stdout.strip()
+        if out and out != "NOT_FOUND":
+            return float(out)
+    except (subprocess.TimeoutExpired, ValueError, Exception):
+        pass
+    return None
+
+
+# ── Overclockers scraper (camoufox subprocess) ───────────────────────────────
+OCUK_SCRAPE_PATH = "/opt/openclaw/data/stic/ocuk_scrape.py"
+
+def scrape_overclockers(code):
+    try:
+        result = subprocess.run(
+            ["/usr/bin/python3", OCUK_SCRAPE_PATH, code],
+            capture_output=True, text=True, timeout=60
+        )
+        out = result.stdout.strip()
+        if out and out != "NOT_FOUND":
+            return float(out)
+    except (subprocess.TimeoutExpired, ValueError, Exception):
+        pass
     return None
 
 # ── Main scrape per product ───────────────────────────────────────────────────
 def scrape_product(page, product, retailer, id_codes):
     name     = retailer["name"]
-    model_no = product["model_no"]
-    mfr      = product["manufacturer"]
     id_col   = retailer.get("id_col")
 
-    # Get the product ID code for this retailer (if available)
-    prod_id  = product["product_id"]
-    code     = id_codes.get(prod_id, {}).get(id_col) if id_col else None
+    # Scan: patchright + Xvfb subprocess, uses stored Scan URL
+    if name == "Scan":
+        url = id_codes.get(product["product_id"], {}).get("Scan URL")
+        if not url:
+            return None, "NOT_STOCKED"
+        try:
+            price = scrape_scan(url)
+            return (price, None) if price else (None, "NOT_FOUND")
+        except Exception as e:
+            log(f"    [{name}] ERROR: {e}")
+            return None, "ERROR"
 
-    # If this retailer has an ID sheet but no code → not stocked
+    # Very: patchright + Xvfb subprocess, uses stored Very URL
+    if name == "Very":
+        url = id_codes.get(product["product_id"], {}).get("Very URL")
+        sku = id_codes.get(product["product_id"], {}).get("Very SKU")
+        if not url:
+            return None, "OUT_OF_STOCK" if sku else "NOT_STOCKED"
+        try:
+            price = scrape_very(url)
+            return (price, None) if price else (None, "NOT_FOUND")
+        except Exception as e:
+            log(f"    [{name}] ERROR: {e}")
+            return None, "ERROR"
+
+    # Overclockers: uses OCUK code from product dict, scraped via camoufox subprocess
+    if name == "Overclockers":
+        code = id_codes.get(product["product_id"], {}).get("OCUK Code")
+        if not code:
+            return None, "NOT_STOCKED"
+        try:
+            price = scrape_overclockers(code)
+            return (price, None) if price else (None, "NOT_FOUND")
+        except Exception as e:
+            log(f"    [{name}] ERROR: {e}")
+            return None, "ERROR"
+
+    # All other retailers: use id_codes from Retailer_IDs sheet
+    prod_id = product["product_id"]
+    code    = id_codes.get(prod_id, {}).get(id_col) if id_col else None
+
     if id_col and not code:
         return None, "NOT_STOCKED"
 
@@ -384,10 +441,6 @@ def scrape_product(page, product, retailer, id_codes):
             price = scrape_ccl(page, code)
         elif name == "AWD-IT":
             price = scrape_awdit(page, code)
-        elif name == "Overclockers":
-            price = scrape_overclockers(page, model_no, model_no)
-            if price is None:
-                price = scrape_overclockers(page, f"{mfr} {model_no}".strip(), model_no)
         else:
             return None, "NOT_FOUND"
 
@@ -520,6 +573,37 @@ def load_products_needing_scan_url():
         rows.append({
             "product_id": pid,
             "ln_code":    ln,
+            "model_no":   str(row[model_c - 1]).strip() if row[model_c - 1] else "",
+        })
+    wb.close()
+    return rows
+
+
+def load_products_needing_very_url():
+    """Return list of {product_id, sku, model_no} rows with Very SKU but no Very URL."""
+    wb      = load_workbook(TEMPLATE_PATH, read_only=True)
+    ws      = wb["Retailer_IDs"]
+    hdrs    = {str(c.value).strip(): c.column for c in ws[1] if c.value}
+    sku_c   = hdrs.get("Very SKU")
+    url_c   = hdrs.get("Very URL")
+    model_c = hdrs.get("Model No", 3)
+    if not sku_c:
+        wb.close()
+        return []
+    rows = []
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        pid = str(row[0]).strip() if row[0] else None
+        if not pid:
+            continue
+        sku = str(row[sku_c - 1]).strip() if row[sku_c - 1] else ""
+        url = str(row[url_c - 1]).strip() if url_c and row[url_c - 1] else ""
+        if not sku or sku.lower() == "none":
+            continue
+        if url and url.lower() not in ("none", ""):
+            continue
+        rows.append({
+            "product_id": pid,
+            "sku":        sku,
             "model_no":   str(row[model_c - 1]).strip() if row[model_c - 1] else "",
         })
     wb.close()
@@ -796,6 +880,74 @@ def discover_scan_urls(page):
 
 
 # ── Combined pre-flight orchestrator ─────────────────────────────────────────
+def _google_very_url(page, sku):
+    """Search Google UK for <sku> site:very.co.uk; return first .prd product URL or None."""
+    search_url = (
+        f"https://www.google.co.uk/search"
+        f"?q={sku}+site%3Avery.co.uk&hl=en-GB&gl=GB&num=5"
+    )
+    try:
+        page.goto(search_url, wait_until="domcontentloaded", timeout=20000)
+        time.sleep(random.uniform(3, 5))
+    except Exception as e:
+        log(f"  [Very] Navigation error for {sku}: {e}")
+        return None
+
+    body = page.inner_text("body")[:400].lower()
+    if "before you continue" in body or "i'm not a robot" in body:
+        log(f"  [Very] ⚠️  Google consent/CAPTCHA for {sku}")
+        return None
+
+    urls = page.evaluate(r"""() => {
+        const found = [];
+        for (const a of document.querySelectorAll('a[href]')) {
+            const h = a.href || '';
+            const m = h.match(/[?&]q=(https?:\/\/(?:www\.)?very\.co\.uk\/[^&]+\.prd[^&]*)/);
+            if (m) { found.push(decodeURIComponent(m[1])); continue; }
+            if (/very\.co\.uk\/.*\.prd/.test(h) && !h.includes('google.'))
+                found.push(h);
+        }
+        return [...new Set(found)];
+    }""")
+
+    if urls:
+        return urls[0]
+
+    raw = page.content()
+    matches = re.findall(r'https?://(?:www\.)?very\.co\.uk/[^\s"\'<>]+\.prd', raw)
+    if matches:
+        cleaned = [re.sub(r'["\'>]+$', '', m) for m in matches]
+        if cleaned:
+            return cleaned[0]
+    return None
+
+
+def discover_very_urls(page):
+    """Discover Very product URLs for products that have a Very SKU but no Very URL."""
+    needs = load_products_needing_very_url()
+    if not needs:
+        log("[Discovery] Very: all SKUs already have URLs — skipping.")
+        return 0
+    log(f"[Discovery] Very: {len(needs)} products need URLs.")
+    found_urls, failed = {}, []
+    for i, p in enumerate(needs, 1):
+        sku   = p["sku"]
+        model = p["model_no"]
+        log(f"  [Very] [{i}/{len(needs)}] {sku}  ({model[:40]})")
+        time.sleep(random.uniform(GOOGLE_DELAY_MIN, GOOGLE_DELAY_MAX))
+        url = _google_very_url(page, sku)
+        if url:
+            found_urls[p["product_id"]] = url
+            log(f"  [Very] ✅ {url}")
+        else:
+            failed.append(sku)
+            log(f"  [Very] ❌ not found")
+    log(f"[Discovery] Very: found {len(found_urls)}/{len(needs)} URLs.")
+    if failed:
+        log(f"[Discovery] Very: unresolved SKUs: {', '.join(failed[:20])}")
+    return _write_discovered_urls("Very URL", found_urls)
+
+
 def run_preflight_discovery():
     """
     Run AWD-IT and Scan URL discovery for any new products added since the last
@@ -809,12 +961,13 @@ def run_preflight_discovery():
     # Quick check: is there anything to do at all?
     awdit_needs = load_products_needing_awdit()
     scan_needs  = load_products_needing_scan_url()
+    very_needs  = load_products_needing_very_url()
 
-    if not awdit_needs and not scan_needs:
+    if not awdit_needs and not scan_needs and not very_needs:
         log("[Discovery] Nothing to discover — all products have URLs. Skipping.")
         return
 
-    log(f"[Discovery] AWD-IT needs: {len(awdit_needs)} | Scan needs: {len(scan_needs)}")
+    log(f"[Discovery] AWD-IT needs: {len(awdit_needs)} | Scan needs: {len(scan_needs)} | Very needs: {len(very_needs)}")
 
     total_written = 0
 
@@ -853,6 +1006,10 @@ def run_preflight_discovery():
 
         if scan_needs:
             written = discover_scan_urls(page)
+            total_written += written
+
+        if very_needs:
+            written = discover_very_urls(page)
             total_written += written
 
         browser.close()
@@ -938,6 +1095,10 @@ def run(start, end, date_str, notify=False):
                     log(f"    [{name}] £{price:.2f}{below}")
                     write_cell(date_str, excel_row, retailer["col"], price, msrp)
                     found += 1
+                elif status == "OUT_OF_STOCK":
+                    log(f"    [{name}] out of stock")
+                    write_cell(date_str, excel_row, retailer["col"], None, msrp, status="OUT_OF_STOCK")
+                    not_stocked += 1
                 elif status == "NOT_STOCKED":
                     log(f"    [{name}] not stocked (no ID code)")
                     write_cell(date_str, excel_row, retailer["col"], None, msrp)
