@@ -5,7 +5,7 @@ services:
     container_name: openclaw
     restart: unless-stopped
     ports:
-      - "127.0.0.1:18789:18789"
+      - "0.0.0.0:18789:18789"
       - "127.0.0.1:3000:3000"
       - "192.168.1.124:2099:2099"
     dns:
