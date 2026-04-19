@@ -29,11 +29,14 @@ Usage:
 """
 
 import argparse
+import fcntl
 import json
+import os
 import re
 import subprocess
 import random
 import time
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -41,6 +44,7 @@ from openpyxl import load_workbook
 from openpyxl.styles import PatternFill, Font
 import sys
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
+from patchright.sync_api import sync_playwright as patchright_playwright
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 TEMPLATE_PATH      = "/opt/openclaw/data/general/Retailer_Template.xlsx"
@@ -52,6 +56,48 @@ ONEDRIVE_DEST      = "onedrive:Documents/Retail Review/"
 AWDIT_CATALOG_PATH = "/opt/openclaw/data/stic/awdit_catalog.json"
 SCAN_SCRAPE_PATH   = "/opt/openclaw/data/stic/scan_scrape.py"
 VERY_SCRAPE_PATH   = "/opt/openclaw/data/stic/very_scrape.py"
+LOCK_PATH          = "/opt/openclaw/data/stic/retailer_scraper.lock"
+
+# ── Process lock ──────────────────────────────────────────────────────────────
+@contextmanager
+def scraper_lock():
+    """Prevent concurrent scraper/discovery instances from corrupting shared files."""
+    lock_file = open(LOCK_PATH, "w")
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lock_file.write(str(os.getpid()))
+        lock_file.flush()
+        yield
+    except IOError:
+        print(f"[Lock] Another scraper instance is already running — exiting.")
+        sys.exit(0)
+    finally:
+        fcntl.flock(lock_file, fcntl.LOCK_UN)
+        lock_file.close()
+        try:
+            os.unlink(LOCK_PATH)
+        except OSError:
+            pass
+
+
+# ── Virtual display (for patchright headed mode) ──────────────────────────────
+@contextmanager
+def virtual_display():
+    """Start a temporary Xvfb display for headed browser sessions."""
+    display = f":{random.randint(50, 200)}"
+    proc = subprocess.Popen(
+        ["Xvfb", display, "-screen", "0", "1366x768x24"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+    os.environ["DISPLAY"] = display
+    time.sleep(1)
+    try:
+        yield display
+    finally:
+        proc.terminate()
+        proc.wait()
+        os.environ.pop("DISPLAY", None)
+
 
 # ── AWD-IT category pages for URL discovery ───────────────────────────────────
 AWDIT_CATEGORIES = [
@@ -971,48 +1017,64 @@ def run_preflight_discovery():
 
     total_written = 0
 
-    with sync_playwright() as pw:
-        browser = pw.chromium.launch(
-            headless=True,
-            args=["--no-sandbox", "--disable-blink-features=AutomationControlled",
-                  "--disable-dev-shm-usage"]
-        )
-        ctx = browser.new_context(
-            viewport={"width": 1366, "height": 768},
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/124.0.0.0 Safari/537.36"
-            ),
-            locale="en-GB",
-            timezone_id="Europe/London",
-            extra_http_headers={
-                "Accept-Language": "en-GB,en;q=0.9",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "DNT": "1",
-            }
-        )
-        ctx.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-            Object.defineProperty(navigator, 'languages', {get: () => ['en-GB', 'en']});
-            Object.defineProperty(navigator, 'plugins',   {get: () => [1, 2, 3]});
-            window.chrome = {runtime: {}};
-        """)
-        page = ctx.new_page()
-
-        if awdit_needs:
+    # AWD-IT: headless playwright (no bot detection issues)
+    if awdit_needs:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-blink-features=AutomationControlled",
+                      "--disable-dev-shm-usage"]
+            )
+            ctx = browser.new_context(
+                viewport={"width": 1366, "height": 768},
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                ),
+                locale="en-GB",
+                timezone_id="Europe/London",
+                extra_http_headers={
+                    "Accept-Language": "en-GB,en;q=0.9",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "DNT": "1",
+                }
+            )
+            ctx.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                Object.defineProperty(navigator, 'languages', {get: () => ['en-GB', 'en']});
+                Object.defineProperty(navigator, 'plugins',   {get: () => [1, 2, 3]});
+                window.chrome = {runtime: {}};
+            """)
+            page = ctx.new_page()
             written = discover_awdit_urls(page)
             total_written += written
+            browser.close()
 
-        if scan_needs:
-            written = discover_scan_urls(page)
-            total_written += written
+    # Scan + Very: patchright headed via Xvfb (Google blocks headless Chromium)
+    if scan_needs or very_needs:
+        with virtual_display():
+            with patchright_playwright() as pw:
+                browser = pw.chromium.launch(
+                    headless=False,
+                    args=["--no-sandbox", "--disable-dev-shm-usage"]
+                )
+                ctx = browser.new_context(
+                    viewport={"width": 1366, "height": 768},
+                    locale="en-GB",
+                    timezone_id="Europe/London",
+                )
+                page = ctx.new_page()
 
-        if very_needs:
-            written = discover_very_urls(page)
-            total_written += written
+                if scan_needs:
+                    written = discover_scan_urls(page)
+                    total_written += written
 
-        browser.close()
+                if very_needs:
+                    written = discover_very_urls(page)
+                    total_written += written
+
+                browser.close()
 
     if total_written:
         log(f"[Discovery] {total_written} new URLs written — syncing template to OneDrive.")
@@ -1155,18 +1217,20 @@ if __name__ == "__main__":
 
     date_str = datetime.now().strftime("%d-%m-%Y")
 
-    if args.discover:
+    with scraper_lock():
+
+      if args.discover:
         # Standalone discovery run — useful to trigger manually after adding LN/ASIN codes
         sync_template_from_onedrive()
         run_preflight_discovery()
 
-    elif args.test:
+      elif args.test:
         # Test mode: pull latest template, run discovery, then scrape first 20 rows
         sync_template_from_onedrive()
         run_preflight_discovery()
         run(1, 20, date_str, notify=False)
 
-    elif args.batch in (1, 2, 3):
+      elif args.batch in (1, 2, 3):
         total  = count_products()
         ranges = batch_ranges(total)
         log(f"Template: {total} products — batch ranges: {ranges}")
@@ -1184,8 +1248,8 @@ if __name__ == "__main__":
 
         run(s, e, date_str, notify=(args.batch == 3))
 
-    elif args.start and args.end:
+      elif args.start and args.end:
         run(args.start, args.end, date_str, notify=False)
 
-    else:
+      else:
         parser.print_help()
