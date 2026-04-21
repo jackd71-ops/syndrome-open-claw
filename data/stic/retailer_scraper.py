@@ -20,6 +20,10 @@ Pre-flight discovery (runs automatically before batch 1):
     AWD-IT category pages only when unmatched products remain.
   • Scan: for any product with a Scan LN code but no Scan URL, searches
     Google UK (site:scan.co.uk) and saves the discovered URL.
+  • Box: for any product with no Box URL, searches Google UK
+    (site:box.co.uk) by model number and saves the discovered URL.
+  • CCL: for any product with no CCL URL, searches Google UK
+    (site:cclonline.com) by model number and saves the discovered URL.
 
 Usage:
   python3 retailer_scraper.py --batch 1|2|3
@@ -684,6 +688,68 @@ def load_products_needing_very_url():
     return rows
 
 
+def load_products_needing_box_url():
+    """Return list of {product_id, model_no, manufacturer} rows with no Box URL."""
+    wb      = load_workbook(TEMPLATE_PATH, read_only=True)
+    ws      = wb["Retailer_IDs"]
+    hdrs    = {str(c.value).strip(): c.column for c in ws[1] if c.value}
+    url_c   = hdrs.get("Box URL")
+    model_c = hdrs.get("Model No", 3)
+    mfr_c   = hdrs.get("Manufacturer", 2)
+    if not url_c:
+        wb.close()
+        return []
+    rows = []
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        pid = str(row[0]).strip() if row[0] else None
+        if not pid:
+            continue
+        url     = str(row[url_c   - 1]).strip() if row[url_c   - 1] else ""
+        model   = str(row[model_c - 1]).strip() if row[model_c - 1] else ""
+        if url and url.lower() not in ("none", ""):
+            continue
+        if not model:
+            continue
+        rows.append({
+            "product_id":   pid,
+            "model_no":     model,
+            "manufacturer": str(row[mfr_c - 1]).strip() if row[mfr_c - 1] else "",
+        })
+    wb.close()
+    return rows
+
+
+def load_products_needing_ccl_url():
+    """Return list of {product_id, model_no, manufacturer} rows with no CCL URL."""
+    wb      = load_workbook(TEMPLATE_PATH, read_only=True)
+    ws      = wb["Retailer_IDs"]
+    hdrs    = {str(c.value).strip(): c.column for c in ws[1] if c.value}
+    url_c   = hdrs.get("CCL URL")
+    model_c = hdrs.get("Model No", 3)
+    mfr_c   = hdrs.get("Manufacturer", 2)
+    if not url_c:
+        wb.close()
+        return []
+    rows = []
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        pid = str(row[0]).strip() if row[0] else None
+        if not pid:
+            continue
+        url   = str(row[url_c   - 1]).strip() if row[url_c   - 1] else ""
+        model = str(row[model_c - 1]).strip() if row[model_c - 1] else ""
+        if url and url.lower() not in ("none", ""):
+            continue
+        if not model:
+            continue
+        rows.append({
+            "product_id":   pid,
+            "model_no":     model,
+            "manufacturer": str(row[mfr_c - 1]).strip() if row[mfr_c - 1] else "",
+        })
+    wb.close()
+    return rows
+
+
 def _write_discovered_urls(col_name, id_to_url):
     """Write {product_id: url} into the named column of Retailer_IDs sheet."""
     if not id_to_url:
@@ -1022,6 +1088,170 @@ def discover_very_urls(page):
     return _write_discovered_urls("Very URL", found_urls)
 
 
+# ── Box: Google UK search for one model number ───────────────────────────────
+_BOX_SKIP = {
+    'laptops','gaming','components','computing','monitors','phones','printers',
+    'networking','home','business','refurbished','deals','contact','warranty',
+    'returns','news','account','wishlist','basket','search','store','blog',
+    'gpu','cpus','motherboards','memory','storage','cooling','power-supplies',
+    'pc-cases','graphics-cards','laptops-store','gaming-store','components-store',
+}
+
+def _google_box_url(page, model_no, manufacturer):
+    """Search Google UK for site:box.co.uk {manufacturer} {model_no}; return product URL or None."""
+    import urllib.parse
+    q = urllib.parse.quote_plus(f"{manufacturer} {model_no} site:box.co.uk")
+    search_url = f"https://www.google.co.uk/search?q={q}&hl=en-GB&gl=GB&num=5"
+    try:
+        page.goto(search_url, wait_until="domcontentloaded", timeout=20000)
+        time.sleep(random.uniform(3, 5))
+    except Exception as e:
+        log(f"  [Box] Navigation error for {model_no}: {e}")
+        return None
+
+    body = page.inner_text("body")[:400].lower()
+    if "before you continue" in body or "i'm not a robot" in body:
+        log(f"  [Box] ⚠️  Google consent/CAPTCHA for {model_no}")
+        return None
+
+    urls = page.evaluate(r"""(skip) => {
+        const found = [];
+        for (const a of document.querySelectorAll('a[href]')) {
+            const h = a.href || '';
+            const m = h.match(/[?&]q=(https?:\/\/(?:www\.)?box\.co\.uk\/[^&"<>#]+)/);
+            const raw = m ? decodeURIComponent(m[1])
+                          : (/box\.co\.uk\//.test(h) && !h.includes('google.') ? h : null);
+            if (!raw) continue;
+            try {
+                const u = new URL(raw);
+                const parts = u.pathname.split('/').filter(p => p);
+                if (parts.length !== 1) continue;
+                const seg = parts[0].toLowerCase();
+                if (seg.length < 10) continue;
+                if (skip.includes(seg) || seg.includes('store')) continue;
+                found.push(raw.split('#')[0]);
+            } catch(e) {}
+        }
+        return [...new Set(found)];
+    }""", list(_BOX_SKIP))
+
+    if urls:
+        return urls[0]
+
+    raw = page.content()
+    matches = re.findall(r'https?://(?:www\.)?box\.co\.uk/([^\s"\'<>&/#]{15,})', raw)
+    for slug in matches:
+        slug = re.sub(r'["\'>]+$', '', slug)
+        if not any(slug.lower() == s or slug.lower().startswith(s + '-') for s in _BOX_SKIP):
+            return f"https://box.co.uk/{slug}"
+    return None
+
+
+# ── CCL Online: Google UK search for one model number ────────────────────────
+def _google_ccl_url(page, model_no, manufacturer):
+    """Search Google UK for site:cclonline.com {manufacturer} {model_no}; return product URL or None."""
+    import urllib.parse
+    q = urllib.parse.quote_plus(f"{manufacturer} {model_no} site:cclonline.com")
+    search_url = f"https://www.google.co.uk/search?q={q}&hl=en-GB&gl=GB&num=5"
+    try:
+        page.goto(search_url, wait_until="domcontentloaded", timeout=20000)
+        time.sleep(random.uniform(3, 5))
+    except Exception as e:
+        log(f"  [CCL] Navigation error for {model_no}: {e}")
+        return None
+
+    body = page.inner_text("body")[:400].lower()
+    if "before you continue" in body or "i'm not a robot" in body:
+        log(f"  [CCL] ⚠️  Google consent/CAPTCHA for {model_no}")
+        return None
+
+    urls = page.evaluate(r"""() => {
+        const found = [];
+        for (const a of document.querySelectorAll('a[href]')) {
+            const h = a.href || '';
+            const m = h.match(/[?&]q=(https?:\/\/(?:www\.)?cclonline\.com\/[^&"<>#]+)/);
+            const raw = m ? decodeURIComponent(m[1])
+                          : (/cclonline\.com\//.test(h) && !h.includes('google.') ? h : null);
+            if (!raw) continue;
+            try {
+                const u = new URL(raw);
+                const parts = u.pathname.split('/').filter(p => p);
+                if (parts.length !== 1) continue;
+                if (parts[0].length < 10) continue;
+                if (!/\d{4,}/.test(parts[0])) continue;  // CCL slugs end with numeric product code
+                const normalised = 'https://www.cclonline.com/' + parts[0] + '/';
+                found.push(normalised);
+            } catch(e) {}
+        }
+        return [...new Set(found)];
+    }""")
+
+    if urls:
+        return urls[0]
+
+    raw = page.content()
+    matches = re.findall(r'https?://(?:www\.)?cclonline\.com/([^\s"\'<>&/#]{15,})/?', raw)
+    for slug in matches:
+        slug = re.sub(r'["\'>]+$', '', slug)
+        if re.search(r'\d{4,}', slug):
+            return f"https://www.cclonline.com/{slug}/"
+    return None
+
+
+# ── Box URL discovery ─────────────────────────────────────────────────────────
+def discover_box_urls(page):
+    """Discover Box product URLs for all products with no Box URL via Google search."""
+    needs = load_products_needing_box_url()
+    if not needs:
+        log("[Discovery] Box: all products already have URLs — skipping.")
+        return 0
+    log(f"[Discovery] Box: {len(needs)} products need URLs (searching Google UK).")
+    found_urls, failed = {}, []
+    for i, p in enumerate(needs, 1):
+        model = p["model_no"]
+        mfr   = p["manufacturer"]
+        log(f"  [Box] [{i}/{len(needs)}] {model[:40]}  ({mfr})")
+        time.sleep(random.uniform(GOOGLE_DELAY_MIN, GOOGLE_DELAY_MAX))
+        url = _google_box_url(page, model, mfr)
+        if url:
+            found_urls[p["product_id"]] = url
+            log(f"  [Box] ✅ {url}")
+        else:
+            failed.append(model)
+            log(f"  [Box] ❌ not found")
+    log(f"[Discovery] Box: found {len(found_urls)}/{len(needs)} URLs.")
+    if failed:
+        log(f"[Discovery] Box: unresolved: {', '.join(f[:30] for f in failed[:20])}")
+    return _write_discovered_urls("Box URL", found_urls)
+
+
+# ── CCL URL discovery ─────────────────────────────────────────────────────────
+def discover_ccl_urls(page):
+    """Discover CCL Online product URLs for all products with no CCL URL via Google search."""
+    needs = load_products_needing_ccl_url()
+    if not needs:
+        log("[Discovery] CCL: all products already have URLs — skipping.")
+        return 0
+    log(f"[Discovery] CCL: {len(needs)} products need URLs (searching Google UK).")
+    found_urls, failed = {}, []
+    for i, p in enumerate(needs, 1):
+        model = p["model_no"]
+        mfr   = p["manufacturer"]
+        log(f"  [CCL] [{i}/{len(needs)}] {model[:40]}  ({mfr})")
+        time.sleep(random.uniform(GOOGLE_DELAY_MIN, GOOGLE_DELAY_MAX))
+        url = _google_ccl_url(page, model, mfr)
+        if url:
+            found_urls[p["product_id"]] = url
+            log(f"  [CCL] ✅ {url}")
+        else:
+            failed.append(model)
+            log(f"  [CCL] ❌ not found")
+    log(f"[Discovery] CCL: found {len(found_urls)}/{len(needs)} URLs.")
+    if failed:
+        log(f"[Discovery] CCL: unresolved: {', '.join(f[:30] for f in failed[:20])}")
+    return _write_discovered_urls("CCL URL", found_urls)
+
+
 def run_preflight_discovery():
     """
     Run AWD-IT and Scan URL discovery for any new products added since the last
@@ -1036,12 +1266,17 @@ def run_preflight_discovery():
     awdit_needs = load_products_needing_awdit()
     scan_needs  = load_products_needing_scan_url()
     very_needs  = load_products_needing_very_url()
+    box_needs   = load_products_needing_box_url()
+    ccl_needs   = load_products_needing_ccl_url()
 
-    if not awdit_needs and not scan_needs and not very_needs:
+    if not awdit_needs and not scan_needs and not very_needs and not box_needs and not ccl_needs:
         log("[Discovery] Nothing to discover — all products have URLs. Skipping.")
         return
 
-    log(f"[Discovery] AWD-IT needs: {len(awdit_needs)} | Scan needs: {len(scan_needs)} | Very needs: {len(very_needs)}")
+    log(
+        f"[Discovery] AWD-IT: {len(awdit_needs)} | Scan: {len(scan_needs)} | "
+        f"Very: {len(very_needs)} | Box: {len(box_needs)} | CCL: {len(ccl_needs)}"
+    )
 
     total_written = 0
 
@@ -1079,8 +1314,8 @@ def run_preflight_discovery():
             total_written += written
             browser.close()
 
-    # Scan + Very: patchright headed via Xvfb (Google blocks headless Chromium)
-    if scan_needs or very_needs:
+    # Scan + Very + Box + CCL: patchright headed via Xvfb (Google blocks headless Chromium)
+    if scan_needs or very_needs or box_needs or ccl_needs:
         with virtual_display():
             with patchright_playwright() as pw:
                 browser = pw.chromium.launch(
@@ -1100,6 +1335,14 @@ def run_preflight_discovery():
 
                 if very_needs:
                     written = discover_very_urls(page)
+                    total_written += written
+
+                if box_needs:
+                    written = discover_box_urls(page)
+                    total_written += written
+
+                if ccl_needs:
+                    written = discover_ccl_urls(page)
                     total_written += written
 
                 browser.close()
