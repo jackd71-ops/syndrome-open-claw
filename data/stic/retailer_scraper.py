@@ -9,11 +9,11 @@ Retailer status (2026-04):
   ✅ Currys       — search by SKU → direct product redirect
   ✅ Overclockers — OCUK code search via camoufox (code in col M of template)
   ❌ Argos        — 403 on all URLs (Akamai)
-  ⚠️  Scan         — Cloudflare blocks direct; URLs discovered via Google UK search
-  ❌ Box          — full JS render
+  ✅ Scan         — patchright + Xvfb; URLs in template (auto-discovered via Google)
+  ✅ Box          — patchright + Xvfb; Angular SPA, price hydrates ~8s post-load
   ✅ CCL Online   — direct product URL → JSON-LD price
   ✅ AWD-IT       — direct product URL → JSON-LD price (URLs auto-discovered)
-  ❌ Very         — 403 on all URLs
+  ✅ Very         — patchright + Xvfb; URLs in template (auto-discovered via Google)
 
 Pre-flight discovery (runs automatically before batch 1):
   • AWD-IT: matches new products against cached category catalog; re-scrapes
@@ -56,6 +56,7 @@ ONEDRIVE_DEST      = "onedrive:Documents/Retail Review/"
 AWDIT_CATALOG_PATH = "/opt/openclaw/data/stic/awdit_catalog.json"
 SCAN_SCRAPE_PATH   = "/opt/openclaw/data/stic/scan_scrape.py"
 VERY_SCRAPE_PATH   = "/opt/openclaw/data/stic/very_scrape.py"
+BOX_SCRAPE_PATH    = "/opt/openclaw/data/stic/box_scrape.py"
 LOCK_PATH          = "/opt/openclaw/data/stic/retailer_scraper.lock"
 
 # ── Process lock ──────────────────────────────────────────────────────────────
@@ -126,7 +127,7 @@ RETAILERS = [
     {"name": "Argos",        "col": 12, "id_col": "ARGOS  SKU",  "blocked": True, "reason": "403 Akamai"},
     {"name": "Scan",         "col": 13, "id_col": "Scan URL",    "blocked": False},
     {"name": "Overclockers", "col": 14, "id_col": None,          "blocked": False},
-    {"name": "Box",          "col": 15, "id_col": None,          "blocked": True, "reason": "JS render"},
+    {"name": "Box",          "col": 15, "id_col": "Box URL",    "blocked": False},
     {"name": "CCL Online",   "col": 16, "id_col": "CCL URL",     "blocked": False},
     {"name": "AWD-IT",       "col": 17, "id_col": "AWD-IT URL",  "blocked": False},
     {"name": "Very",         "col": 18, "id_col": "Very URL",    "blocked": False},
@@ -413,6 +414,21 @@ def scrape_very(url):
     return None
 
 
+# ── Box scraper (patchright + Xvfb subprocess) ───────────────────────────────
+def scrape_box(url):
+    try:
+        result = subprocess.run(
+            ["xvfb-run", "--auto-servernum", "/usr/bin/python3", BOX_SCRAPE_PATH, url],
+            capture_output=True, text=True, timeout=120
+        )
+        out = result.stdout.strip()
+        if out and out != "NOT_FOUND":
+            return float(out)
+    except (subprocess.TimeoutExpired, ValueError, Exception):
+        pass
+    return None
+
+
 # ── Overclockers scraper (camoufox subprocess) ───────────────────────────────
 OCUK_SCRAPE_PATH = "/opt/openclaw/data/stic/ocuk_scrape.py"
 
@@ -454,6 +470,18 @@ def scrape_product(page, product, retailer, id_codes):
             return None, "OUT_OF_STOCK" if sku else "NOT_STOCKED"
         try:
             price = scrape_very(url)
+            return (price, None) if price else (None, "NOT_FOUND")
+        except Exception as e:
+            log(f"    [{name}] ERROR: {e}")
+            return None, "ERROR"
+
+    # Box: patchright + Xvfb subprocess, uses stored Box URL
+    if name == "Box":
+        url = id_codes.get(product["product_id"], {}).get("Box URL")
+        if not url:
+            return None, "NOT_STOCKED"
+        try:
+            price = scrape_box(url)
             return (price, None) if price else (None, "NOT_FOUND")
         except Exception as e:
             log(f"    [{name}] ERROR: {e}")
