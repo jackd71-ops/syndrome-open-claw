@@ -1678,6 +1678,16 @@ def run_discovery_sanity_report(page):
         log(f"[Sanity] Report written → {report_path}")
         if flags:
             log(f"[Sanity] ⚠️  {len(flags)} item(s) flagged — check report before next batch.")
+            lines = [f"⚠️ <b>Discovery sanity check — {len(flags)} URL(s) need review</b>"]
+            lines.append("Retailer price &gt;5% below Amazon — possible wrong SKU match:\n")
+            for r in flags:
+                lines.append(
+                    f"• <b>{r['manufacturer']} {r['model']}</b>\n"
+                    f"  {r['retailer']} £{r['retailer_price']:.2f} vs Amazon £{r['amazon_price']:.2f}"
+                    f" ({r['diff_pct']:+.1%})\n"
+                    f"  {r['url']}"
+                )
+            send_telegram("\n".join(lines))
     except Exception as e:
         log(f"[Sanity] Could not write report: {e}")
         log(report_text)
