@@ -40,6 +40,8 @@ import re
 import subprocess
 import random
 import time
+import urllib.parse
+import urllib.request
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -62,6 +64,9 @@ SCAN_SCRAPE_PATH   = "/opt/openclaw/data/stic/scan_scrape.py"
 VERY_SCRAPE_PATH   = "/opt/openclaw/data/stic/very_scrape.py"
 BOX_SCRAPE_PATH    = "/opt/openclaw/data/stic/box_scrape.py"
 LOCK_PATH          = "/opt/openclaw/data/stic/retailer_scraper.lock"
+
+# Populated by discover_* functions; consumed by run_discovery_sanity_report()
+_DISCOVERY_LOG: list = []
 
 # ── Process lock ──────────────────────────────────────────────────────────────
 @contextmanager
@@ -532,7 +537,6 @@ def scrape_product(page, product, retailer, id_codes):
 
 # ── Telegram ──────────────────────────────────────────────────────────────────
 def send_telegram(message):
-    import urllib.request
     token = get_secrets().get("TELEGRAM_TOKEN", "")
     if not token:
         return
@@ -653,6 +657,34 @@ def load_products_needing_scan_url():
             "ln_code":    ln,
             "model_no":   str(row[model_c - 1]).strip() if row[model_c - 1] else "",
         })
+    wb.close()
+    return rows
+
+
+def load_products_needing_scan_url_by_model():
+    """Return products with model_no but no Scan URL (no LN code required)."""
+    wb      = load_workbook(TEMPLATE_PATH, read_only=True)
+    ws      = wb["Retailer_IDs"]
+    hdrs    = {str(c.value).strip(): c.column for c in ws[1] if c.value}
+    url_c   = hdrs.get("Scan URL")
+    model_c = hdrs.get("Model No", 3)
+    mfr_c   = hdrs.get("Manufacturer", 2)
+    if not url_c:
+        wb.close()
+        return []
+    rows = []
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        pid = str(row[0]).strip() if row[0] else None
+        if not pid:
+            continue
+        url   = str(row[url_c   - 1]).strip() if row[url_c   - 1] else ""
+        model = str(row[model_c - 1]).strip() if row[model_c - 1] else ""
+        mfr   = str(row[mfr_c  - 1]).strip() if row[mfr_c  - 1] else ""
+        if url and url.lower() not in ("none", ""):
+            continue
+        if not model:
+            continue
+        rows.append({"product_id": pid, "model_no": model, "manufacturer": mfr})
     wb.close()
     return rows
 
@@ -981,6 +1013,99 @@ def _google_scan_url(page, ln_code):
     return None
 
 
+def _fetch_scan_mpn(url):
+    """
+    Fetch a Scan product page and return the best model identifier for matching.
+    Tries itemprop=mpn first; if that looks like an internal code (e.g. ASUS's
+    90MB1EG0-M0EAY0), falls back to extracting the model from the page title.
+    Scan product pages are not Cloudflare-gated for GET requests.
+    """
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+
+        mpn = None
+        m = re.search(r'itemprop=["\']mpn["\'][^>]*>([^<]+)<', html)
+        if m:
+            mpn = m.group(1).strip()
+        if not mpn:
+            m2 = re.search(r'Manufacturer code:[^<]*<strong>([^<]+)<', html)
+            if m2:
+                mpn = m2.group(1).strip()
+
+        # If MPN is an internal reference code (e.g. "90MB1EG0-M0EAY0"), extract
+        # the model name from the page title instead (before the LN number).
+        if mpn and re.match(r'^[0-9A-Z]{4,}[\-/]', mpn):
+            m3 = re.search(r'<title>([^<]+)</title>', html)
+            if m3:
+                title = m3.group(1)
+                # Strip trailing " | SCAN UK" and everything after " LN\d+"
+                title = re.sub(r'\s+LN\d+.*', '', title)
+                title = title.strip()
+                if title:
+                    return title  # e.g. "ASUS PRIME B650M-A WIFI II DDR5 PCIe 4.0 MicroATX Motherboard"
+
+        return mpn
+    except Exception:
+        pass
+    return None
+
+
+def _mpn_matches(mpn, model_no):
+    """
+    Return True if the identifier fetched from Scan matches the model number.
+    Both are normalised (lowercased, spaces/hyphens collapsed).
+    Accepts: exact match, model contained in identifier, or identifier in model.
+    """
+    def norm(s):
+        return re.sub(r'[\s\-]+', ' ', s.strip().lower())
+    n_mpn   = norm(mpn)
+    n_model = norm(model_no)
+    return n_mpn == n_model or n_model in n_mpn or n_mpn in n_model
+
+
+def _scan_direct_url(page, model_no, manufacturer):
+    """
+    Search scan.co.uk's own search engine for manufacturer + model_no.
+    For each candidate URL, fetch the product page to check itemprop=mpn.
+    Returns the first URL whose MPN matches, or None.
+    """
+    q = urllib.parse.quote_plus(f"{manufacturer} {model_no}")
+    try:
+        page.goto(f"https://www.scan.co.uk/search?q={q}",
+                  wait_until="domcontentloaded", timeout=25000)
+        time.sleep(random.uniform(3, 5))
+    except Exception as e:
+        log(f"  [Scan] Nav error for {model_no}: {e}")
+        return None
+
+    candidates = page.evaluate(r"""() => {
+        const found = [];
+        for (const a of document.querySelectorAll('a[href]')) {
+            const h = a.href || '';
+            if (/scan\.co\.uk\/products\//.test(h) && !h.includes('google.'))
+                found.push(h.split('#')[0].split('?')[0]);
+        }
+        return [...new Set(found)];
+    }""")
+
+    # Exclude bundle/refurbished/open-box URLs — we want standalone product pages only
+    _SCAN_SLUG_SKIP = ('bundle', 'refurbished', 'open-box', 'combo')
+    filtered = [u for u in candidates if not any(s in u.lower() for s in _SCAN_SLUG_SKIP)]
+
+    for url in filtered[:5]:
+        mpn = _fetch_scan_mpn(url)
+        if mpn and _mpn_matches(mpn, model_no):
+            return url
+        elif mpn:
+            log(f"  [Scan]   skip {mpn!r} (wanted {model_no!r})")
+    return None
+
+
 # ── Scan URL discovery ────────────────────────────────────────────────────────
 def discover_scan_urls(page):
     """
@@ -1016,6 +1141,48 @@ def discover_scan_urls(page):
     log(f"[Discovery] Scan: found {len(found_urls)}/{len(needs)} URLs.")
     if failed:
         log(f"[Discovery] Scan: unresolved LN codes: {', '.join(failed[:20])}")
+    return _write_discovered_urls("Scan URL", found_urls)
+
+
+def discover_scan_urls_by_model(page):
+    """
+    Discover Scan URLs by searching scan.co.uk directly using manufacturer + model number.
+    No LN code required. Validates each URL to avoid storing wrong-generation results.
+    """
+    needs = load_products_needing_scan_url_by_model()
+    if not needs:
+        log("[Discovery] Scan (model): all products have Scan URLs — skipping.")
+        return 0
+
+    log(f"[Discovery] Scan (model): {len(needs)} products need URLs (direct Scan search).")
+    found_urls = {}
+
+    # Warm up on Scan homepage before searching
+    try:
+        page.goto("https://www.scan.co.uk/", wait_until="domcontentloaded", timeout=25000)
+        time.sleep(random.uniform(3, 5))
+    except Exception as e:
+        log(f"[Discovery] Scan (model): warmup failed: {e}")
+
+    for i, row in enumerate(needs, 1):
+        pid   = row["product_id"]
+        model = row["model_no"]
+        mfr   = row["manufacturer"]
+        log(f"  [Scan] [{i}/{len(needs)}] {mfr} {model[:40]}")
+
+        url = _scan_direct_url(page, model, mfr)
+        if url:
+            log(f"  [Scan] ✅ {url}")
+            found_urls[pid] = url
+            _DISCOVERY_LOG.append({"product_id": pid, "model_no": model,
+                                   "manufacturer": mfr, "retailer": "Scan", "url": url})
+        else:
+            log(f"  [Scan] ❌ not found / no valid match")
+
+        if i < len(needs):
+            time.sleep(random.uniform(3, 6))
+
+    log(f"[Discovery] Scan (model): found {len(found_urls)}/{len(needs)} URLs.")
     return _write_discovered_urls("Scan URL", found_urls)
 
 
@@ -1088,7 +1255,90 @@ def discover_very_urls(page):
     return _write_discovered_urls("Very URL", found_urls)
 
 
-# ── Box: Google UK search for one model number ───────────────────────────────
+# ── URL verification via page title ──────────────────────────────────────────
+def _title_matches(title, model_no):
+    """
+    Return True if the page title contains enough tokens from model_no.
+    All significant tokens (4+ chars) must be present; shorter ones at least half.
+    """
+    def norm(s):
+        return re.sub(r'[\s\-/]+', ' ', s.strip().lower())
+    nt = norm(title)
+    nm = norm(model_no)
+    # Quick exact substring check
+    if nm in nt:
+        return True
+    tokens = [t for t in nm.split() if len(t) >= 3]
+    if not tokens:
+        return False
+    long_tokens  = [t for t in tokens if len(t) >= 4]
+    short_tokens = [t for t in tokens if len(t) == 3]
+    # All long tokens must appear
+    if not all(t in nt for t in long_tokens):
+        return False
+    # At least half of short tokens
+    short_ok = sum(1 for t in short_tokens if t in nt)
+    return short_ok >= max(1, len(short_tokens) * 0.5) if short_tokens else True
+
+
+def _verify_url_by_title(page, url, model_no, label=""):
+    """
+    Navigate to url and check the page title contains the model_no tokens.
+    Used to confirm Box search results before storing the URL.
+    """
+    try:
+        page.goto(url, wait_until="domcontentloaded", timeout=20000)
+        time.sleep(random.uniform(2, 3))
+        title = page.title()
+        if _title_matches(title, model_no):
+            return True
+        log(f"  [{label}] title mismatch: {title[:80]!r}")
+    except Exception as e:
+        log(f"  [{label}] verify nav error for {url}: {e}")
+    return False
+
+
+def _verify_ccl_url(page, url, model_no, label=""):
+    """
+    Navigate to a CCL product page and verify by extracting the 'Mfg Code:' field.
+    CCL renders this as a text node: 'Mfg Code: <model>'.
+    Falls back to title matching if the field is absent.
+    Returns True if verified, False otherwise.
+    """
+    try:
+        page.goto(url, wait_until="domcontentloaded", timeout=20000)
+        time.sleep(random.uniform(2, 3))
+
+        mfg_code = page.evaluate("""() => {
+            // Walk all text nodes looking for "Mfg Code:"
+            const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+            let node;
+            while (node = walker.nextNode()) {
+                const t = node.textContent.trim();
+                if (t.startsWith('Mfg Code:')) {
+                    return t.slice('Mfg Code:'.length).trim();
+                }
+            }
+            return null;
+        }""")
+
+        if mfg_code:
+            if _mpn_matches(mfg_code, model_no):
+                return True
+            log(f"  [{label}] Mfg Code mismatch: {mfg_code!r} (wanted {model_no!r})")
+            return False
+
+        # Fallback to title if Mfg Code not found
+        title = page.title()
+        if _title_matches(title, model_no):
+            return True
+        log(f"  [{label}] title mismatch (no Mfg Code): {title[:80]!r}")
+    except Exception as e:
+        log(f"  [{label}] verify nav error for {url}: {e}")
+    return False
+
+
+# ── Multi-engine site: search (DDG primary, Google fallback) ─────────────────
 _BOX_SKIP = {
     'laptops','gaming','components','computing','monitors','phones','printers',
     'networking','home','business','refurbished','deals','contact','warranty',
@@ -1097,104 +1347,136 @@ _BOX_SKIP = {
     'pc-cases','graphics-cards','laptops-store','gaming-store','components-store',
 }
 
+# Engines tried in order. DDG first — no rate limiting observed.
+# Google last — rate-limits after the first search per session but useful as fallback.
+_SEARCH_ENGINES = [
+    ("DDG",    lambda q: f"https://duckduckgo.com/?q={q}&kl=uk-en"),
+    ("Google", lambda q: f"https://www.google.co.uk/search?q={q}&hl=en-GB&gl=GB&num=5"),
+]
+
+def _is_blocked(page):
+    body = page.inner_text("body")[:500].lower()
+    return ("before you continue" in body or "i'm not a robot" in body
+            or "verify you are human" in body or len(body) < 50)
+
 def _google_box_url(page, model_no, manufacturer):
-    """Search Google UK for site:box.co.uk {manufacturer} {model_no}; return product URL or None."""
-    import urllib.parse
+    """
+    Search for site:box.co.uk using DDG then Google (fallback).
+    For each candidate URL, verifies the product page title matches model_no.
+    Returns the first verified URL, or None.
+    """
     q = urllib.parse.quote_plus(f"{manufacturer} {model_no} site:box.co.uk")
-    search_url = f"https://www.google.co.uk/search?q={q}&hl=en-GB&gl=GB&num=5"
-    try:
-        page.goto(search_url, wait_until="domcontentloaded", timeout=20000)
-        time.sleep(random.uniform(3, 5))
-    except Exception as e:
-        log(f"  [Box] Navigation error for {model_no}: {e}")
-        return None
+    skip = list(_BOX_SKIP)
 
-    body = page.inner_text("body")[:400].lower()
-    if "before you continue" in body or "i'm not a robot" in body:
-        log(f"  [Box] ⚠️  Google consent/CAPTCHA for {model_no}")
-        return None
+    for engine_name, engine_url in _SEARCH_ENGINES:
+        try:
+            page.goto(engine_url(q), wait_until="domcontentloaded", timeout=20000)
+            time.sleep(random.uniform(3, 5))
+        except Exception as e:
+            log(f"  [Box:{engine_name}] nav error: {e}")
+            continue
 
-    urls = page.evaluate(r"""(skip) => {
-        const found = [];
-        for (const a of document.querySelectorAll('a[href]')) {
-            const h = a.href || '';
-            const m = h.match(/[?&]q=(https?:\/\/(?:www\.)?box\.co\.uk\/[^&"<>#]+)/);
-            const raw = m ? decodeURIComponent(m[1])
-                          : (/box\.co\.uk\//.test(h) && !h.includes('google.') ? h : null);
-            if (!raw) continue;
-            try {
-                const u = new URL(raw);
-                const parts = u.pathname.split('/').filter(p => p);
-                if (parts.length !== 1) continue;
-                const seg = parts[0].toLowerCase();
-                if (seg.length < 10) continue;
-                if (skip.includes(seg) || seg.includes('store')) continue;
-                found.push(raw.split('#')[0]);
-            } catch(e) {}
-        }
-        return [...new Set(found)];
-    }""", list(_BOX_SKIP))
+        if _is_blocked(page):
+            log(f"  [Box:{engine_name}] blocked/consent — trying next engine")
+            continue
 
-    if urls:
-        return urls[0]
+        candidates = page.evaluate(r"""(skip) => {
+            const found = [];
+            for (const a of document.querySelectorAll('a[href]')) {
+                const h = a.href || '';
+                const m = h.match(/[?&](?:q|uddg)=(https?:\/\/(?:www\.)?box\.co\.uk\/[^&"<>#]+)/);
+                const raw = m ? decodeURIComponent(m[1])
+                              : (/box\.co\.uk\//.test(h)
+                                 && !h.includes('google.') && !h.includes('duckduck') ? h : null);
+                if (!raw) continue;
+                try {
+                    const u = new URL(raw);
+                    const parts = u.pathname.split('/').filter(p => p);
+                    if (parts.length !== 1) continue;
+                    const seg = parts[0].toLowerCase();
+                    if (seg.length < 10 || skip.includes(seg) || seg.includes('store')) continue;
+                    found.push(raw.split('#')[0]);
+                } catch(e) {}
+            }
+            return [...new Set(found)];
+        }""", skip)
 
-    raw = page.content()
-    matches = re.findall(r'https?://(?:www\.)?box\.co\.uk/([^\s"\'<>&/#]{15,})', raw)
-    for slug in matches:
-        slug = re.sub(r'["\'>]+$', '', slug)
-        if not any(slug.lower() == s or slug.lower().startswith(s + '-') for s in _BOX_SKIP):
-            return f"https://box.co.uk/{slug}"
+        # Regex fallback on raw HTML
+        if not candidates:
+            raw = page.content()
+            matches = re.findall(r'https?://(?:www\.)?box\.co\.uk/([^\s"\'<>&/#]{15,})', raw)
+            for slug in matches:
+                slug = re.sub(r'["\'>]+$', '', slug)
+                if not any(slug.lower() == s or slug.lower().startswith(s + '-') for s in _BOX_SKIP):
+                    candidates.append(f"https://box.co.uk/{slug}")
+
+        if not candidates:
+            log(f"  [Box:{engine_name}] ❌ no candidates")
+            continue
+
+        for url in candidates[:5]:
+            if _verify_url_by_title(page, url, model_no, label=f"Box:{engine_name}"):
+                return url
+
     return None
 
 
-# ── CCL Online: Google UK search for one model number ────────────────────────
+# ── CCL Online: multi-engine search ──────────────────────────────────────────
 def _google_ccl_url(page, model_no, manufacturer):
-    """Search Google UK for site:cclonline.com {manufacturer} {model_no}; return product URL or None."""
-    import urllib.parse
+    """
+    Search for site:cclonline.com using DDG then Google (fallback).
+    Returns first valid CCL product URL (slug must contain 4+ digit code), or None.
+    """
     q = urllib.parse.quote_plus(f"{manufacturer} {model_no} site:cclonline.com")
-    search_url = f"https://www.google.co.uk/search?q={q}&hl=en-GB&gl=GB&num=5"
-    try:
-        page.goto(search_url, wait_until="domcontentloaded", timeout=20000)
-        time.sleep(random.uniform(3, 5))
-    except Exception as e:
-        log(f"  [CCL] Navigation error for {model_no}: {e}")
-        return None
 
-    body = page.inner_text("body")[:400].lower()
-    if "before you continue" in body or "i'm not a robot" in body:
-        log(f"  [CCL] ⚠️  Google consent/CAPTCHA for {model_no}")
-        return None
+    for engine_name, engine_url in _SEARCH_ENGINES:
+        try:
+            page.goto(engine_url(q), wait_until="domcontentloaded", timeout=20000)
+            time.sleep(random.uniform(3, 5))
+        except Exception as e:
+            log(f"  [CCL:{engine_name}] nav error: {e}")
+            continue
 
-    urls = page.evaluate(r"""() => {
-        const found = [];
-        for (const a of document.querySelectorAll('a[href]')) {
-            const h = a.href || '';
-            const m = h.match(/[?&]q=(https?:\/\/(?:www\.)?cclonline\.com\/[^&"<>#]+)/);
-            const raw = m ? decodeURIComponent(m[1])
-                          : (/cclonline\.com\//.test(h) && !h.includes('google.') ? h : null);
-            if (!raw) continue;
-            try {
-                const u = new URL(raw);
-                const parts = u.pathname.split('/').filter(p => p);
-                if (parts.length !== 1) continue;
-                if (parts[0].length < 10) continue;
-                if (!/\d{4,}/.test(parts[0])) continue;  // CCL slugs end with numeric product code
-                const normalised = 'https://www.cclonline.com/' + parts[0] + '/';
-                found.push(normalised);
-            } catch(e) {}
-        }
-        return [...new Set(found)];
-    }""")
+        if _is_blocked(page):
+            log(f"  [CCL:{engine_name}] blocked/consent — trying next engine")
+            continue
 
-    if urls:
-        return urls[0]
+        candidates = page.evaluate(r"""() => {
+            const found = [];
+            for (const a of document.querySelectorAll('a[href]')) {
+                const h = a.href || '';
+                const m = h.match(/[?&](?:q|uddg)=(https?:\/\/(?:www\.)?cclonline\.com\/[^&"<>#]+)/);
+                const raw = m ? decodeURIComponent(m[1])
+                              : (/cclonline\.com\//.test(h)
+                                 && !h.includes('google.') && !h.includes('duckduck') ? h : null);
+                if (!raw) continue;
+                try {
+                    const u = new URL(raw);
+                    const parts = u.pathname.split('/').filter(p => p);
+                    if (parts.length !== 1 || parts[0].length < 10) continue;
+                    if (!/\d{4,}/.test(parts[0])) continue;
+                    found.push('https://www.cclonline.com/' + parts[0] + '/');
+                } catch(e) {}
+            }
+            return [...new Set(found)];
+        }""")
 
-    raw = page.content()
-    matches = re.findall(r'https?://(?:www\.)?cclonline\.com/([^\s"\'<>&/#]{15,})/?', raw)
-    for slug in matches:
-        slug = re.sub(r'["\'>]+$', '', slug)
-        if re.search(r'\d{4,}', slug):
-            return f"https://www.cclonline.com/{slug}/"
+        if not candidates:
+            raw = page.content()
+            matches = re.findall(r'https?://(?:www\.)?cclonline\.com/([^\s"\'<>&/#]{15,})/?', raw)
+            for slug in matches:
+                slug = re.sub(r'["\'>]+$', '', slug)
+                if re.search(r'\d{4,}', slug):
+                    candidates.append(f"https://www.cclonline.com/{slug}/")
+
+        if not candidates:
+            log(f"  [CCL:{engine_name}] ❌ no candidates")
+            continue
+
+        for url in candidates[:5]:
+            if _verify_ccl_url(page, url, model_no, label=f"CCL:{engine_name}"):
+                return url
+
     return None
 
 
@@ -1216,6 +1498,8 @@ def discover_box_urls(page):
         if url:
             found_urls[p["product_id"]] = url
             log(f"  [Box] ✅ {url}")
+            _DISCOVERY_LOG.append({"product_id": p["product_id"], "model_no": model,
+                                   "manufacturer": mfr, "retailer": "Box", "url": url})
         else:
             failed.append(model)
             log(f"  [Box] ❌ not found")
@@ -1243,6 +1527,8 @@ def discover_ccl_urls(page):
         if url:
             found_urls[p["product_id"]] = url
             log(f"  [CCL] ✅ {url}")
+            _DISCOVERY_LOG.append({"product_id": p["product_id"], "model_no": model,
+                                   "manufacturer": mfr, "retailer": "CCL Online", "url": url})
         else:
             failed.append(model)
             log(f"  [CCL] ❌ not found")
@@ -1250,6 +1536,151 @@ def discover_ccl_urls(page):
     if failed:
         log(f"[Discovery] CCL: unresolved: {', '.join(f[:30] for f in failed[:20])}")
     return _write_discovered_urls("CCL URL", found_urls)
+
+
+def load_amazon_prices():
+    """
+    Return {product_id (str): amazon_price (float)} from the most recent daily
+    sheet in the current month's output XLSX. Returns empty dict if unavailable.
+    """
+    try:
+        path = get_output_path()
+        if not Path(path).exists():
+            return {}
+        wb = load_workbook(path, read_only=True)
+        # Find most recent daily sheet (format DD-MM-YYYY)
+        daily = [s for s in wb.sheetnames if re.match(r'\d{2}-\d{2}-\d{4}', s)]
+        if not daily:
+            wb.close()
+            return {}
+        sheet = wb[sorted(daily, key=lambda s: s.split('-')[::-1])[-1]]
+        prices = {}
+        for row in sheet.iter_rows(min_row=2, values_only=True):
+            pid   = str(row[0]).strip() if row[0] else None
+            price = row[9]  # Amazon UK column
+            if pid and price and isinstance(price, (int, float)) and price > 0:
+                prices[pid] = float(price)
+        wb.close()
+        return prices
+    except Exception as e:
+        log(f"[Sanity] Could not load Amazon prices: {e}")
+        return {}
+
+
+def _quick_price_for_sanity(retailer, url, page):
+    """
+    Scrape a price from url for the sanity check.
+    Uses the existing scraper for each retailer; returns float or None.
+    """
+    try:
+        if retailer == "CCL Online":
+            return scrape_ccl(page, url)
+        if retailer == "Box":
+            return scrape_box(url)
+        if retailer == "Scan":
+            return scrape_scan(url)
+    except Exception as e:
+        log(f"  [Sanity] scrape error for {retailer} {url}: {e}")
+    return None
+
+
+def run_discovery_sanity_report(page):
+    """
+    For every URL written during this discovery session, scrape its price and
+    compare to the most recently scraped Amazon price for the same product.
+    If a retailer price is more than 5% below Amazon, flag it — this may mean
+    the search matched a cheaper/different variant.
+    Writes a human-readable report to OUTPUT_DIR/discovery_sanity_YYYY-MM-DD.txt.
+    """
+    if not _DISCOVERY_LOG:
+        log("[Sanity] No new URLs discovered this session — skipping sanity check.")
+        return
+
+    log(f"[Sanity] Checking {len(_DISCOVERY_LOG)} newly discovered URLs against Amazon prices...")
+    amazon = load_amazon_prices()
+    if not amazon:
+        log("[Sanity] No Amazon prices available — skipping sanity check.")
+        return
+
+    THRESHOLD = 0.05  # flag if retailer is >5% cheaper than Amazon
+
+    flags   = []
+    ok_rows = []
+
+    for item in _DISCOVERY_LOG:
+        pid      = item["product_id"]
+        model    = item["model_no"]
+        mfr      = item["manufacturer"]
+        retailer = item["retailer"]
+        url      = item["url"]
+
+        amz = amazon.get(pid)
+        if not amz:
+            log(f"  [Sanity] {pid} — no Amazon price on record, skipping")
+            continue
+
+        log(f"  [Sanity] {pid} {model[:35]} ({retailer}) ...")
+        price = _quick_price_for_sanity(retailer, url, page)
+
+        if price is None:
+            log(f"  [Sanity]   could not scrape price")
+            continue
+
+        diff_pct = (price - amz) / amz  # negative = cheaper than Amazon
+        log(f"  [Sanity]   {retailer} £{price:.2f}  vs  Amazon £{amz:.2f}  ({diff_pct:+.1%})")
+
+        row = {
+            "pid": pid, "model": model, "manufacturer": mfr,
+            "retailer": retailer, "url": url,
+            "retailer_price": price, "amazon_price": amz,
+            "diff_pct": diff_pct,
+        }
+        if diff_pct < -THRESHOLD:
+            flags.append(row)
+        else:
+            ok_rows.append(row)
+
+    # Write report
+    report_path = f"{OUTPUT_DIR}/discovery_sanity_{datetime.now().strftime('%Y-%m-%d')}.txt"
+    lines = [
+        f"Discovery Price Sanity Report — {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        f"Threshold: flag if retailer price >5% below Amazon",
+        "=" * 72,
+    ]
+
+    if flags:
+        lines.append(f"\n⚠️  FLAGGED — please verify SKU match ({len(flags)} items):\n")
+        for r in flags:
+            lines += [
+                f"  Product:   {r['pid']}  {r['manufacturer']} {r['model']}",
+                f"  Retailer:  {r['retailer']}  £{r['retailer_price']:.2f}",
+                f"  Amazon:    £{r['amazon_price']:.2f}",
+                f"  Diff:      {r['diff_pct']:+.1%}  ← CHEAPER THAN AMAZON BY >{THRESHOLD:.0%}",
+                f"  URL:       {r['url']}",
+                "",
+            ]
+    else:
+        lines.append("\n✅ No flags — all discovered prices are within 5% of Amazon.\n")
+
+    if ok_rows:
+        lines.append(f"OK items ({len(ok_rows)}):\n")
+        for r in ok_rows:
+            lines.append(
+                f"  {r['pid']:8s}  {r['manufacturer']:10s} {r['model'][:35]:35s}"
+                f"  {r['retailer']:12s} £{r['retailer_price']:7.2f}"
+                f"  Amazon £{r['amazon_price']:7.2f}  ({r['diff_pct']:+.1%})"
+            )
+
+    report_text = "\n".join(lines) + "\n"
+    try:
+        with open(report_path, "w") as f:
+            f.write(report_text)
+        log(f"[Sanity] Report written → {report_path}")
+        if flags:
+            log(f"[Sanity] ⚠️  {len(flags)} item(s) flagged — check report before next batch.")
+    except Exception as e:
+        log(f"[Sanity] Could not write report: {e}")
+        log(report_text)
 
 
 def run_preflight_discovery():
@@ -1262,20 +1693,24 @@ def run_preflight_discovery():
     log("PRE-FLIGHT URL DISCOVERY")
     log("=" * 65)
 
-    # Quick check: is there anything to do at all?
-    awdit_needs = load_products_needing_awdit()
-    scan_needs  = load_products_needing_scan_url()
-    very_needs  = load_products_needing_very_url()
-    box_needs   = load_products_needing_box_url()
-    ccl_needs   = load_products_needing_ccl_url()
+    _DISCOVERY_LOG.clear()  # reset for this session
 
-    if not awdit_needs and not scan_needs and not very_needs and not box_needs and not ccl_needs:
+    # Quick check: is there anything to do at all?
+    awdit_needs      = load_products_needing_awdit()
+    scan_needs       = load_products_needing_scan_url()
+    scan_model_needs = load_products_needing_scan_url_by_model()
+    very_needs       = load_products_needing_very_url()
+    box_needs        = load_products_needing_box_url()
+    ccl_needs        = load_products_needing_ccl_url()
+
+    if not awdit_needs and not scan_needs and not scan_model_needs and not very_needs and not box_needs and not ccl_needs:
         log("[Discovery] Nothing to discover — all products have URLs. Skipping.")
         return
 
     log(
-        f"[Discovery] AWD-IT: {len(awdit_needs)} | Scan: {len(scan_needs)} | "
-        f"Very: {len(very_needs)} | Box: {len(box_needs)} | CCL: {len(ccl_needs)}"
+        f"[Discovery] AWD-IT: {len(awdit_needs)} | Scan(LN): {len(scan_needs)} | "
+        f"Scan(model): {len(scan_model_needs)} | Very: {len(very_needs)} | "
+        f"Box: {len(box_needs)} | CCL: {len(ccl_needs)}"
     )
 
     total_written = 0
@@ -1315,7 +1750,7 @@ def run_preflight_discovery():
             browser.close()
 
     # Scan + Very + Box + CCL: patchright headed via Xvfb (Google blocks headless Chromium)
-    if scan_needs or very_needs or box_needs or ccl_needs:
+    if scan_needs or scan_model_needs or very_needs or box_needs or ccl_needs:
         with virtual_display():
             with patchright_playwright() as pw:
                 browser = pw.chromium.launch(
@@ -1333,6 +1768,10 @@ def run_preflight_discovery():
                     written = discover_scan_urls(page)
                     total_written += written
 
+                if scan_model_needs:
+                    written = discover_scan_urls_by_model(page)
+                    total_written += written
+
                 if very_needs:
                     written = discover_very_urls(page)
                     total_written += written
@@ -1344,6 +1783,9 @@ def run_preflight_discovery():
                 if ccl_needs:
                     written = discover_ccl_urls(page)
                     total_written += written
+
+                # Price sanity check — uses same live browser page
+                run_discovery_sanity_report(page)
 
                 browser.close()
 
