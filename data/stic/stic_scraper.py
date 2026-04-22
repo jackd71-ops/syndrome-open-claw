@@ -165,11 +165,12 @@ def read_products(start: int, end: int) -> list:
         if row_num > end:
             break
         products.append({
-            "row_num":      row_num,
-            "product_id":   row[0],
-            "description":  str(row[1]).strip() if row[1] else "",
-            "model_no":     str(row[2]).strip() if row[2] else "",
-            "manufacturer": str(row[3]).strip() if row[3] else "",
+            "row_num":       row_num,
+            "product_id":    row[0],
+            "description":   str(row[1]).strip() if row[1] else "",
+            "model_no":      str(row[2]).strip() if row[2] else "",
+            "manufacturer":  str(row[3]).strip() if row[3] else "",
+            "product_group": str(row[4]).strip() if row[4] else None,
         })
     wb.close()
     return products
@@ -267,6 +268,44 @@ def write_result(monthly_path: str, date_str: str, row_num: int, distributor_dat
 
     wb.save(monthly_path)
     wb.close()
+
+# ── Write result to SQLite ────────────────────────────────────────────────────
+_DB_PATH = "/opt/openclaw/data/analytics/prices.db"
+
+_DIST_DB_NAME = {
+    "TD Synnex UK": "TD Synnex",
+    "VIP":          "VIP",
+    "Westcoast":    "Westcoast",
+    "Target":       "Target",
+    "M2M Direct":   "M2M Direct",
+}
+
+def write_to_db(date_str: str, product: dict, distributor_data: dict):
+    """Write scraped distributor prices to SQLite. Never raises — logs on failure."""
+    import sqlite3
+    try:
+        product_id    = product["product_id"]
+        model_no      = product["model_no"]
+        manufacturer  = product["manufacturer"]
+        product_group = product.get("product_group")
+
+        db = sqlite3.connect(_DB_PATH)
+        db.execute("PRAGMA journal_mode=WAL")
+        for dist_name in _DIST_DB_NAME:
+            db_dist = _DIST_DB_NAME[dist_name]
+            price, qty = distributor_data.get(dist_name, (None, None))
+            db.execute(
+                """INSERT OR IGNORE INTO stic_prices
+                   (date, product_id, model_no, manufacturer, product_group,
+                    distributor, price, qty)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (date_str, product_id, model_no, manufacturer, product_group,
+                 db_dist, price, qty),
+            )
+        db.commit()
+        db.close()
+    except Exception as e:
+        log(f"  DB write error (non-fatal): {e}")
 
 # ── Browser: login ────────────────────────────────────────────────────────────
 def login(page, username: str, password: str) -> bool:
@@ -677,8 +716,9 @@ def run(start: int, end: int, date_str: str, is_final: bool = False):
                 time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
                 continue
 
-            # Write to Excel
+            # Write to Excel and SQLite
             write_result(monthly_path, date_str, row_num, dist_data)
+            write_to_db(date_str, product, dist_data)
 
             completed.add(str(row_num))
             save_progress(date_str, completed)
