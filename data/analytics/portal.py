@@ -787,8 +787,9 @@ def stic_report(name):
         return jsonify([])
     prev = prev_date("stic_prices", latest)
 
-    STOCK_SUM = "SUM(COALESCE(qty,0))"
-    PRICE_MIN = "MIN(CASE WHEN price>0 THEN price END)"
+    STOCK_SUM  = "SUM(COALESCE(qty,0))"
+    PRICE_MIN  = "MIN(CASE WHEN price>0 THEN price END)"
+    PRICE_FLOOR = "MIN(CASE WHEN price>0 AND qty>0 THEN price END)"
 
     if name == "no_channel_stock":
         cutoff_date = qry_one(
@@ -796,7 +797,7 @@ def stic_report(name):
         )["d"]
         rows = qry(
             f"""SELECT product_id, model_no, manufacturer,
-                   {PRICE_MIN} AS min_price, {STOCK_SUM} AS total_stock,
+                   {PRICE_FLOOR} AS min_price, {STOCK_SUM} AS total_stock,
                    MAX(CASE WHEN distributor='VIP' THEN price END) AS vip_price
                 FROM stic_prices
                 WHERE date >= ?
@@ -812,7 +813,7 @@ def stic_report(name):
         rows = qry(
             f"""SELECT t.product_id, t.model_no, t.manufacturer,
                    SUM(t.qty) AS total_stock,
-                   MIN(CASE WHEN t.price>0 THEN t.price END) AS min_price,
+                   MIN(CASE WHEN t.price>0 AND t.qty>0 THEN t.price END) AS min_price,
                    MAX(CASE WHEN t.distributor='VIP' THEN t.price END) AS vip_price
                 FROM stic_prices t
                 WHERE t.date = ?
@@ -828,7 +829,7 @@ def stic_report(name):
     elif name == "single_distributor":
         rows = qry(
             f"""SELECT product_id, model_no, manufacturer,
-                   {PRICE_MIN} AS min_price, {STOCK_SUM} AS total_stock,
+                   {PRICE_FLOOR} AS min_price, {STOCK_SUM} AS total_stock,
                    MAX(CASE WHEN distributor='VIP' THEN price END) AS vip_price
                 FROM stic_prices WHERE date=?
                 GROUP BY product_id, model_no, manufacturer
@@ -846,7 +847,7 @@ def stic_report(name):
         rows = qry(
             f"""SELECT t.product_id, t.model_no, t.manufacturer,
                    SUM(t.qty) AS total_stock,
-                   MIN(CASE WHEN t.price>0 THEN t.price END) AS min_price,
+                   MIN(CASE WHEN t.price>0 AND t.qty>0 THEN t.price END) AS min_price,
                    MAX(CASE WHEN t.distributor='VIP' THEN t.price END) AS vip_price
                 FROM stic_prices t
                 WHERE t.date = ?
@@ -864,7 +865,7 @@ def stic_report(name):
         rows = qry(
             f"""SELECT a.product_id, a.model_no, a.manufacturer,
                    {STOCK_SUM.replace('qty', 'a.qty')} AS total_stock,
-                   MIN(CASE WHEN a.price>0 THEN a.price END) AS min_price,
+                   MIN(CASE WHEN a.price>0 AND a.qty>0 THEN a.price END) AS min_price,
                    MAX(CASE WHEN a.distributor='VIP' THEN a.price END) AS vip_price
                 FROM stic_prices a
                 WHERE a.date=?
@@ -872,7 +873,7 @@ def stic_report(name):
                 HAVING MAX(CASE WHEN a.distributor='VIP' AND a.qty>0 THEN 1 ELSE 0 END) = 1
                    AND MAX(CASE WHEN a.distributor='VIP' THEN a.price END) IS NOT NULL
                    AND MAX(CASE WHEN a.distributor='VIP' THEN a.price END)
-                       > MIN(CASE WHEN a.price>0 THEN a.price END)
+                       > MIN(CASE WHEN a.price>0 AND a.qty>0 THEN a.price END)
                 ORDER BY MAX(CASE WHEN a.distributor='VIP' THEN COALESCE(a.qty,0) END) DESC
                 LIMIT 200""",
             (latest,)
@@ -885,7 +886,7 @@ def stic_report(name):
         rows = qry(
             f"""SELECT a.product_id, a.model_no, a.manufacturer,
                    {STOCK_SUM.replace('qty', 'a.qty')} AS total_stock,
-                   MIN(CASE WHEN a.price>0 THEN a.price END) AS min_price,
+                   MIN(CASE WHEN a.price>0 AND a.qty>0 THEN a.price END) AS min_price,
                    MAX(CASE WHEN a.distributor='VIP' THEN a.price END) AS vip_price
                 FROM stic_prices a
                 WHERE a.date=?
@@ -906,7 +907,7 @@ def stic_report(name):
     elif name == "vip_exclusive":
         rows = qry(
             f"""SELECT product_id, model_no, manufacturer,
-                   {PRICE_MIN} AS min_price,
+                   {PRICE_FLOOR} AS min_price,
                    SUM(CASE WHEN distributor='VIP' THEN COALESCE(qty,0) ELSE 0 END) AS total_stock,
                    MAX(CASE WHEN distributor='VIP' THEN price END) AS vip_price
                 FROM stic_prices WHERE date=?
@@ -920,14 +921,16 @@ def stic_report(name):
     elif name == "vip_price_gap":
         rows = qry(
             f"""SELECT v.product_id, v.model_no, v.manufacturer,
-                   v.price AS vip_price, f.min_price AS floor_price,
-                   (v.price - f.min_price) AS gap
+                   v.price AS vip_price, f.floor_price AS floor_price,
+                   (v.price - f.floor_price) AS gap
                 FROM stic_prices v
-                JOIN (SELECT product_id, {PRICE_MIN} AS min_price FROM stic_prices WHERE date=? GROUP BY product_id) f
+                JOIN (SELECT product_id,
+                             MIN(CASE WHEN price>0 AND qty>0 THEN price END) AS floor_price
+                      FROM stic_prices WHERE date=? GROUP BY product_id) f
                   ON f.product_id = v.product_id
                 WHERE v.date=? AND v.distributor='VIP' AND v.qty>0
-                  AND v.price IS NOT NULL AND f.min_price IS NOT NULL
-                  AND v.price > f.min_price
+                  AND v.price IS NOT NULL AND f.floor_price IS NOT NULL
+                  AND v.price > f.floor_price
                 ORDER BY gap DESC LIMIT 100""",
             (latest, latest)
         )
