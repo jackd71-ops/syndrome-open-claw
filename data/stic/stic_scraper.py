@@ -677,6 +677,22 @@ def search_and_scrape(page, model_no: str, cache: dict, product_id: str = None, 
         return None
 
 # ── OneDrive sync ────────────────────────────────────────────────────────────
+def sync_template_from_onedrive() -> bool:
+    """Pull the latest master template from OneDrive before each run."""
+    import subprocess
+    log("Syncing master template from OneDrive…")
+    result = subprocess.run(
+        ["rclone", "copy", f"{ONEDRIVE_DEST}/STIC Template.xlsx", str(Path(MASTER_PATH).parent)],
+        capture_output=True, text=True
+    )
+    if result.returncode == 0:
+        log("Master template updated from OneDrive.")
+        return True
+    else:
+        log(f"Template sync WARNING (using local copy): {result.stderr.strip()}")
+        return False
+
+
 def sync_to_onedrive(monthly_path: str) -> bool:
     """Copy this month's STIC Excel file to OneDrive via rclone."""
     import subprocess
@@ -730,6 +746,8 @@ def run(start: int, end: int, date_str: str, is_final: bool = False):
     monthly_path = get_monthly_path()
     cache = load_cache()
     completed = load_progress(date_str)
+
+    sync_template_from_onedrive()
 
     log(f"Starting STIC scrape: products {start}–{end}, date={date_str}")
     log(f"Monthly file: {Path(monthly_path).name}")
