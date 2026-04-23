@@ -244,11 +244,13 @@ def read_products(start, end):
         except (ValueError, TypeError):
             pass
         products.append({
-            "row_num":      row_num,
-            "product_id":   str(row[0]).strip(),
-            "model_no":     str(row[2]).strip() if row[2] else "",
-            "manufacturer": str(row[3]).strip() if row[3] else "",
-            "msrp":         msrp,
+            "row_num":       row_num,
+            "product_id":    str(row[0]).strip(),
+            "description":   str(row[1]).strip() if row[1] else "",
+            "model_no":      str(row[2]).strip() if row[2] else "",
+            "manufacturer":  str(row[3]).strip() if row[3] else "",
+            "product_group": str(row[4]).strip() if row[4] else None,
+            "msrp":          msrp,
         })
     wb.close()
     return products
@@ -587,6 +589,56 @@ def sync_template_from_onedrive():
         log("Template ← OneDrive: OK (pulled if remote was newer)")
     else:
         log(f"Template ← OneDrive FAILED: {r.stderr.strip()} — using local copy")
+
+# ── SQLite DB write ───────────────────────────────────────────────────────────
+_DB_PATH = "/opt/openclaw/data/analytics/prices.db"
+
+_RETAILER_DB_NAME = {
+    "Amazon UK":    "Amazon",
+    "Currys":       "Currys",
+    "Argos":        "Argos",
+    "Scan":         "Scan",
+    "Overclockers": "Overclockers",
+    "Box":          "Box",
+    "CCL Online":   "CCL Online",
+    "AWD-IT":       "AWD-IT",
+    "Very":         "Very",
+}
+
+def write_to_db(date_str, product, retailer_prices_dict):
+    """Write one row per retailer for this product. Never raises — logs on failure."""
+    import sqlite3
+    try:
+        d, m, y = date_str.split("-")
+        iso_date = f"{y}-{m}-{d}"
+
+        product_id    = int(product["product_id"])
+        model_no      = product["model_no"]
+        description   = product.get("description", "")
+        manufacturer  = product["manufacturer"]
+        product_group = product.get("product_group")
+        msrp          = product.get("msrp")
+
+        db = sqlite3.connect(_DB_PATH)
+        db.execute("PRAGMA journal_mode=WAL")
+        for retailer_name, price in retailer_prices_dict.items():
+            db_retailer = _RETAILER_DB_NAME.get(retailer_name, retailer_name)
+            below_msrp = None
+            if price is not None and msrp is not None:
+                below_msrp = 1 if price < msrp else 0
+            db.execute(
+                """INSERT OR IGNORE INTO retailer_prices
+                   (date, product_id, model_no, description, manufacturer,
+                    product_group, msrp, retailer, price, below_msrp)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (iso_date, product_id, model_no, description, manufacturer,
+                 product_group, msrp, db_retailer, price, below_msrp),
+            )
+        db.commit()
+        db.close()
+    except Exception as e:
+        log(f"  DB write error (non-fatal): {e}")
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PRE-FLIGHT URL DISCOVERY
@@ -1870,7 +1922,9 @@ def run(start, end, date_str, notify=False):
             for r in blocked:
                 write_cell(date_str, excel_row, r["col"], None, msrp, status="BLOCKED")
 
-            # Scrape active retailers
+            # Scrape active retailers; collect prices for DB write
+            db_prices = {r["name"]: None for r in RETAILERS}  # all retailers default NULL
+
             for retailer in active:
                 name  = retailer["name"]
                 price, status = scrape_product(page, product, retailer, id_codes)
@@ -1879,6 +1933,7 @@ def run(start, end, date_str, notify=False):
                     below = " ⚠️ BELOW MSRP" if msrp and price < msrp else ""
                     log(f"    [{name}] £{price:.2f}{below}")
                     write_cell(date_str, excel_row, retailer["col"], price, msrp)
+                    db_prices[name] = price
                     found += 1
                 elif status == "OUT_OF_STOCK":
                     log(f"    [{name}] out of stock")
@@ -1894,6 +1949,8 @@ def run(start, end, date_str, notify=False):
                     not_found += 1
 
                 time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
+
+            write_to_db(date_str, product, db_prices)
 
             products_done += 1
             completed.add(str(row_num))

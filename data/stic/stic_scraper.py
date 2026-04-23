@@ -284,6 +284,10 @@ def write_to_db(date_str: str, product: dict, distributor_data: dict):
     """Write scraped distributor prices to SQLite. Never raises — logs on failure."""
     import sqlite3
     try:
+        # Convert DD-MM-YYYY to YYYY-MM-DD for DB consistency
+        d, m, y = date_str.split("-")
+        iso_date = f"{y}-{m}-{d}"
+
         product_id    = product["product_id"]
         model_no      = product["model_no"]
         manufacturer  = product["manufacturer"]
@@ -299,7 +303,7 @@ def write_to_db(date_str: str, product: dict, distributor_data: dict):
                    (date, product_id, model_no, manufacturer, product_group,
                     distributor, price, qty)
                    VALUES (?,?,?,?,?,?,?,?)""",
-                (date_str, product_id, model_no, manufacturer, product_group,
+                (iso_date, product_id, model_no, manufacturer, product_group,
                  db_dist, price, qty),
             )
         db.commit()
