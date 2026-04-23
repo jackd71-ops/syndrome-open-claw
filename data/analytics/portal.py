@@ -63,9 +63,21 @@ _CHIPSET_RE = re.compile(
     r'A[0-9]{3}[A-Z]?|W[0-9]{3}[A-Z]?|TRX[0-9]+|WRX[0-9]+)\b'
 )
 
+_GPU_CHIP_RE = re.compile(r'((?:RTX|RX|GTX|GT)\d{3,4}(?:TI|XT|XTX)?)', re.IGNORECASE)
+_GPU_MEM_RE  = re.compile(r'(?:^|[-])O?(\d+)G(?:D\d)?(?:[-]|$)', re.IGNORECASE)
+
 def extract_chipset(model_no):
     m = _CHIPSET_RE.search(model_no.upper())
     return m.group(1) if m else "Other"
+
+def extract_gpu_chipset(model_no):
+    chip_m = _GPU_CHIP_RE.search(model_no)
+    if not chip_m:
+        return "Other"
+    chip = chip_m.group(1).upper()  # e.g. RTX5060TI, RX9070XT, GT710
+    mem_m = _GPU_MEM_RE.search(model_no)
+    mem = f" {mem_m.group(1)}G" if mem_m else ""
+    return f"{chip}{mem}"
 
 # ── HTML template ─────────────────────────────────────────────────────────────
 
@@ -182,6 +194,10 @@ HTML = r"""<!DOCTYPE html>
   .modal-body strong { color: #0078D4; }
 
   /* Info button */
+  .cg-btn { background:#fff; border:1px solid #C8C6C4; border-radius:2px; padding:4px 12px;
+             font-size:12px; cursor:pointer; color:#323130; }
+  .cg-btn:hover { background:#F3F2F1; }
+  .cg-btn.cg-active { background:#0078D4; color:#fff; border-color:#0078D4; font-weight:600; }
   .info-btn { background: none; border: 1px solid #C8D6E5; border-radius: 50%; width: 20px; height: 20px;
               font-size: 11px; cursor: pointer; color: #0078D4; font-weight: 700; line-height: 18px;
               text-align: center; margin-left: 8px; vertical-align: middle; display: inline-block; }
@@ -266,7 +282,14 @@ HTML = r"""<!DOCTYPE html>
     <!-- Overview -->
     <div class="content-section active" id="stic-overview">
       <div id="stic-kpi" class="kpi-row"><div class="spinner">Loading…</div></div>
-      <div class="section-title">Chipset Daily Overview</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+        <span class="section-title" style="margin-bottom:0">Chipset Daily Overview</span>
+        <div style="display:flex;gap:4px;margin-left:12px">
+          <button id="cg-mbrd"   class="cg-btn cg-active" onclick="switchChipsetGroup('mbrd')">Motherboard</button>
+          <button id="cg-server" class="cg-btn"            onclick="switchChipsetGroup('server')">Server</button>
+          <button id="cg-gpu"    class="cg-btn"            onclick="switchChipsetGroup('gpu')">VGA</button>
+        </div>
+      </div>
       <div class="tbl-wrap" id="stic-chipset-tbl"><div class="spinner">Loading…</div></div>
     </div>
 
@@ -368,7 +391,19 @@ function loadSticOverview() {
     `;
   });
 
-  fetch('/api/stic/chipset-overview').then(r=>r.json()).then(rows => {
+  loadChipsetOverview('mbrd');
+}
+
+function switchChipsetGroup(group) {
+  ['mbrd','server','gpu'].forEach(g => {
+    document.getElementById('cg-'+g).classList.toggle('cg-active', g === group);
+  });
+  loadChipsetOverview(group);
+}
+
+function loadChipsetOverview(group) {
+  document.getElementById('stic-chipset-tbl').innerHTML = '<div class="spinner">Loading…</div>';
+  fetch('/api/stic/chipset-overview?group=' + group).then(r=>r.json()).then(rows => {
     if (!rows.length) { document.getElementById('stic-chipset-tbl').innerHTML = '<p style="color:#A19F9D;padding:20px">No data</p>'; return; }
     const cols = ['Chipset','VIP SKUs','Channel Floor £','VIP Lowest £','VIP vs Floor','Channel Stock'];
     let html = '<table><thead><tr>' + cols.map(c=>`<th>${c}</th>`).join('') + '</tr></thead><tbody>';
@@ -858,14 +893,23 @@ def stic_chipset_overview():
     if not latest:
         return jsonify([])
 
+    group = request.args.get("group", "mbrd")
+    group_filter = {
+        "mbrd":   "product_group = 'PROD_MBRD'",
+        "server": "product_group = 'PROD_MBRDS'",
+        "gpu":    "product_group = 'PROD_VIDEO'",
+    }.get(group, "product_group = 'PROD_MBRD'")
+
     rows = qry(
-        """SELECT product_id, model_no, distributor, price, qty
-           FROM stic_prices WHERE date=?""", (latest,)
+        f"""SELECT product_id, model_no, chipset, distributor, price, qty
+           FROM stic_prices WHERE date=? AND {group_filter}""", (latest,)
     )
+
+    chipset_fn = extract_gpu_chipset if group == "gpu" else extract_chipset
 
     chipset_data = {}
     for r in rows:
-        cs = extract_chipset(r["model_no"])
+        cs = r["chipset"] or chipset_fn(r["model_no"])
         if cs not in chipset_data:
             chipset_data[cs] = {"vip_skus": set(), "floor_prices": [], "vip_prices": [], "stock": 0}
         d = chipset_data[cs]

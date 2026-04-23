@@ -164,6 +164,9 @@ def read_products(start: int, end: int) -> list:
             continue
         if row_num > end:
             break
+        eol = row[7] if len(row) > 7 else None
+        if eol:
+            continue  # skip end-of-life products
         products.append({
             "row_num":       row_num,
             "product_id":    row[0],
@@ -171,6 +174,8 @@ def read_products(start: int, end: int) -> list:
             "model_no":      str(row[2]).strip() if row[2] else "",
             "manufacturer":  str(row[3]).strip() if row[3] else "",
             "product_group": str(row[4]).strip() if row[4] else None,
+            "chipset":       str(row[5]).strip() if len(row) > 5 and row[5] else None,
+            "ean":           str(row[6]).strip() if len(row) > 6 and row[6] else None,
         })
     wb.close()
     return products
@@ -191,15 +196,15 @@ def ensure_dated_sheet(monthly_path: str, date_str: str):
     new_ws = wb.copy_worksheet(master)
     new_ws.title = date_str
 
-    # Clear price/qty columns (G onwards), keep product info (A-E)
+    # Clear price/qty columns (J onwards), keep product info (A-H) and spacer (I)
     for row in new_ws.iter_rows(min_row=3):
         for cell in row:
-            if cell.column >= 7:
+            if cell.column >= 10:
                 cell.value = None
 
-    # Ensure column Q header = "Total Stock"
+    # Ensure column T header = "Total Stock"
     for r in (1, 2):
-        cell = new_ws.cell(row=r, column=17)
+        cell = new_ws.cell(row=r, column=20)
         if not cell.value:
             cell.value = "Total Stock"
 
@@ -220,11 +225,11 @@ def write_result(monthly_path: str, date_str: str, row_num: int, distributor_dat
     # K=Westcoast Price, L=Westcoast Qty, M=Target Price, N=Target Qty,
     # O=M2M Price, P=M2M Qty
     col_map = {
-        "TD Synnex UK": (7, 8),    # G, H
-        "VIP":          (9, 10),   # I, J
-        "Westcoast":    (11, 12),  # K, L
-        "Target":       (13, 14),  # M, N
-        "M2M Direct":   (15, 16),  # O, P
+        "TD Synnex UK": (10, 11),  # J, K
+        "VIP":          (12, 13),  # L, M
+        "Westcoast":    (14, 15),  # N, O
+        "Target":       (16, 17),  # P, Q
+        "M2M Direct":   (18, 19),  # R, S
     }
 
     if status == "FAILED_MATCH":
@@ -260,11 +265,11 @@ def write_result(monthly_path: str, date_str: str, row_num: int, distributor_dat
                 cheapest_dist = min(compare, key=compare.get)
                 ws.cell(row=excel_row, column=price_cells[cheapest_dist]).fill = GREEN_FILL
 
-        # Column Q (17): total stock across all monitored distributors
+        # Column T (20): total stock across all monitored distributors
         qty_cols = [qty_col for _, (_, qty_col) in col_map.items()]
         qty_letters = [get_column_letter(c) for c in qty_cols]
         sum_formula = "=" + "+".join(f"IFERROR({l}{excel_row},0)" for l in qty_letters)
-        ws.cell(row=excel_row, column=17).value = sum_formula
+        ws.cell(row=excel_row, column=20).value = sum_formula
 
     wb.save(monthly_path)
     wb.close()
@@ -325,6 +330,7 @@ def write_to_db(date_str: str, product: dict, distributor_data: dict):
         model_no      = product["model_no"]
         manufacturer  = product["manufacturer"]
         product_group = product.get("product_group")
+        chipset       = product.get("chipset")
 
         db = sqlite3.connect(_DB_PATH)
         db.execute("PRAGMA journal_mode=WAL")
@@ -334,10 +340,10 @@ def write_to_db(date_str: str, product: dict, distributor_data: dict):
             db.execute(
                 """INSERT OR IGNORE INTO stic_prices
                    (date, product_id, model_no, manufacturer, product_group,
-                    distributor, price, qty)
-                   VALUES (?,?,?,?,?,?,?,?)""",
+                    chipset, distributor, price, qty)
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
                 (iso_date, product_id, model_no, manufacturer, product_group,
-                 db_dist, price, qty),
+                 chipset, db_dist, price, qty),
             )
         db.commit()
         db.close()
