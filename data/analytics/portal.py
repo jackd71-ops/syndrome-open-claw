@@ -273,6 +273,15 @@ HTML = r"""<!DOCTYPE html>
 </div>
 
 <script>
+// ── Date formatting ───────────────────────────────────────────────────────────
+function fmtDate(d) {
+  if (!d || d === '—') return d;
+  // "2026-04-22" → "22/04/26"
+  const parts = d.split('-');
+  if (parts.length !== 3) return d;
+  return `${parts[2]}/${parts[1]}/${parts[0].slice(2)}`;
+}
+
 // ── Tab switching ─────────────────────────────────────────────────────────────
 let currentTab = 'stic';
 function switchTab(tab) {
@@ -307,7 +316,7 @@ function loadSticOverview() {
       <div class="kpi-card"><div class="label">Channel Stock Today</div><div class="value">${data.channel_stock_today.toLocaleString()}</div><div class="sub">units across all distributors</div></div>
       <div class="kpi-card"><div class="label">SKUs In Stock</div><div class="value">${data.skus_in_stock}</div><div class="sub">of ${data.total_skus} tracked</div></div>
       <div class="kpi-card"><div class="label">SKUs No Stock</div><div class="value">${data.skus_no_stock}</div><div class="sub">zero channel inventory</div></div>
-      <div class="kpi-card"><div class="label">Last Scraped</div><div class="value" style="font-size:16px">${data.latest_date}</div><div class="sub">${data.dates_tracked} dates tracked</div></div>
+      <div class="kpi-card"><div class="label">Last Scraped</div><div class="value" style="font-size:16px">${fmtDate(data.latest_date)}</div><div class="sub">${data.dates_tracked} dates tracked</div></div>
     `;
   });
 
@@ -340,12 +349,13 @@ function doSticSearch() {
   document.getElementById('stic-search-results').innerHTML = '<div class="spinner">Searching…</div>';
   fetch('/api/stic/search?q=' + encodeURIComponent(q)).then(r=>r.json()).then(rows => {
     if (!rows.length) { document.getElementById('stic-search-results').innerHTML = '<p style="color:#A19F9D;padding:20px">No results</p>'; return; }
-    let html = '<div class="section-title">Results (' + rows.length + ')</div><div class="tbl-wrap"><table><thead><tr><th>Product ID</th><th>Model</th><th>Manufacturer</th><th>Channel Stock</th><th>Lowest Price</th></tr></thead><tbody>';
+    let html = '<div class="section-title">Results (' + rows.length + ')</div><div class="tbl-wrap"><table><thead><tr><th>Product ID</th><th>Model</th><th>Manufacturer</th><th>Channel Stock</th><th>Floor £</th><th>VIP £</th></tr></thead><tbody>';
     rows.forEach(r => {
       html += `<tr class="clickable" onclick="loadSticSku(${r.product_id},'search')">
         <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer}</td>
         <td>${(r.total_stock||0).toLocaleString()}</td>
         <td>${r.min_price ? '£'+r.min_price.toFixed(2) : '—'}</td>
+        <td>${vipCell(r.vip_price, r.min_price)}</td>
       </tr>`;
     });
     html += '</tbody></table></div>';
@@ -365,11 +375,22 @@ function loadSticSku(productId, backSection) {
   });
 }
 
+// ── VIP price cell helper ─────────────────────────────────────────────────────
+function vipCell(vip, floor) {
+  if (vip == null) return '—';
+  const fmt = '£' + vip.toFixed(2);
+  if (floor == null) return fmt;
+  if (vip > floor) return `<span class="badge badge-red">${fmt}</span>`;
+  if (vip < floor) return `<span class="badge badge-green">${fmt}</span>`;
+  return `<span class="badge badge-blue">${fmt}</span>`;
+}
+
 function renderSticSku(data) {
   const el = document.getElementById('stic-sku-content');
   const { info, snapshot, price_history, stock_history, cheapest_history } = data;
 
-  let html = `<h3 style="margin-bottom:8px">${info.manufacturer} ${info.model_no}</h3>
+  const desc = info.description ? `<span style="color:#323130"> — ${info.description}</span>` : '';
+  let html = `<h3 style="margin-bottom:8px">${info.manufacturer} ${info.model_no}${desc}</h3>
     <p style="color:#605E5C;margin-bottom:16px">Product ID: ${info.product_id} | Group: ${info.product_group||'—'}</p>`;
 
   // Snapshot table
@@ -382,7 +403,7 @@ function renderSticSku(data) {
   // Cheapest history table
   html += '<div class="section-title">Cheapest Price History</div><div class="tbl-wrap"><table><thead><tr><th>Date</th><th>Distributor</th><th>Price</th></tr></thead><tbody>';
   cheapest_history.forEach(r => {
-    html += `<tr><td>${r.date}</td><td>${r.distributor}</td><td>${r.price ? '£'+r.price.toFixed(2) : '—'}</td></tr>`;
+    html += `<tr><td>${fmtDate(r.date)}</td><td>${r.distributor}</td><td>${r.price ? '£'+r.price.toFixed(2) : '—'}</td></tr>`;
   });
   html += '</tbody></table></div>';
 
@@ -420,8 +441,9 @@ function renderSticSku(data) {
   </div>`;
   el.innerHTML += chartHtml;
 
+  const fmtDates = dates.map(fmtDate);
   const opts = (type, datasets, stacked) => ({
-    type, data: { labels: dates, datasets },
+    type, data: { labels: fmtDates, datasets },
     options: { responsive:true, maintainAspectRatio:true, plugins:{legend:{labels:{font:{size:10}}}},
                 scales: { x:{ticks:{font:{size:10}}}, y:{stacked: stacked||false, ticks:{font:{size:10}}} } }
   });
@@ -498,11 +520,12 @@ function renderReport(name, rows) {
         <td>${badge}</td></tr>`;
     };
   } else {
-    cols = ['Product ID','Model','Manufacturer','Channel Stock','Lowest Price'];
+    cols = ['Product ID','Model','Manufacturer','Channel Stock','Floor £','VIP £'];
     rowFn = r => `<tr class="clickable" onclick="loadSticSku(${r.product_id},'report')">
       <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer}</td>
       <td>${(r.total_stock||0).toLocaleString()}</td>
       <td>${r.min_price ? '£'+r.min_price.toFixed(2) : '—'}</td>
+      <td>${vipCell(r.vip_price, r.min_price)}</td>
     </tr>`;
   }
 
@@ -523,7 +546,7 @@ function loadRetailerKpi() {
       <div class="kpi-card"><div class="label">SKUs Tracked</div><div class="value">${data.total_skus}</div></div>
       <div class="kpi-card"><div class="label">Below MSRP Today</div><div class="value">${data.below_msrp_today}</div><div class="sub">prices below MSRP</div></div>
       <div class="kpi-card"><div class="label">Prices Scraped Today</div><div class="value">${data.prices_today}</div></div>
-      <div class="kpi-card"><div class="label">Last Scraped</div><div class="value" style="font-size:16px">${data.latest_date}</div></div>
+      <div class="kpi-card"><div class="label">Last Scraped</div><div class="value" style="font-size:16px">${fmtDate(data.latest_date)}</div></div>
     `;
   });
 }
@@ -594,7 +617,7 @@ function renderRetSku(data) {
   el.innerHTML += `<div class="chart-box" style="margin-bottom:20px"><h4>Price Trend by Retailer</h4><canvas id="ret-chart-price" style="max-height:220px"></canvas></div>`;
   new Chart(document.getElementById('ret-chart-price'), {
     type: 'line',
-    data: { labels: dates, datasets },
+    data: { labels: dates.map(fmtDate), datasets },
     options: { responsive:true, maintainAspectRatio:true,
                plugins:{legend:{labels:{font:{size:10}}}},
                scales:{x:{ticks:{font:{size:10}}}, y:{ticks:{font:{size:10}}}} }
@@ -696,9 +719,10 @@ def stic_search():
 
     like = f"%{q}%"
     rows = qry(
-        """SELECT DISTINCT s.product_id, s.model_no, s.manufacturer,
+        """SELECT s.product_id, s.model_no, s.manufacturer,
                SUM(s.qty) AS total_stock,
-               MIN(CASE WHEN s.price > 0 THEN s.price END) AS min_price
+               MIN(CASE WHEN s.price > 0 THEN s.price END) AS min_price,
+               MAX(CASE WHEN s.distributor='VIP' THEN s.price END) AS vip_price
            FROM stic_prices s
            WHERE s.date=?
              AND (CAST(s.product_id AS TEXT) LIKE ? OR s.model_no LIKE ? OR s.manufacturer LIKE ?)
@@ -717,7 +741,11 @@ def stic_sku(product_id):
         return jsonify({})
 
     info = qry_one(
-        "SELECT product_id, model_no, manufacturer, product_group FROM stic_prices WHERE product_id=? LIMIT 1",
+        """SELECT s.product_id, s.model_no, s.manufacturer, s.product_group,
+               (SELECT r.description FROM retailer_prices r
+                WHERE r.product_id=s.product_id AND r.description IS NOT NULL AND r.description != ''
+                LIMIT 1) AS description
+           FROM stic_prices s WHERE s.product_id=? LIMIT 1""",
         (product_id,)
     ) or {}
 
@@ -768,7 +796,8 @@ def stic_report(name):
         )["d"]
         rows = qry(
             f"""SELECT product_id, model_no, manufacturer,
-                   {PRICE_MIN} AS min_price, {STOCK_SUM} AS total_stock
+                   {PRICE_MIN} AS min_price, {STOCK_SUM} AS total_stock,
+                   MAX(CASE WHEN distributor='VIP' THEN price END) AS vip_price
                 FROM stic_prices
                 WHERE date >= ?
                 GROUP BY product_id, model_no, manufacturer
@@ -782,7 +811,9 @@ def stic_report(name):
             return jsonify([])
         rows = qry(
             f"""SELECT t.product_id, t.model_no, t.manufacturer,
-                   SUM(t.qty) AS total_stock, MIN(CASE WHEN t.price>0 THEN t.price END) AS min_price
+                   SUM(t.qty) AS total_stock,
+                   MIN(CASE WHEN t.price>0 THEN t.price END) AS min_price,
+                   MAX(CASE WHEN t.distributor='VIP' THEN t.price END) AS vip_price
                 FROM stic_prices t
                 WHERE t.date = ?
                 GROUP BY t.product_id, t.model_no, t.manufacturer
@@ -797,7 +828,8 @@ def stic_report(name):
     elif name == "single_distributor":
         rows = qry(
             f"""SELECT product_id, model_no, manufacturer,
-                   {PRICE_MIN} AS min_price, {STOCK_SUM} AS total_stock
+                   {PRICE_MIN} AS min_price, {STOCK_SUM} AS total_stock,
+                   MAX(CASE WHEN distributor='VIP' THEN price END) AS vip_price
                 FROM stic_prices WHERE date=?
                 GROUP BY product_id, model_no, manufacturer
                 HAVING COUNT(CASE WHEN qty>0 THEN 1 END) = 1
@@ -813,7 +845,9 @@ def stic_report(name):
             return jsonify([])
         rows = qry(
             f"""SELECT t.product_id, t.model_no, t.manufacturer,
-                   SUM(t.qty) AS total_stock, MIN(CASE WHEN t.price>0 THEN t.price END) AS min_price
+                   SUM(t.qty) AS total_stock,
+                   MIN(CASE WHEN t.price>0 THEN t.price END) AS min_price,
+                   MAX(CASE WHEN t.distributor='VIP' THEN t.price END) AS vip_price
                 FROM stic_prices t
                 WHERE t.date = ?
                 GROUP BY t.product_id, t.model_no, t.manufacturer
@@ -866,7 +900,8 @@ def stic_report(name):
         rows = qry(
             f"""SELECT product_id, model_no, manufacturer,
                    {PRICE_MIN} AS min_price,
-                   SUM(CASE WHEN distributor='VIP' THEN COALESCE(qty,0) ELSE 0 END) AS total_stock
+                   SUM(CASE WHEN distributor='VIP' THEN COALESCE(qty,0) ELSE 0 END) AS total_stock,
+                   MAX(CASE WHEN distributor='VIP' THEN price END) AS vip_price
                 FROM stic_prices WHERE date=?
                 GROUP BY product_id, model_no, manufacturer
                 HAVING COUNT(CASE WHEN qty>0 THEN 1 END) = 1
@@ -892,8 +927,8 @@ def stic_report(name):
 
     elif name == "never_stocked":
         rows = qry(
-            f"""SELECT DISTINCT product_id, model_no, manufacturer,
-                   0 AS total_stock, NULL AS min_price
+            f"""SELECT product_id, model_no, manufacturer,
+                   0 AS total_stock, NULL AS min_price, NULL AS vip_price
                 FROM stic_prices
                 GROUP BY product_id, model_no, manufacturer
                 HAVING MAX(COALESCE(qty,0)) = 0 AND MAX(price) IS NULL
