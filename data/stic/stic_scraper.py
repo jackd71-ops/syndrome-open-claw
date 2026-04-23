@@ -2,7 +2,7 @@
 """
 STIC (Stock In The Channel) price scraper for OpenClaw.
 Searches each product by model number, scrapes distributor prices/stock,
-writes results to a dated sheet in the XLSX template.
+writes results directly to SQLite DB (no Excel output).
 
 Usage:
   python3 stic_scraper.py --batch 1   # products 1-260 (9:30am run)
@@ -20,24 +20,14 @@ from datetime import datetime
 from pathlib import Path
 
 from openpyxl import load_workbook
-from openpyxl.utils import get_column_letter
-from openpyxl.styles import PatternFill, numbers
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
-GBP_FORMAT  = '£#,##0.00'
-GREEN_FILL  = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-
 # ── Paths ────────────────────────────────────────────────────────────────────
-MASTER_PATH   = "/opt/openclaw/data/general/STIC Template.xlsx"   # never written to
+MASTER_PATH   = "/opt/openclaw/data/general/STIC Template.xlsx"
 CACHE_PATH    = "/opt/openclaw/data/stic/url_cache.json"
 PROGRESS_PATH = "/opt/openclaw/data/stic/progress_{date}.json"
 SESSION_PATH  = "/opt/openclaw/data/stic/session.json"
 LOG_PATH      = "/opt/openclaw/logs/stic.log"
-
-def get_monthly_path() -> str:
-    """Returns e.g. /opt/openclaw/data/general/STIC_2026-04.xlsx"""
-    month = datetime.now().strftime("%Y-%m")
-    return f"/opt/openclaw/data/general/STIC_{month}.xlsx"
 
 # ── STIC config ───────────────────────────────────────────────────────────────
 STIC_BASE     = "https://www.stockinthechannel.co.uk"
@@ -117,14 +107,6 @@ def save_progress(date_str: str, completed: set):
         json.dump(list(completed), f)
 
 # ── Read products from template ───────────────────────────────────────────────
-def ensure_monthly_file(monthly_path: str):
-    """Create this month's working file from the master template if it doesn't exist."""
-    import shutil
-    if Path(monthly_path).exists():
-        return
-    shutil.copy2(MASTER_PATH, monthly_path)
-    log(f"Created new monthly file: {Path(monthly_path).name}")
-
 def count_products() -> int:
     """Count total products in master template."""
     wb = load_workbook(MASTER_PATH, read_only=True)
@@ -179,100 +161,6 @@ def read_products(start: int, end: int) -> list:
         })
     wb.close()
     return products
-
-# ── Ensure dated sheet exists ─────────────────────────────────────────────────
-def ensure_dated_sheet(monthly_path: str, date_str: str):
-    """Add a dated sheet to this month's file if it doesn't exist yet."""
-    from copy import copy
-
-    wb = load_workbook(monthly_path)
-    master = wb.worksheets[0]
-
-    if date_str in wb.sheetnames:
-        log(f"Sheet '{date_str}' already exists.")
-        wb.close()
-        return
-
-    new_ws = wb.copy_worksheet(master)
-    new_ws.title = date_str
-
-    # Clear price/qty columns (J onwards), keep product info (A-H) and spacer (I)
-    for row in new_ws.iter_rows(min_row=3):
-        for cell in row:
-            if cell.column >= 10:
-                cell.value = None
-
-    # Ensure column T header = "Total Stock"
-    for r in (1, 2):
-        cell = new_ws.cell(row=r, column=20)
-        if not cell.value:
-            cell.value = "Total Stock"
-
-    wb.save(monthly_path)
-    wb.close()
-    log(f"Created sheet '{date_str}' in {Path(monthly_path).name}.")
-
-# ── Write result to sheet ─────────────────────────────────────────────────────
-def write_result(monthly_path: str, date_str: str, row_num: int, distributor_data: dict, status: str = None):
-    """Write scraped data to the dated sheet. Row num is 1-indexed product row."""
-    wb = load_workbook(monthly_path)
-    ws = wb[date_str]
-
-    # Excel row = row_num + 2 (2 header rows)
-    excel_row = row_num + 2
-
-    # Column mapping: G=TD Synnex Price, H=TD Synnex Qty, I=VIP Price, J=VIP Qty,
-    # K=Westcoast Price, L=Westcoast Qty, M=Target Price, N=Target Qty,
-    # O=M2M Price, P=M2M Qty
-    col_map = {
-        "TD Synnex UK": (10, 11),  # J, K
-        "VIP":          (12, 13),  # L, M
-        "Westcoast":    (14, 15),  # N, O
-        "Target":       (16, 17),  # P, Q
-        "M2M Direct":   (18, 19),  # R, S
-    }
-
-    if status == "FAILED_MATCH":
-        # Mark column A with failed match indicator
-        ws.cell(row=excel_row, column=1).value = f"FAILED_MATCH: {ws.cell(row=excel_row, column=1).value}"
-    elif status == "NOT_LISTED":
-        pass  # Leave blank — distributor doesn't list this product
-    else:
-        price_cells = {}  # dist_name -> cell column, for green highlight
-        for dist_name, (price_col, qty_col) in col_map.items():
-            if dist_name in distributor_data:
-                price, qty = distributor_data[dist_name]
-                if price is not None:
-                    c = ws.cell(row=excel_row, column=price_col)
-                    c.value = price
-                    c.number_format = GBP_FORMAT
-                    price_cells[dist_name] = price_col
-                if qty is not None:
-                    ws.cell(row=excel_row, column=qty_col).value = qty
-
-        # Green highlight on cheapest price cell
-        if price_cells:
-            prices_with_stock = {
-                d: distributor_data[d][0]
-                for d in price_cells
-                if distributor_data[d][0] is not None and (distributor_data[d][1] or 0) > 0
-            }
-            # Fall back to all prices if none have stock
-            compare = prices_with_stock if prices_with_stock else {
-                d: distributor_data[d][0] for d in price_cells if distributor_data[d][0] is not None
-            }
-            if compare:
-                cheapest_dist = min(compare, key=compare.get)
-                ws.cell(row=excel_row, column=price_cells[cheapest_dist]).fill = GREEN_FILL
-
-        # Column T (20): total stock across all monitored distributors
-        qty_cols = [qty_col for _, (_, qty_col) in col_map.items()]
-        qty_letters = [get_column_letter(c) for c in qty_cols]
-        sum_formula = "=" + "+".join(f"IFERROR({l}{excel_row},0)" for l in qty_letters)
-        ws.cell(row=excel_row, column=20).value = sum_formula
-
-    wb.save(monthly_path)
-    wb.close()
 
 # ── Data bleed detection ─────────────────────────────────────────────────────
 def check_data_bleed(iso_date: str) -> list[dict]:
@@ -693,21 +581,6 @@ def sync_template_from_onedrive() -> bool:
         return False
 
 
-def sync_to_onedrive(monthly_path: str) -> bool:
-    """Copy this month's STIC Excel file to OneDrive via rclone."""
-    import subprocess
-    log(f"Syncing {Path(monthly_path).name} → {ONEDRIVE_DEST}/")
-    result = subprocess.run(
-        ["rclone", "copy", monthly_path, ONEDRIVE_DEST, "--progress"],
-        capture_output=True, text=True
-    )
-    if result.returncode == 0:
-        log("OneDrive sync complete.")
-        return True
-    else:
-        log(f"OneDrive sync FAILED: {result.stderr.strip()}")
-        return False
-
 # ── Telegram notification ─────────────────────────────────────────────────────
 def send_telegram(message: str):
     import requests as req
@@ -743,19 +616,13 @@ def run(start: int, end: int, date_str: str, is_final: bool = False):
         log("ERROR: STIC_USERNAME or STIC_PASSWORD not found in secrets.json")
         sys.exit(1)
 
-    monthly_path = get_monthly_path()
     cache = load_cache()
     completed = load_progress(date_str)
 
     sync_template_from_onedrive()
 
     log(f"Starting STIC scrape: products {start}–{end}, date={date_str}")
-    log(f"Monthly file: {Path(monthly_path).name}")
     log(f"URL cache: {len(cache)} entries. Already completed today: {len(completed)}")
-
-    # Ensure this month's file and today's sheet exist
-    ensure_monthly_file(monthly_path)
-    ensure_dated_sheet(monthly_path, date_str)
 
     products = read_products(start, end)
     log(f"Loaded {len(products)} products for this batch.")
@@ -822,15 +689,13 @@ def run(start: int, end: int, date_str: str, is_final: bool = False):
 
             if not dist_data and model_no not in cache:
                 log(f"  FAILED MATCH — no result found for: {model_no}")
-                write_result(monthly_path, date_str, row_num, {}, status="FAILED_MATCH")
                 completed.add(str(row_num))
                 save_progress(date_str, completed)
                 save_cache(cache)
                 time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
                 continue
 
-            # Write to Excel and SQLite
-            write_result(monthly_path, date_str, row_num, dist_data)
+            # Write to DB
             write_to_db(date_str, product, dist_data)
 
             completed.add(str(row_num))
@@ -856,13 +721,10 @@ def run(start: int, end: int, date_str: str, is_final: bool = False):
     failed = [p["model_no"] for p in products if str(p["row_num"]) not in completed]
     log(f"\nBatch complete. {len(completed)} products done today. {len(failed)} skipped/failed.")
 
-    # Sync to OneDrive after every batch
-    sync_ok = sync_to_onedrive(monthly_path)
-
     # Telegram notification — only on final batch
     if is_final:
         total_today = len(load_progress(date_str))
-        status_icon = "✅" if sync_ok else "⚠️"
+        status_icon = "✅"
 
         # Convert DD-MM-YYYY to YYYY-MM-DD for DB query
         d, m, y = date_str.split("-")
@@ -886,7 +748,6 @@ def run(start: int, end: int, date_str: str, is_final: bool = False):
             f"{status_icon} <b>STIC scrape complete</b> — {date_str}\n\n"
             f"✔️ Total scraped today: {total_today} products\n"
             f"❌ This batch failed/skipped: {len(failed)}\n"
-            f"📁 {Path(monthly_path).name} → OneDrive {'synced' if sync_ok else 'SYNC FAILED'}\n"
             f"🕐 Finished: {datetime.now().strftime('%H:%M')}"
             f"{bleed_section}"
         )
