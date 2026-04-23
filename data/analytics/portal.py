@@ -34,8 +34,21 @@ def qry_one(sql, params=()):
     return dict(row) if row else None
 
 def latest_date(table="stic_prices"):
-    r = qry_one(f"SELECT MAX(date) AS d FROM {table}")
-    return r["d"] if r else None
+    from datetime import datetime, timedelta
+    import zoneinfo
+    today = datetime.now(zoneinfo.ZoneInfo("Europe/London")).date().isoformat()
+    yesterday = (datetime.now(zoneinfo.ZoneInfo("Europe/London")).date() - timedelta(days=1)).isoformat()
+    db = get_db()
+    counts = {r["d"]: r["c"] for r in db.execute(
+        f"SELECT date AS d, COUNT(*) AS c FROM {table} WHERE date IN (?,?) GROUP BY date",
+        (today, yesterday)
+    ).fetchall()}
+    db.close()
+    today_c = counts.get(today, 0)
+    yest_c  = counts.get(yesterday, 0)
+    if yest_c and today_c >= yest_c * 0.9:
+        return today
+    return yesterday if yest_c else (today if today_c else None)
 
 def prev_date(table, current):
     r = qry_one(
@@ -61,7 +74,7 @@ HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>OpenClaw Sales Portal</title>
+<title>Competition Analysis</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -190,7 +203,7 @@ HTML = r"""<!DOCTYPE html>
 <body>
 
 <div class="tab-bar">
-  <span class="tab-bar-title">OpenClaw</span>
+  <span class="tab-bar-title">Competition Analysis</span>
   <div class="tab active" id="tab-stic" onclick="switchTab('stic')">STIC</div>
   <div class="tab" id="tab-retailer" onclick="switchTab('retailer')">Retailer</div>
 </div>
@@ -384,11 +397,12 @@ function doSticSearch() {
   document.getElementById('stic-search-results').innerHTML = '<div class="spinner">Searching…</div>';
   fetch('/api/stic/search?q=' + encodeURIComponent(q)).then(r=>r.json()).then(rows => {
     if (!rows.length) { document.getElementById('stic-search-results').innerHTML = '<p style="color:#A19F9D;padding:20px">No results</p>'; return; }
-    let html = '<div class="section-title">Results (' + rows.length + ')</div><div class="tbl-wrap"><table><thead><tr><th>Product ID</th><th>Model</th><th>Manufacturer</th><th>Channel Stock</th><th>Floor £</th><th>VIP £</th></tr></thead><tbody>';
+    let html = '<div class="section-title">Results (' + rows.length + ')</div><div class="tbl-wrap"><table><thead><tr><th>Product ID</th><th>Model</th><th>Manufacturer</th><th>Channel Stock</th><th>VIP Stock</th><th>Floor £</th><th>VIP £</th></tr></thead><tbody>';
     rows.forEach(r => {
       html += `<tr class="clickable" onclick="loadSticSku(${r.product_id},'search')">
         <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer}</td>
         <td>${(r.total_stock||0).toLocaleString()}</td>
+        <td>${(r.vip_stock||0).toLocaleString()}</td>
         <td>${r.min_price ? '£'+r.min_price.toFixed(2) : '—'}</td>
         <td>${vipCell(r.vip_price, r.min_price)}</td>
       </tr>`;
@@ -597,17 +611,59 @@ function closeHelp() {
   document.getElementById('info-modal').classList.remove('open');
 }
 
+let _reportCache = { name: null, rows: [] };
+
+function buildReportFilterBar(rows) {
+  const manufacturers  = [...new Set(rows.map(r=>r.manufacturer).filter(Boolean))].sort();
+  const groups         = [...new Set(rows.map(r=>r.product_group).filter(Boolean))].sort();
+  const mOpts  = ['<option value="">All Manufacturers</option>', ...manufacturers.map(m=>`<option>${m}</option>`)].join('');
+  const gOpts  = ['<option value="">All Groups</option>',        ...groups.map(g=>`<option>${g}</option>`)].join('');
+  return `<div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+    <select id="filter-mfr"   onchange="applyReportFilters()" style="padding:6px 10px;border:1px solid #C8C6C4;border-radius:4px;font-size:13px;min-width:180px">${mOpts}</select>
+    <select id="filter-group" onchange="applyReportFilters()" style="padding:6px 10px;border:1px solid #C8C6C4;border-radius:4px;font-size:13px;min-width:180px">${gOpts}</select>
+  </div>`;
+}
+
+function applyReportFilters() {
+  const mfr   = document.getElementById('filter-mfr')?.value   || '';
+  const grp   = document.getElementById('filter-group')?.value || '';
+  const filtered = _reportCache.rows.filter(r =>
+    (!mfr || r.manufacturer   === mfr) &&
+    (!grp || r.product_group  === grp)
+  );
+  renderReportTable(_reportCache.name, filtered);
+}
+
 function renderReport(name, rows) {
+  _reportCache = { name, rows };
   const title = REPORT_TITLES[name] || name;
   if (!rows.length) {
     document.getElementById('stic-report-content').innerHTML =
       `<div class="section-title">${title}</div><p style="color:#A19F9D;padding:20px">No items match this report.</p>`;
     return;
   }
+  renderReportTable(name, rows);
+}
+
+function renderReportTable(name, rows) {
+  const title = REPORT_TITLES[name] || name;
 
   let cols, rowFn;
 
-  if (name === 'vip_price_gap') {
+  if (name === 'vip_out_on_price') {
+    cols = ['Product ID','Model','Manufacturer','Channel Stock','VIP Stock','Floor £','VIP £','Suggested Cost £'];
+    rowFn = r => {
+      const sug = r.min_price ? '£'+(r.min_price*0.96).toFixed(2) : '—';
+      return `<tr class="clickable" onclick="loadSticSku(${r.product_id},'report')">
+        <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer}</td>
+        <td>${(r.total_stock||0).toLocaleString()}</td>
+        <td>${(r.vip_stock||0).toLocaleString()}</td>
+        <td>${r.min_price ? '£'+r.min_price.toFixed(2) : '—'}</td>
+        <td>${vipCell(r.vip_price, r.min_price)}</td>
+        <td style="font-weight:600;color:#107C10">${sug}</td>
+      </tr>`;
+    };
+  } else if (name === 'vip_price_gap') {
     cols = ['Product ID','Model','Manufacturer','VIP £','Floor £','Gap £'];
     rowFn = r => `<tr class="clickable" onclick="loadSticSku(${r.product_id},'report')">
       <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer}</td>
@@ -646,11 +702,19 @@ function renderReport(name, rows) {
     </tr>`;
   }
 
+  const filterBar = (name === 'vip_out_on_price') ? buildReportFilterBar(_reportCache.rows) : '';
+  const savedMfr  = document.getElementById('filter-mfr')?.value   || '';
+  const savedGrp  = document.getElementById('filter-group')?.value || '';
+
   let html = `<div class="section-title">${title} <span style="font-size:12px;font-weight:400;color:#605E5C">(${rows.length} items)</span><button class="info-btn" onclick="showHelp('${name}')" title="How this report works">ⓘ</button></div>
-    <div class="tbl-wrap"><table><thead><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr></thead><tbody>`;
+    ${filterBar}<div class="tbl-wrap"><table><thead><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr></thead><tbody>`;
   rows.forEach(r => { html += rowFn(r); });
   html += '</tbody></table></div>';
   document.getElementById('stic-report-content').innerHTML = html;
+
+  // Restore filter selections after re-render
+  if (savedMfr  && document.getElementById('filter-mfr'))   document.getElementById('filter-mfr').value   = savedMfr;
+  if (savedGrp  && document.getElementById('filter-group')) document.getElementById('filter-group').value = savedGrp;
 }
 
 // ── Retailer KPI ──────────────────────────────────────────────────────────────
@@ -838,6 +902,7 @@ def stic_search():
     rows = qry(
         """SELECT s.product_id, s.model_no, s.manufacturer,
                SUM(s.qty) AS total_stock,
+               MAX(CASE WHEN s.distributor='VIP' THEN COALESCE(s.qty,0) END) AS vip_stock,
                MIN(CASE WHEN s.price > 0 THEN s.price END) AS min_price,
                MAX(CASE WHEN s.distributor='VIP' THEN s.price END) AS vip_price
            FROM stic_prices s
@@ -980,13 +1045,14 @@ def stic_report(name):
 
     elif name == "vip_out_on_price":
         rows = qry(
-            f"""SELECT a.product_id, a.model_no, a.manufacturer,
+            f"""SELECT a.product_id, a.model_no, a.manufacturer, a.product_group,
                    {STOCK_SUM.replace('qty', 'a.qty')} AS total_stock,
+                   MAX(CASE WHEN a.distributor='VIP' THEN COALESCE(a.qty,0) END) AS vip_stock,
                    MIN(CASE WHEN a.price>0 AND a.qty>0 THEN a.price END) AS min_price,
                    MAX(CASE WHEN a.distributor='VIP' THEN a.price END) AS vip_price
                 FROM stic_prices a
                 WHERE a.date=?
-                GROUP BY a.product_id, a.model_no, a.manufacturer
+                GROUP BY a.product_id, a.model_no, a.manufacturer, a.product_group
                 HAVING MAX(CASE WHEN a.distributor='VIP' AND a.qty>0 THEN 1 ELSE 0 END) = 1
                    AND MAX(CASE WHEN a.distributor='VIP' THEN a.price END) IS NOT NULL
                    AND MAX(CASE WHEN a.distributor='VIP' THEN a.price END)

@@ -387,15 +387,39 @@ def search_and_scrape(page, model_no: str, cache: dict, product_id: str = None, 
             return {}
 
         # Find the product card whose SKU matches our model_no, then scrape only that table.
-        # If no exact SKU match found, fall back to the first table on the page.
+        # Falls back to brand match. Never uses first table blindly — returns match_type='none'
+        # if neither check passes, so we write nulls rather than bleed another SKU's data.
         result = page.evaluate("""
-            (modelNo) => {
-                const data = [];
+            ([modelNo, brand]) => {
                 const tables = document.querySelectorAll('table');
-                if (!tables.length) return data;
+                if (!tables.length) return { match_type: 'none', rows: [] };
 
-                // Try to find the table inside the card that has "SKU: {modelNo}"
+                const brandLower = (brand || '').toLowerCase();
+
+                function cardText(table) {
+                    let el = table.parentElement;
+                    for (let i = 0; i < 12; i++) {
+                        if (!el) break;
+                        el = el.parentElement;
+                    }
+                    return '';
+                }
+
+                function getCardRoot(table) {
+                    let el = table.parentElement;
+                    for (let i = 0; i < 12; i++) {
+                        if (!el) break;
+                        const text = el.innerText || '';
+                        if (text.includes('SKU:') || text.includes('Brand:') || text.includes('Manufacturer:')) return el;
+                        el = el.parentElement;
+                    }
+                    return table.parentElement;
+                }
+
                 let targetTable = null;
+                let matchType = 'none';
+
+                // Pass 1: exact SKU match
                 for (const table of tables) {
                     let el = table.parentElement;
                     for (let i = 0; i < 12; i++) {
@@ -403,6 +427,7 @@ def search_and_scrape(page, model_no: str, cache: dict, product_id: str = None, 
                         const text = el.innerText || '';
                         if (text.includes('SKU: ' + modelNo)) {
                             targetTable = table;
+                            matchType = 'sku';
                             break;
                         }
                         el = el.parentElement;
@@ -410,35 +435,56 @@ def search_and_scrape(page, model_no: str, cache: dict, product_id: str = None, 
                     if (targetTable) break;
                 }
 
-                // Fall back to first table if no SKU match
-                if (!targetTable) targetTable = tables[0];
+                // Pass 2: brand match (only if brand provided and no SKU match)
+                if (!targetTable && brandLower) {
+                    for (const table of tables) {
+                        let el = table.parentElement;
+                        for (let i = 0; i < 12; i++) {
+                            if (!el) break;
+                            const text = (el.innerText || '').toLowerCase();
+                            if (text.includes(brandLower)) {
+                                targetTable = table;
+                                matchType = 'brand';
+                                break;
+                            }
+                            el = el.parentElement;
+                        }
+                        if (targetTable) break;
+                    }
+                }
 
-                const rows = targetTable.querySelectorAll('tr');
-                rows.forEach((row, idx) => {
-                    if (idx === 0) return; // skip header row
+                if (!targetTable) return { match_type: 'none', rows: [] };
 
+                const rows = [];
+                targetTable.querySelectorAll('tr').forEach((row, idx) => {
+                    if (idx === 0) return;
                     const cells = row.querySelectorAll('td');
                     if (cells.length < 2) return;
-
                     const distName = cells[0].innerText.trim();
-                    const stockText = cells.length >= 3
-                        ? cells[cells.length - 2].innerText.trim()
-                        : '';
+                    const stockText = cells.length >= 3 ? cells[cells.length - 2].innerText.trim() : '';
                     const priceText = cells[cells.length - 1].innerText.trim();
-
-                    if (distName) {
-                        data.push({
-                            distributor: distName,
-                            stock: stockText,
-                            price: priceText,
-                            allCells: Array.from(cells).map(c => c.innerText.trim())
-                        });
-                    }
+                    if (distName) rows.push({
+                        distributor: distName,
+                        stock: stockText,
+                        price: priceText,
+                        allCells: Array.from(cells).map(c => c.innerText.trim())
+                    });
                 });
 
-                return data;
+                return { match_type: matchType, rows };
             }
-        """, model_no)
+        """, [model_no, manufacturer])
+
+        match_type = result.get("match_type", "none") if isinstance(result, dict) else "none"
+        raw_rows   = result.get("rows", [])         if isinstance(result, dict) else (result or [])
+
+        if match_type == "none":
+            log(f"  No SKU or brand match on results page — will try product detail fallback.")
+            raw_rows = []
+        elif match_type == "brand":
+            log(f"  WARNING: no SKU match — accepted on brand match only ({manufacturer}). Verify manually.")
+
+        result = raw_rows
 
         # If no table found, retry via product ID:
         # 1. Search by ID to get results page
@@ -518,7 +564,13 @@ def search_and_scrape(page, model_no: str, cache: dict, product_id: str = None, 
                     }
                 """)
                 if result:
-                    log(f"  Product detail page fallback succeeded.")
+                    # Validate brand on the detail page before accepting
+                    page_text = page.inner_text("body").lower()
+                    if manufacturer and manufacturer.lower() not in page_text:
+                        log(f"  VALIDATION FAILED: brand '{manufacturer}' not found on detail page — discarding data.")
+                        result = []
+                    else:
+                        log(f"  Product detail page fallback succeeded (brand validated).")
                 else:
                     log(f"  Product detail page also found no table.")
             else:
