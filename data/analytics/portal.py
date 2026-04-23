@@ -150,6 +150,30 @@ HTML = r"""<!DOCTYPE html>
   /* Spinner */
   .spinner { text-align: center; padding: 40px; color: #A19F9D; font-size: 13px; }
 
+  /* Info modal */
+  .modal-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.35);
+                    z-index: 1000; align-items: center; justify-content: center; }
+  .modal-backdrop.open { display: flex; }
+  .modal { background: #fff; border-radius: 2px; width: 520px; max-width: 90vw;
+           max-height: 80vh; display: flex; flex-direction: column;
+           box-shadow: 0 8px 32px rgba(0,0,0,0.18); }
+  .modal-header { background: #0078D4; color: #fff; padding: 14px 18px;
+                  display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+  .modal-header h3 { font-size: 14px; font-weight: 600; margin: 0; }
+  .modal-close { background: none; border: none; color: #fff; font-size: 18px; cursor: pointer;
+                 line-height: 1; padding: 0 2px; opacity: 0.85; }
+  .modal-close:hover { opacity: 1; }
+  .modal-body { padding: 20px; overflow-y: auto; font-size: 13px; line-height: 1.6; color: #323130; }
+  .modal-body p { margin-bottom: 10px; }
+  .modal-body p:last-child { margin-bottom: 0; }
+  .modal-body strong { color: #0078D4; }
+
+  /* Info button */
+  .info-btn { background: none; border: 1px solid #C8D6E5; border-radius: 50%; width: 20px; height: 20px;
+              font-size: 11px; cursor: pointer; color: #0078D4; font-weight: 700; line-height: 18px;
+              text-align: center; margin-left: 8px; vertical-align: middle; display: inline-block; }
+  .info-btn:hover { background: #DEECF9; }
+
   /* Section */
   .content-section { display: none; }
   .content-section.active { display: block; }
@@ -269,6 +293,17 @@ HTML = r"""<!DOCTYPE html>
       <button class="back-btn" onclick="document.getElementById('ret-sku').classList.remove('active')">← Back</button>
       <div id="ret-sku-content"><div class="spinner">Loading…</div></div>
     </div>
+  </div>
+</div>
+
+<!-- Info modal -->
+<div class="modal-backdrop" id="info-modal" onclick="if(event.target===this)closeHelp()">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="modal-title">Report Info</h3>
+      <button class="modal-close" onclick="closeHelp()">✕</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
   </div>
 </div>
 
@@ -466,19 +501,101 @@ function loadReport(name, btn) {
 }
 
 const REPORT_TITLES = {
-  no_channel_stock: 'No Channel Stock 5+ Days',
-  back_in_stock: 'Back In Stock (zero yesterday, stock today)',
+  no_channel_stock:   'No Channel Stock 5+ Days',
+  back_in_stock:      'Back In Stock',
   single_distributor: 'Single Distributor Remaining',
-  new_stock_arrival: 'New Stock Arrival (5+ days absent, now stocked)',
-  vip_out_on_price: 'VIP Out on Price (has stock, not cheapest)',
-  vip_static: 'VIP Static — Market Moving',
-  vip_exclusive: 'VIP Exclusive (only stocked distributor)',
-  vip_price_gap: 'VIP Price Gap (£ above cheapest)',
-  never_stocked: 'No Channel Stock Ever (potential exclusives)',
-  price_dropping: 'Price Dropping vs Yesterday',
-  price_rising: 'Price Rising (all distributors up 7 days)',
-  daily_changes: 'All Changes Since Yesterday',
+  new_stock_arrival:  'New Stock Arrival',
+  vip_out_on_price:   'VIP Out on Price',
+  vip_static:         'VIP Static — Market Moving',
+  vip_exclusive:      'VIP Exclusive',
+  vip_price_gap:      'VIP Price Gap',
+  never_stocked:      'No Channel Stock Ever',
+  price_dropping:     'Price Dropping',
+  price_rising:       'Price Rising',
+  daily_changes:      'All Changes Since Yesterday',
 };
+
+const REPORT_HELP = {
+  no_channel_stock: {
+    title: 'No Channel Stock — 5+ Days',
+    body: `<p>Shows products where <strong>no distributor has had any stock for at least 5 consecutive days</strong>. The report looks back across the last 5 dates in the database and only includes products where every distributor shows zero stock on every one of those dates.</p>
+<p><strong>Floor £</strong> and <strong>VIP £</strong> show the last known prices where available, but may be blank if no price has been listed recently.</p>
+<p><strong>How to use:</strong> These products are effectively out of the market. They may represent supply chain issues, end-of-life SKUs, or products that are exclusively held somewhere outside the channel. Worth reviewing whether VIP should be sourcing them independently.</p>`
+  },
+  back_in_stock: {
+    title: 'Back In Stock',
+    body: `<p>Products that had <strong>zero channel stock yesterday but have stock today</strong>. "Yesterday" means the most recent date before today in the database.</p>
+<p><strong>Floor £</strong> is the cheapest price from any distributor that currently has stock. <strong>VIP £</strong> shows VIP's current price if they have stock.</p>
+<p><strong>How to use:</strong> Fast-moving opportunity list. These products just became available again — if VIP is not yet priced competitively or doesn't have stock, this is the moment to act before competitors react.</p>`
+  },
+  single_distributor: {
+    title: 'Single Distributor Remaining',
+    body: `<p>Products where <strong>exactly one distributor has stock today</strong>. All other distributors show zero or no stock.</p>
+<p><strong>VIP £</strong> tells you whether VIP is that sole supplier (blue = sole supplier and matches floor, red = VIP is the only one but priced above their own floor, which would only happen if multiple VIP rows exist) or whether a competitor holds it exclusively.</p>
+<p><strong>How to use:</strong> Supply concentration risk. If VIP is the sole supplier, this is a pricing power opportunity. If a competitor is the sole supplier, stock availability for VIP's customers may be at risk.</p>`
+  },
+  new_stock_arrival: {
+    title: 'New Stock Arrival',
+    body: `<p>Products that <strong>had zero stock for 5 or more consecutive days and now have stock today</strong>. This is a stricter version of Back In Stock — the absence must have lasted at least 5 days, not just overnight.</p>
+<p><strong>How to use:</strong> Significant restocks only. A product reappearing after 5+ days of absence often indicates a new shipment or an allocation being released. These are worth flagging to the sales team as fresh supply on previously unavailable lines.</p>`
+  },
+  vip_out_on_price: {
+    title: 'VIP Out on Price',
+    body: `<p>VIP <strong>has stock today but is not the cheapest</strong> in-stock distributor. The floor price is the cheapest price from any distributor that currently has units — zero-stock listings are ignored.</p>
+<p>Sorted by <strong>VIP stock quantity descending</strong>, so the largest inventory exposure is at the top.</p>
+<p><strong>How to use:</strong> These are live sales being lost right now. A customer comparing prices will find a cheaper option. The top of this list — high VIP stock, priced above the market — represents the biggest revenue risk. The gap column on VIP Price Gap shows the same data sorted differently.</p>`
+  },
+  vip_static: {
+    title: 'VIP Static — Market Moving',
+    body: `<p>VIP's stock level <strong>has not changed for 5 or more consecutive days</strong> while the rest of the market continues to move. Calculated by checking that VIP's qty is identical across all 5+ dates in the window.</p>
+<p><strong>How to use:</strong> Either VIP is not selling this product at all (demand problem or pricing issue), or sales are perfectly matching replenishment (less likely). Cross-reference with VIP Out on Price — if a product appears on both lists, VIP has static stock AND is not the cheapest, which strongly suggests a pricing problem is suppressing sales.</p>`
+  },
+  vip_exclusive: {
+    title: 'VIP Exclusive',
+    body: `<p>VIP is the <strong>only distributor with stock today</strong>. All other distributors show zero stock or no listing.</p>
+<p><strong>How to use:</strong> Pricing power opportunity. When VIP is the sole source of supply, there is no direct price competition and margin can potentially be protected or improved. Also useful for identifying which SKUs VIP should be promoting actively — customers who need these products have nowhere else to go in the channel.</p>`
+  },
+  vip_price_gap: {
+    title: 'VIP Price Gap',
+    body: `<p>VIP has stock but is priced <strong>above the cheapest in-stock competitor</strong>. Sorted by the <strong>absolute £ gap descending</strong> — the largest price difference is at the top.</p>
+<p>The floor price only includes distributors who actually have stock. Zero-stock listings are excluded so the gap reflects a real alternative a customer could buy today.</p>
+<p><strong>How to use:</strong> Spot where VIP pricing looks most anomalous. A large gap on a high-volume SKU is a strong signal of either an incorrect price loaded in the system or a competitor running a deep promotion. Unlike VIP Out on Price (sorted by VIP stock), this list highlights the SKUs where VIP's price looks most out of line, regardless of how much stock VIP holds.</p>`
+  },
+  never_stocked: {
+    title: 'No Channel Stock Ever',
+    body: `<p>Products that have <strong>never had any distributor price or stock</strong> across all dates in the database. No distributor has ever listed a price for these SKUs.</p>
+<p><strong>How to use:</strong> Potential VIP exclusives or products not yet released into the channel. If VIP holds stock of these products, they may have an exclusive supply arrangement. Worth reviewing against VIP's own stock system to see which of these VIP actually holds — those would be exclusive sales opportunities with no channel competition at all.</p>`
+  },
+  price_dropping: {
+    title: 'Price Dropping',
+    body: `<p>Products where the <strong>cheapest available price today is lower than it was yesterday</strong>. Only compares prices from distributors with actual stock on both days.</p>
+<p>Sorted by the size of the price drop (largest drop first).</p>
+<p><strong>How to use:</strong> Early warning of price pressure. A distributor cutting price aggressively may be trying to clear stock, responding to a competitor, or reacting to a new product announcement. If VIP is on these products, a price review may be needed to stay competitive.</p>`
+  },
+  price_rising: {
+    title: 'Price Rising',
+    body: `<p>Products where prices have been <strong>rising across distributors over the last 7 days</strong>. Only products with measurable price movement (not flat or unchanged) are included.</p>
+<p><strong>How to use:</strong> May indicate tightening supply, increased demand, or a cost increase being passed through the channel. If VIP's price has not risen in line with the market, VIP may be underselling. If VIP's price has risen ahead of the market, there may be a risk of losing sales.</p>`
+  },
+  daily_changes: {
+    title: 'All Changes Since Yesterday',
+    body: `<p>Every <strong>price move and stock change across all distributors since yesterday</strong>. Shows both the old and new value side by side.</p>
+<p>A price change is flagged in <span style="color:#A4262C;font-weight:600">red</span> if the price went up, <span style="color:#107C10;font-weight:600">green</span> if it went down. Stock changes are shown in the Stock column.</p>
+<p><strong>How to use:</strong> Full market activity log for the day. Useful for a quick morning review of what moved overnight before looking at specific reports. If a product you care about appears here, click through to the SKU drill-down to see the full price and stock history.</p>`
+  },
+};
+
+// ── Info modal ────────────────────────────────────────────────────────────────
+function showHelp(name) {
+  const h = REPORT_HELP[name];
+  if (!h) return;
+  document.getElementById('modal-title').textContent = h.title;
+  document.getElementById('modal-body').innerHTML = h.body;
+  document.getElementById('info-modal').classList.add('open');
+}
+function closeHelp() {
+  document.getElementById('info-modal').classList.remove('open');
+}
 
 function renderReport(name, rows) {
   const title = REPORT_TITLES[name] || name;
@@ -529,7 +646,7 @@ function renderReport(name, rows) {
     </tr>`;
   }
 
-  let html = `<div class="section-title">${title} <span style="font-size:12px;font-weight:400;color:#605E5C">(${rows.length} items)</span></div>
+  let html = `<div class="section-title">${title} <span style="font-size:12px;font-weight:400;color:#605E5C">(${rows.length} items)</span><button class="info-btn" onclick="showHelp('${name}')" title="How this report works">ⓘ</button></div>
     <div class="tbl-wrap"><table><thead><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr></thead><tbody>`;
   rows.forEach(r => { html += rowFn(r); });
   html += '</tbody></table></div>';
