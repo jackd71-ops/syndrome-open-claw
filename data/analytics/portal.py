@@ -862,17 +862,20 @@ def stic_report(name):
 
     elif name == "vip_out_on_price":
         rows = qry(
-            f"""SELECT v.product_id, v.model_no, v.manufacturer,
-                   v.price AS vip_price, v.qty AS vip_stock,
-                   f.min_price AS floor_price
-                FROM stic_prices v
-                JOIN (SELECT product_id, {PRICE_MIN} AS min_price FROM stic_prices WHERE date=? GROUP BY product_id) f
-                  ON f.product_id = v.product_id
-                WHERE v.date=? AND v.distributor='VIP'
-                  AND v.qty > 0 AND v.price IS NOT NULL
-                  AND v.price > f.min_price
-                ORDER BY v.qty DESC LIMIT 200""",
-            (latest, latest)
+            f"""SELECT a.product_id, a.model_no, a.manufacturer,
+                   {STOCK_SUM.replace('qty', 'a.qty')} AS total_stock,
+                   MIN(CASE WHEN a.price>0 THEN a.price END) AS min_price,
+                   MAX(CASE WHEN a.distributor='VIP' THEN a.price END) AS vip_price
+                FROM stic_prices a
+                WHERE a.date=?
+                GROUP BY a.product_id, a.model_no, a.manufacturer
+                HAVING MAX(CASE WHEN a.distributor='VIP' AND a.qty>0 THEN 1 ELSE 0 END) = 1
+                   AND MAX(CASE WHEN a.distributor='VIP' THEN a.price END) IS NOT NULL
+                   AND MAX(CASE WHEN a.distributor='VIP' THEN a.price END)
+                       > MIN(CASE WHEN a.price>0 THEN a.price END)
+                ORDER BY MAX(CASE WHEN a.distributor='VIP' THEN COALESCE(a.qty,0) END) DESC
+                LIMIT 200""",
+            (latest,)
         )
 
     elif name == "vip_static":
@@ -880,20 +883,24 @@ def stic_report(name):
             "SELECT MIN(date) AS d FROM (SELECT DISTINCT date FROM stic_prices ORDER BY date DESC LIMIT 7)"
         )["d"]
         rows = qry(
-            f"""SELECT v.product_id, v.model_no, v.manufacturer,
-                   v.qty AS vip_stock, v.price AS vip_price,
-                   mkt.total_stock AS total_stock, 0 AS min_price
-                FROM stic_prices v
-                JOIN (SELECT product_id, {STOCK_SUM} AS total_stock FROM stic_prices WHERE date=? GROUP BY product_id) mkt
-                  ON mkt.product_id = v.product_id
-                WHERE v.date=? AND v.distributor='VIP' AND v.qty > 0
-                  AND v.product_id IN (
-                    SELECT product_id FROM stic_prices WHERE distributor='VIP' AND date >= ?
-                    GROUP BY product_id
-                    HAVING MAX(COALESCE(qty,0)) = MIN(COALESCE(qty,0)) AND COUNT(DISTINCT date) >= 5
-                  )
-                ORDER BY v.qty DESC LIMIT 100""",
-            (latest, latest, cutoff)
+            f"""SELECT a.product_id, a.model_no, a.manufacturer,
+                   {STOCK_SUM.replace('qty', 'a.qty')} AS total_stock,
+                   MIN(CASE WHEN a.price>0 THEN a.price END) AS min_price,
+                   MAX(CASE WHEN a.distributor='VIP' THEN a.price END) AS vip_price
+                FROM stic_prices a
+                WHERE a.date=?
+                GROUP BY a.product_id, a.model_no, a.manufacturer
+                HAVING MAX(CASE WHEN a.distributor='VIP' THEN COALESCE(a.qty,0) END) > 0
+                   AND a.product_id IN (
+                     SELECT product_id FROM stic_prices
+                     WHERE distributor='VIP' AND date >= ?
+                     GROUP BY product_id
+                     HAVING MAX(COALESCE(qty,0)) = MIN(COALESCE(qty,0))
+                        AND COUNT(DISTINCT date) >= 5
+                   )
+                ORDER BY MAX(CASE WHEN a.distributor='VIP' THEN COALESCE(a.qty,0) END) DESC
+                LIMIT 100""",
+            (latest, cutoff)
         )
 
     elif name == "vip_exclusive":
