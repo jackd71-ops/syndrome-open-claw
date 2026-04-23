@@ -269,6 +269,39 @@ def write_result(monthly_path: str, date_str: str, row_num: int, distributor_dat
     wb.save(monthly_path)
     wb.close()
 
+# ── Data bleed detection ─────────────────────────────────────────────────────
+def check_data_bleed(iso_date: str) -> list[dict]:
+    """
+    Find SKU pairs where 3+ distributors share identical non-null price+qty on
+    the same date — strong signal that one SKU picked up another's scraped data.
+    Returns list of dicts: {product_id, model_no, matched_to, matched_model, matching_rows}
+    """
+    import sqlite3
+    try:
+        db = sqlite3.connect(_DB_PATH)
+        db.row_factory = sqlite3.Row
+        rows = db.execute("""
+            SELECT a.product_id, a.model_no, b.product_id AS matched_to,
+                   b.model_no AS matched_model, COUNT(*) AS matching_rows
+            FROM stic_prices a
+            JOIN stic_prices b
+              ON b.date=a.date AND b.distributor=a.distributor
+             AND b.product_id != a.product_id
+             AND a.price IS NOT NULL AND b.price IS NOT NULL
+             AND a.qty   IS NOT NULL AND b.qty   IS NOT NULL
+             AND a.price = b.price   AND a.qty   = b.qty
+            WHERE a.date=? AND a.product_id < b.product_id
+            GROUP BY a.product_id, b.product_id
+            HAVING matching_rows >= 3
+            ORDER BY matching_rows DESC, a.product_id
+        """, (iso_date,)).fetchall()
+        db.close()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        log(f"  Data bleed check error: {e}")
+        return []
+
+
 # ── Write result to SQLite ────────────────────────────────────────────────────
 _DB_PATH = "/opt/openclaw/data/analytics/prices.db"
 
@@ -806,12 +839,32 @@ def run(start: int, end: int, date_str: str, is_final: bool = False):
     if is_final:
         total_today = len(load_progress(date_str))
         status_icon = "✅" if sync_ok else "⚠️"
+
+        # Convert DD-MM-YYYY to YYYY-MM-DD for DB query
+        d, m, y = date_str.split("-")
+        iso_date = f"{y}-{m}-{d}"
+        bleed_suspects = check_data_bleed(iso_date)
+        log(f"Data bleed check: {len(bleed_suspects)} suspect pairs found.")
+
+        bleed_section = ""
+        if bleed_suspects:
+            lines = [f"⚠️ <b>Possible data bleed ({len(bleed_suspects)} pairs) — please verify:</b>"]
+            for s in bleed_suspects:
+                lines.append(
+                    f"  • {s['product_id']} {s['model_no']} ↔ {s['matched_to']} {s['matched_model']}"
+                    f" ({s['matching_rows']} distis match)"
+                )
+            bleed_section = "\n" + "\n".join(lines)
+        else:
+            bleed_section = "\n✅ No data bleed suspects found."
+
         msg = (
             f"{status_icon} <b>STIC scrape complete</b> — {date_str}\n\n"
             f"✔️ Total scraped today: {total_today} products\n"
             f"❌ This batch failed/skipped: {len(failed)}\n"
             f"📁 {Path(monthly_path).name} → OneDrive {'synced' if sync_ok else 'SYNC FAILED'}\n"
             f"🕐 Finished: {datetime.now().strftime('%H:%M')}"
+            f"{bleed_section}"
         )
         send_telegram(msg)
 
