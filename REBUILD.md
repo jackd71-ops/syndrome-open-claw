@@ -212,16 +212,26 @@ Add:
 
 ## 11. rclone / OneDrive
 
-rclone OAuth tokens are **not backed up** (they contain live auth credentials).
-OneDrive must be re-authenticated after a rebuild:
+rclone OAuth token is backed up to TrueNAS at `/mnt/Deep/backups/openclaw/rclone-config/`.
 
 ```bash
-rclone config
-# Select: n (new remote)
-# Name: onedrive
-# Type: onedrive
-# Follow the OAuth flow in browser
-# drive_id to reconnect to: 47252F09A1E9A101 (personal drive)
+# Restore from TrueNAS backup:
+mkdir -p /home/adminclaude/.config/rclone
+rsync -av \
+  -e "ssh -i /home/adminclaude/.ssh/id_ed25519_openclaw" \
+  truenas_admin@192.168.1.158:/mnt/Deep/backups/openclaw/rclone-config/ \
+  /home/adminclaude/.config/rclone/
+chown -R adminclaude:adminclaude /home/adminclaude/.config/rclone
+
+# Verify it works:
+rclone lsd onedrive:
+```
+
+If the token has expired (unlikely but possible), re-authenticate:
+
+```bash
+rclone config reconnect onedrive:
+# drive_id: 47252F09A1E9A101 (personal drive)
 ```
 
 ---

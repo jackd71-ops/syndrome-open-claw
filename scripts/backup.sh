@@ -21,8 +21,19 @@ rsync -av --delete \
   truenas_admin@192.168.1.158:/mnt/Deep/backups/openclaw/ \
   >> "$LOG" 2>&1
 
-if [ $? -eq 0 ]; then
+MAIN_OK=$?
+
+# Backup rclone config (OneDrive OAuth token) into a subdir of the same backup path
+rsync -av \
+  -e "ssh -i /home/adminclaude/.ssh/id_ed25519_openclaw -o BatchMode=yes" \
+  /home/adminclaude/.config/rclone/ \
+  truenas_admin@192.168.1.158:/mnt/Deep/backups/openclaw/rclone-config/ \
+  >> "$LOG" 2>&1
+
+RCLONE_OK=$?
+
+if [ $MAIN_OK -eq 0 ] && [ $RCLONE_OK -eq 0 ]; then
   echo "[$TIMESTAMP] Backup complete." >> "$LOG"
 else
-  echo "[$TIMESTAMP] Backup FAILED." >> "$LOG"
+  echo "[$TIMESTAMP] Backup FAILED (main=$MAIN_OK rclone=$RCLONE_OK)." >> "$LOG"
 fi
