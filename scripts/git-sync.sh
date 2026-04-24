@@ -42,7 +42,8 @@ git add data/analytics/portal.py \
         data/stic/ocuk_scrape.py \
         scripts/backup.sh \
         scripts/git-sync.sh \
-        scripts/safe-restart.sh
+        scripts/safe-restart.sh \
+        REBUILD.md
 
 CHANGED=$(git diff --cached --name-only | tr '\n' ' ')
 git commit -m "Auto-sync: $(date +%Y-%m-%d) — ${CHANGED}"
