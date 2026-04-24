@@ -10,8 +10,11 @@ rsync -av --delete \
   -e "ssh -i /home/adminclaude/.ssh/id_ed25519_openclaw -o BatchMode=yes" \
   /opt/openclaw/config/ \
   /opt/openclaw/workspace/ \
+  /opt/openclaw/workspace-family/ \
+  /opt/openclaw/workspace-sales/ \
   /opt/openclaw/data/ \
   /opt/openclaw/scripts/ \
+  /opt/openclaw/ha-config/ \
   /opt/openclaw/secrets.json \
   /opt/openclaw/docker-compose.yml \
   /opt/openclaw/Dockerfile \
