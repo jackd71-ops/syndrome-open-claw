@@ -157,6 +157,18 @@ HTML = r"""<!DOCTYPE html>
   tr:hover td { background: #DEECF9; }
   .clickable { cursor: pointer; }
   .clickable td:first-child { color: #0078D4; }
+  tr.row-selected td { background: #EFF6FC !important; }
+  .drill-header { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+  .drill-close { background:none; border:1px solid #C8C6C4; border-radius:3px; padding:2px 10px; cursor:pointer; color:#605E5C; font-size:12px; }
+  .drill-close:hover { background:#F3F2F1; }
+  .watch-btn { background:none; border:none; cursor:pointer; font-size:18px; color:#C8C6C4; padding:0 2px; line-height:1; vertical-align:middle; transition:color .15s; }
+  .watch-btn.watched { color:#FFB900; }
+  .watch-btn:hover { color:#FFB900; }
+  .watch-star { background:none; border:none; cursor:pointer; font-size:13px; color:#C8C6C4; padding:0 3px; line-height:1; }
+  .watch-star.watched { color:#FFB900; }
+  .watch-star:hover { color:#FFB900; }
+  td.wstar { width:26px; padding:4px 2px !important; text-align:center !important; }
+  th.wstar { width:26px; padding:4px 2px !important; }
 
   /* Badges */
   .badge { display: inline-block; padding: 2px 6px; border-radius: 2px; font-size: 11px;
@@ -241,6 +253,7 @@ HTML = r"""<!DOCTYPE html>
         Stock Intelligence <span class="arrow">▾</span>
       </div>
       <div class="sidebar-items">
+        <button class="sidebar-btn" onclick="loadWatchlistReport(this)">★ Watched SKUs</button>
         <button class="sidebar-btn" onclick="loadReport('no_channel_stock',this)">No channel stock 5+ days</button>
         <button class="sidebar-btn" onclick="loadReport('back_in_stock',this)">Back in stock</button>
         <button class="sidebar-btn" onclick="loadReport('single_distributor',this)">Single distributor</button>
@@ -291,6 +304,13 @@ HTML = r"""<!DOCTYPE html>
         </div>
       </div>
       <div class="tbl-wrap" id="stic-chipset-tbl"><div class="spinner">Loading…</div></div>
+      <div id="stic-chipset-drill" style="display:none;margin-top:4px">
+        <div class="drill-header">
+          <span id="stic-chipset-drill-title" class="section-title" style="margin:0"></span>
+          <button class="drill-close" onclick="closeChipsetDrill()">✕ Close</button>
+        </div>
+        <div class="tbl-wrap" id="stic-chipset-drill-tbl"></div>
+      </div>
     </div>
 
     <!-- Search -->
@@ -394,23 +414,119 @@ function loadSticOverview() {
   loadChipsetOverview('mbrd');
 }
 
+// ── Watchlist ─────────────────────────────────────────────────────────────────
+let _watchedIds = new Set();
+
+function loadWatchlist() {
+  fetch('/api/watchlist').then(r=>r.json()).then(data => {
+    _watchedIds = new Set(data.ids);
+    _refreshAllStars();
+  });
+}
+
+function _refreshAllStars() {
+  document.querySelectorAll('[data-watch-pid]').forEach(el => {
+    const pid = +el.dataset.watchPid;
+    _applyStarState(el, _watchedIds.has(pid));
+  });
+}
+
+function _applyStarState(el, watched) {
+  el.classList.toggle('watched', watched);
+  el.title = watched ? 'Remove from watchlist' : 'Add to watchlist';
+  el.textContent = watched ? '★' : '☆';
+}
+
+function toggleWatch(pid, event) {
+  if (event) event.stopPropagation();
+  const watching = _watchedIds.has(pid);
+  const method   = watching ? 'DELETE' : 'POST';
+  fetch('/api/watchlist/' + pid, { method }).then(r=>r.json()).then(data => {
+    if (data.watched) _watchedIds.add(pid); else _watchedIds.delete(pid);
+    _refreshAllStars();
+  });
+}
+
+function watchStarHtml(pid, cls) {
+  const w = _watchedIds.has(pid);
+  return `<button class="${cls||'watch-star'}${w?' watched':''}" data-watch-pid="${pid}"
+    onclick="toggleWatch(${pid},event)" title="${w?'Remove from watchlist':'Add to watchlist'}">${w?'★':'☆'}</button>`;
+}
+
+function loadWatchlistReport(btn) {
+  if (currentSidebarBtn) currentSidebarBtn.classList.remove('active');
+  if (btn) { btn.classList.add('active'); currentSidebarBtn = btn; }
+  showSticSection('report');
+  document.getElementById('stic-report-content').innerHTML = '<div class="spinner">Loading…</div>';
+  fetch('/api/watchlist/report').then(r=>r.json()).then(data => {
+    renderWatchlistReport(data);
+  });
+}
+
+function renderWatchlistReport(data) {
+  const el = document.getElementById('stic-report-content');
+  if (!data.rows || !data.rows.length) {
+    el.innerHTML = `<div class="section-title">★ Watched SKUs</div>
+      <p style="color:#A19F9D;padding:20px 0">No SKUs on your watchlist yet. Open any SKU and click the ★ to start tracking it.</p>`;
+    return;
+  }
+
+  const dists = data.distributors.filter(d => data.rows.some(r => r.distributors[d] !== undefined));
+  let html = `<div class="section-title">★ Watched SKUs <span style="font-size:12px;font-weight:400;color:#605E5C">(${data.rows.length} SKUs — ${fmtDate(data.date)})</span></div>`;
+  html += '<div class="tbl-wrap"><table><thead><tr>';
+  html += '<th></th><th>Product ID</th><th>Model</th><th>Manufacturer</th>';
+  dists.forEach(d => html += `<th>${d}</th>`);
+  html += '<th>Total</th><th>Δ Yesterday</th></tr></thead><tbody>';
+
+  data.rows.forEach(r => {
+    const delta     = r.delta;
+    const deltaFmt  = delta === 0 ? '<span style="color:#A19F9D">—</span>'
+                    : delta > 0   ? `<span style="color:#107C10;font-weight:600">+${delta}</span>`
+                    :               `<span style="color:#D13438;font-weight:600">${delta}</span>`;
+    html += `<tr class="clickable" onclick="loadSticSku(${r.product_id},'report')">
+      <td class="wstar">${watchStarHtml(r.product_id)}</td>
+      <td>${r.product_id}</td>
+      <td>${r.model_no}</td>
+      <td>${r.manufacturer}</td>`;
+    dists.forEach(d => {
+      const qty = (r.distributors[d] || {}).today || 0;
+      html += `<td>${qty > 0 ? qty.toLocaleString() : '<span style="color:#C8C6C4">0</span>'}</td>`;
+    });
+    html += `<td><strong>${r.total_today.toLocaleString()}</strong></td><td>${deltaFmt}</td></tr>`;
+  });
+
+  html += '</tbody></table></div>';
+  el.innerHTML = html;
+  _refreshAllStars();
+}
+
+let _chipsetGroup  = 'mbrd';
+let _chipsetActive = null;
+let _cgRows        = [];
+
 function switchChipsetGroup(group) {
+  _chipsetGroup  = group;
+  _chipsetActive = null;
   ['mbrd','server','gpu'].forEach(g => {
     document.getElementById('cg-'+g).classList.toggle('cg-active', g === group);
   });
+  document.getElementById('stic-chipset-drill').style.display = 'none';
   loadChipsetOverview(group);
 }
 
 function loadChipsetOverview(group) {
+  _chipsetGroup = group;
   document.getElementById('stic-chipset-tbl').innerHTML = '<div class="spinner">Loading…</div>';
   fetch('/api/stic/chipset-overview?group=' + group).then(r=>r.json()).then(rows => {
+    _cgRows = rows;
     if (!rows.length) { document.getElementById('stic-chipset-tbl').innerHTML = '<p style="color:#A19F9D;padding:20px">No data</p>'; return; }
     const cols = ['Chipset','VIP SKUs','Channel Floor £','VIP Lowest £','VIP vs Floor','Channel Stock'];
     let html = '<table><thead><tr>' + cols.map(c=>`<th>${c}</th>`).join('') + '</tr></thead><tbody>';
-    rows.forEach(r => {
+    rows.forEach((r, i) => {
       const diff = (r.vip_price && r.floor_price) ? ((r.vip_price - r.floor_price) / r.floor_price * 100).toFixed(1) : null;
       const diffBadge = diff === null ? '' : diff > 5 ? `<span class="badge badge-red">+${diff}%</span>` : diff > 0 ? `<span class="badge badge-orange">+${diff}%</span>` : `<span class="badge badge-green">${diff}%</span>`;
-      html += `<tr>
+      const sel = r.chipset === _chipsetActive ? ' row-selected' : '';
+      html += `<tr class="clickable${sel}" data-ci="${i}" title="Click to view SKUs">
         <td><strong>${r.chipset}</strong></td>
         <td>${r.vip_skus}</td>
         <td>${r.floor_price ? '£'+r.floor_price.toFixed(2) : '—'}</td>
@@ -421,7 +537,58 @@ function loadChipsetOverview(group) {
     });
     html += '</tbody></table>';
     document.getElementById('stic-chipset-tbl').innerHTML = html;
+    document.querySelectorAll('#stic-chipset-tbl tr[data-ci]').forEach(tr => {
+      tr.addEventListener('click', () => {
+        const cs = _cgRows[+tr.dataset.ci].chipset;
+        toggleChipsetDrill(tr, cs);
+      });
+    });
+    // Re-open drill if one was already active
+    if (_chipsetActive) loadChipsetDrill(_chipsetActive);
   });
+}
+
+function toggleChipsetDrill(tr, chipset) {
+  if (_chipsetActive === chipset) { closeChipsetDrill(); return; }
+  document.querySelectorAll('#stic-chipset-tbl tr.row-selected').forEach(r => r.classList.remove('row-selected'));
+  tr.classList.add('row-selected');
+  _chipsetActive = chipset;
+  loadChipsetDrill(chipset);
+}
+
+function closeChipsetDrill() {
+  _chipsetActive = null;
+  document.getElementById('stic-chipset-drill').style.display = 'none';
+  document.querySelectorAll('#stic-chipset-tbl tr.row-selected').forEach(r => r.classList.remove('row-selected'));
+}
+
+function loadChipsetDrill(chipset) {
+  const drillEl = document.getElementById('stic-chipset-drill');
+  drillEl.style.display = 'block';
+  document.getElementById('stic-chipset-drill-title').textContent = chipset + ' — SKUs';
+  document.getElementById('stic-chipset-drill-tbl').innerHTML = '<div class="spinner">Loading…</div>';
+  fetch('/api/stic/chipset-skus?group=' + _chipsetGroup + '&chipset=' + encodeURIComponent(chipset))
+    .then(r=>r.json()).then(rows => {
+      if (!rows.length) {
+        document.getElementById('stic-chipset-drill-tbl').innerHTML = '<p style="color:#A19F9D;padding:20px">No SKUs found</p>';
+        return;
+      }
+      let html = '<table><thead><tr><th class="wstar"></th><th>Product ID</th><th>Model</th><th>Manufacturer</th><th>Channel Stock</th><th>VIP Stock</th><th>Floor £</th><th>VIP £</th></tr></thead><tbody>';
+      rows.forEach(r => {
+        html += `<tr class="clickable" onclick="loadSticSku(${r.product_id},'overview')" title="Click for full SKU detail">
+          <td class="wstar">${watchStarHtml(r.product_id)}</td>
+          <td>${r.product_id}</td>
+          <td>${r.model_no}</td>
+          <td>${r.manufacturer}</td>
+          <td>${(r.channel_stock||0).toLocaleString()}</td>
+          <td>${(r.vip_stock||0).toLocaleString()}</td>
+          <td>${r.floor_price ? '£'+r.floor_price.toFixed(2) : '—'}</td>
+          <td>${vipCell(r.vip_price, r.floor_price)}</td>
+        </tr>`;
+      });
+      html += '</tbody></table>';
+      document.getElementById('stic-chipset-drill-tbl').innerHTML = html;
+    });
 }
 
 // ── STIC search ───────────────────────────────────────────────────────────────
@@ -432,9 +599,10 @@ function doSticSearch() {
   document.getElementById('stic-search-results').innerHTML = '<div class="spinner">Searching…</div>';
   fetch('/api/stic/search?q=' + encodeURIComponent(q)).then(r=>r.json()).then(rows => {
     if (!rows.length) { document.getElementById('stic-search-results').innerHTML = '<p style="color:#A19F9D;padding:20px">No results</p>'; return; }
-    let html = '<div class="section-title">Results (' + rows.length + ')</div><div class="tbl-wrap"><table><thead><tr><th>Product ID</th><th>Model</th><th>Manufacturer</th><th>Channel Stock</th><th>VIP Stock</th><th>Floor £</th><th>VIP £</th></tr></thead><tbody>';
+    let html = '<div class="section-title">Results (' + rows.length + ')</div><div class="tbl-wrap"><table><thead><tr><th class="wstar"></th><th>Product ID</th><th>Model</th><th>Manufacturer</th><th>Channel Stock</th><th>VIP Stock</th><th>Floor £</th><th>VIP £</th></tr></thead><tbody>';
     rows.forEach(r => {
       html += `<tr class="clickable" onclick="loadSticSku(${r.product_id},'search')">
+        <td class="wstar">${watchStarHtml(r.product_id)}</td>
         <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer}</td>
         <td>${(r.total_stock||0).toLocaleString()}</td>
         <td>${(r.vip_stock||0).toLocaleString()}</td>
@@ -474,8 +642,16 @@ function renderSticSku(data) {
   const { info, snapshot, price_history, stock_history, cheapest_history } = data;
 
   const desc = info.description ? `<span style="color:#323130"> — ${info.description}</span>` : '';
-  let html = `<h3 style="margin-bottom:8px">${info.manufacturer} ${info.model_no}${desc}</h3>
-    <p style="color:#605E5C;margin-bottom:16px">Product ID: ${info.product_id} | Group: ${info.product_group||'—'}</p>`;
+  let html = `<div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px">
+    <div style="flex:1">
+      <h3 style="margin:0 0 4px">${info.manufacturer} ${info.model_no}${desc}</h3>
+      <p style="color:#605E5C;margin:0">Product ID: ${info.product_id} | Group: ${info.product_group||'—'}</p>
+    </div>
+    <button class="watch-btn" data-watch-pid="${info.product_id}"
+      onclick="toggleWatch(${info.product_id},event)"
+      title="${_watchedIds.has(info.product_id)?'Remove from watchlist':'Add to watchlist'}"
+      style="margin-top:2px">${_watchedIds.has(info.product_id)?'★':'☆'}</button>
+  </div>`;
 
   // Snapshot table
   html += '<div class="section-title">Current Snapshot</div><div class="tbl-wrap"><table><thead><tr><th>Distributor</th><th>Price</th><th>Stock</th></tr></thead><tbody>';
@@ -496,19 +672,27 @@ function renderSticSku(data) {
   // Charts
   const dists = [...new Set(price_history.map(r => r.distributor))];
   const dates  = [...new Set(price_history.map(r => r.date))].sort();
-  const palette = ['#0078D4','#E88C1A','#8A8886','#FFB900','#107C10','#D13438'];
+  const DIST_COLOURS = {
+    'VIP':        '#0078D4',   // blue
+    'M2M Direct': '#FFB900',   // amber
+    'TD Synnex':  '#D13438',   // red
+    'Target':     '#8A8886',   // grey
+    'Westcoast':  '#107C10',   // green
+  };
+  const _fallback = ['#00B7C3','#8764B8','#E88C1A','#69797E'];
+  const distColour = (d, i) => DIST_COLOURS[d] ?? _fallback[i % _fallback.length];
 
   const priceDs = dists.map((d, i) => ({
     label: d,
     data: dates.map(dt => { const row = price_history.find(r => r.distributor===d && r.date===dt); return row?.price ?? null; }),
-    borderColor: palette[i % palette.length], backgroundColor: 'transparent',
+    borderColor: distColour(d, i), backgroundColor: 'transparent',
     tension: 0.2, spanGaps: true, pointRadius: 2,
   }));
 
   const stockDs = dists.map((d, i) => ({
     label: d,
     data: dates.map(dt => { const row = stock_history.find(r => r.distributor===d && r.date===dt); return row?.qty ?? 0; }),
-    backgroundColor: palette[i % palette.length],
+    backgroundColor: distColour(d, i),
   }));
 
   const cheapestDs = [{
@@ -842,6 +1026,7 @@ function renderRetSku(data) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function() {
+  loadWatchlist();
   loadSticOverview();
 });
 </script>
@@ -929,6 +1114,70 @@ def stic_chipset_overview():
             "floor_price": min(d["floor_prices"]) if d["floor_prices"] else None,
             "vip_price": min(d["vip_prices"]) if d["vip_prices"] else None,
             "channel_stock": d["stock"],
+        })
+    return jsonify(result)
+
+
+@app.route("/api/stic/chipset-skus")
+def stic_chipset_skus():
+    latest = latest_date("stic_prices")
+    if not latest:
+        return jsonify([])
+
+    group   = request.args.get("group", "mbrd")
+    chipset = request.args.get("chipset", "").strip()
+    if not chipset:
+        return jsonify([])
+
+    group_filter = {
+        "mbrd":   "product_group = 'PROD_MBRD'",
+        "server": "product_group = 'PROD_MBRDS'",
+        "gpu":    "product_group = 'PROD_VIDEO'",
+    }.get(group, "product_group = 'PROD_MBRD'")
+
+    rows = qry(
+        f"""SELECT product_id, model_no, manufacturer, chipset, distributor, price, qty
+           FROM stic_prices WHERE date=? AND {group_filter}""", (latest,)
+    )
+
+    chipset_fn = extract_gpu_chipset if group == "gpu" else extract_chipset
+
+    products = {}
+    for r in rows:
+        cs = r["chipset"] or chipset_fn(r["model_no"])
+        if cs != chipset:
+            continue
+        pid = r["product_id"]
+        if pid not in products:
+            products[pid] = {
+                "product_id":    pid,
+                "model_no":      r["model_no"],
+                "manufacturer":  r["manufacturer"],
+                "floor_prices":  [],
+                "vip_price":     None,
+                "vip_stock":     0,
+                "channel_stock": 0,
+            }
+        p = products[pid]
+        if r["price"] and r["qty"] and r["qty"] > 0:
+            p["floor_prices"].append(r["price"])
+        if r["distributor"] == "VIP":
+            if r["price"]:
+                p["vip_price"] = r["price"]
+            p["vip_stock"] = r["qty"] or 0
+        if r["qty"]:
+            p["channel_stock"] += r["qty"]
+
+    result = []
+    for p in sorted(products.values(), key=lambda x: x["model_no"]):
+        result.append({
+            "product_id":    p["product_id"],
+            "model_no":      p["model_no"],
+            "manufacturer":  p["manufacturer"],
+            "floor_price":   min(p["floor_prices"]) if p["floor_prices"] else None,
+            "vip_price":     p["vip_price"],
+            "vip_stock":     p["vip_stock"],
+            "channel_stock": p["channel_stock"],
         })
     return jsonify(result)
 
@@ -1304,6 +1553,121 @@ def retailer_sku(product_id):
 def index():
     return render_template_string(HTML)
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# WATCHLIST
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/watchlist", methods=["GET"])
+def watchlist_get():
+    rows = qry("SELECT product_id FROM watchlist ORDER BY added_date DESC")
+    return jsonify({"ids": [r["product_id"] for r in rows]})
+
+
+@app.route("/api/watchlist/<int:product_id>", methods=["POST"])
+def watchlist_add(product_id):
+    from datetime import date as _date
+    db = get_db()
+    db.execute(
+        "INSERT OR IGNORE INTO watchlist(product_id, added_date) VALUES(?,?)",
+        (product_id, _date.today().isoformat())
+    )
+    db.commit()
+    db.close()
+    return jsonify({"watched": True})
+
+
+@app.route("/api/watchlist/<int:product_id>", methods=["DELETE"])
+def watchlist_remove(product_id):
+    db = get_db()
+    db.execute("DELETE FROM watchlist WHERE product_id=?", (product_id,))
+    db.commit()
+    db.close()
+    return jsonify({"watched": False})
+
+
+@app.route("/api/watchlist/report")
+def watchlist_report():
+    latest = latest_date("stic_prices")
+    if not latest:
+        return jsonify([])
+
+    watched = qry("SELECT product_id FROM watchlist ORDER BY added_date DESC")
+    if not watched:
+        return jsonify([])
+
+    pids     = [r["product_id"] for r in watched]
+    prev     = prev_date("stic_prices", latest)
+    ph       = ",".join("?" * len(pids))
+
+    today_rows = qry(
+        f"SELECT product_id, model_no, manufacturer, distributor, qty "
+        f"FROM stic_prices WHERE date=? AND product_id IN ({ph})",
+        (latest, *pids)
+    )
+    yest_rows = qry(
+        f"SELECT product_id, distributor, qty "
+        f"FROM stic_prices WHERE date=? AND product_id IN ({ph})",
+        (prev, *pids)
+    ) if prev else []
+
+    # Build per-SKU dict
+    skus = {}
+    for pid in pids:
+        skus[pid] = {"product_id": pid, "model_no": "", "manufacturer": "",
+                     "today": {}, "yesterday": {}}
+
+    for r in today_rows:
+        pid = r["product_id"]
+        skus[pid]["model_no"]     = r["model_no"]
+        skus[pid]["manufacturer"] = r["manufacturer"]
+        skus[pid]["today"][r["distributor"]] = r["qty"] or 0
+
+    for r in yest_rows:
+        pid = r["product_id"]
+        if pid in skus:
+            skus[pid]["yesterday"][r["distributor"]] = r["qty"] or 0
+
+    # All distributors present across all rows (ordered)
+    dist_order = ["M2M Direct", "TD Synnex", "Target", "VIP", "Westcoast"]
+    all_dists  = dist_order + [d for d in
+                     sorted({r["distributor"] for r in today_rows})
+                     if d not in dist_order]
+
+    result = []
+    for pid in pids:
+        s = skus[pid]
+        if not s["model_no"]:   # not in DB for latest date — skip
+            continue
+        total_today = sum(s["today"].values())
+        total_yest  = sum(s["yesterday"].values())
+        dist_data   = {d: {"today": s["today"].get(d, 0),
+                           "yesterday": s["yesterday"].get(d, 0)}
+                       for d in all_dists if d in s["today"] or d in s["yesterday"]}
+        result.append({
+            "product_id":    pid,
+            "model_no":      s["model_no"],
+            "manufacturer":  s["manufacturer"],
+            "distributors":  dist_data,
+            "total_today":   total_today,
+            "total_yest":    total_yest,
+            "delta":         total_today - total_yest,
+        })
+
+    return jsonify({"rows": result, "distributors": all_dists,
+                    "date": latest, "prev_date": prev})
+
+
+def _init_watchlist():
+    db = get_db()
+    db.execute("""CREATE TABLE IF NOT EXISTS watchlist (
+        product_id INTEGER PRIMARY KEY,
+        added_date TEXT NOT NULL
+    )""")
+    db.commit()
+    db.close()
+
+_init_watchlist()
 
 if __name__ == "__main__":
     import os

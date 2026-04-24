@@ -47,7 +47,6 @@ from datetime import datetime
 from pathlib import Path
 
 from openpyxl import load_workbook
-from openpyxl.styles import PatternFill, Font
 import sys
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 from patchright.sync_api import sync_playwright as patchright_playwright
@@ -148,14 +147,6 @@ DELAY_MAX      = 14
 LONG_PAUSE_MIN = 30
 LONG_PAUSE_MAX = 90
 
-# ── Styles ────────────────────────────────────────────────────────────────────
-RED_FILL    = PatternFill("solid", fgColor="FF0000")
-RED_FONT    = Font(color="FFFFFF", bold=True)
-GREY_FILL   = PatternFill("solid", fgColor="D9D9D9")
-GREY_FONT   = Font(color="808080", italic=True)
-ORANGE_FILL = PatternFill("solid", fgColor="FFA500")
-ORANGE_FONT = Font(color="FFFFFF", bold=True)
-
 # ── Logging ───────────────────────────────────────────────────────────────────
 def log(msg):
     ts   = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -167,9 +158,6 @@ def log(msg):
 def get_secrets():
     with open(SECRETS_PATH) as f:
         return json.load(f)
-
-def get_output_path():
-    return f"{OUTPUT_DIR}/Retailer_Results_{datetime.now().strftime('%Y-%m')}.xlsx"
 
 # ── Progress ──────────────────────────────────────────────────────────────────
 def load_progress(date_str):
@@ -254,51 +242,6 @@ def read_products(start, end):
         })
     wb.close()
     return products
-
-# ── Ensure monthly output file ────────────────────────────────────────────────
-def ensure_output_file(date_str):
-    import shutil
-    out = get_output_path()
-    if not Path(out).exists():
-        shutil.copy(TEMPLATE_PATH, out)
-        log(f"Created monthly file: {Path(out).name}")
-    wb = load_workbook(out)
-    if date_str not in wb.sheetnames:
-        master = wb.worksheets[0]
-        ws     = wb.copy_worksheet(master)
-        ws.title = date_str
-        for row in ws.iter_rows(min_row=2):
-            for cell in row:
-                if cell.column >= 10:
-                    cell.value = None
-                    cell.fill  = PatternFill(fill_type=None)
-        wb.save(out)
-        log(f"Created sheet '{date_str}'")
-    wb.close()
-
-# ── Write one cell ────────────────────────────────────────────────────────────
-def write_cell(date_str, excel_row, col, price, msrp, status=None):
-    out  = get_output_path()
-    wb   = load_workbook(out)
-    ws   = wb[date_str]
-    cell = ws.cell(row=excel_row, column=col)
-    if status == "BLOCKED":
-        cell.value = "—"
-        cell.fill  = GREY_FILL
-        cell.font  = GREY_FONT
-    elif status == "OUT_OF_STOCK":
-        cell.value = "OOS"
-        cell.fill  = ORANGE_FILL
-        cell.font  = ORANGE_FONT
-    elif price is not None:
-        cell.value         = price
-        cell.number_format = '£#,##0.00'
-        if msrp and price < msrp:
-            cell.fill = RED_FILL
-            cell.font = RED_FONT
-    # status == "NOT_FOUND" → leave blank
-    wb.save(out)
-    wb.close()
 
 # ── Price parser ──────────────────────────────────────────────────────────────
 def parse_price(text):
@@ -550,17 +493,6 @@ def send_telegram(message):
         log("Telegram sent.")
     except Exception as e:
         log(f"Telegram error: {e}")
-
-# ── OneDrive sync ─────────────────────────────────────────────────────────────
-def sync_onedrive():
-    """Push current monthly results file to OneDrive."""
-    out = get_output_path()
-    r   = subprocess.run(["rclone", "copyto", out, f"{ONEDRIVE_DEST}{Path(out).name}"],
-                         capture_output=True, text=True)
-    ok  = r.returncode == 0
-    log("OneDrive sync: OK" if ok else f"OneDrive sync FAILED: {r.stderr}")
-    return ok
-
 
 def sync_template_to_onedrive():
     """Push local Retailer_Template.xlsx to OneDrive (after discovery writes URLs)."""
@@ -1592,30 +1524,30 @@ def discover_ccl_urls(page):
 
 def load_amazon_prices():
     """
-    Return {product_id (str): amazon_price (float)} from the most recent daily
-    sheet in the current month's output XLSX. Returns empty dict if unavailable.
+    Return {product_id (str): amazon_price (float)} from the most recent date
+    in retailer_prices DB for Amazon UK. Returns empty dict if unavailable.
     """
+    import sqlite3 as _sqlite3
+    DB_PATH = "/opt/openclaw/data/analytics/prices.db"
     try:
-        path = get_output_path()
-        if not Path(path).exists():
+        con = _sqlite3.connect(DB_PATH)
+        con.row_factory = _sqlite3.Row
+        row = con.execute(
+            "SELECT MAX(date) AS d FROM retailer_prices WHERE retailer='Amazon UK'"
+        ).fetchone()
+        latest = row["d"] if row else None
+        if not latest:
+            con.close()
             return {}
-        wb = load_workbook(path, read_only=True)
-        # Find most recent daily sheet (format DD-MM-YYYY)
-        daily = [s for s in wb.sheetnames if re.match(r'\d{2}-\d{2}-\d{4}', s)]
-        if not daily:
-            wb.close()
-            return {}
-        sheet = wb[sorted(daily, key=lambda s: s.split('-')[::-1])[-1]]
-        prices = {}
-        for row in sheet.iter_rows(min_row=2, values_only=True):
-            pid   = str(row[0]).strip() if row[0] else None
-            price = row[9]  # Amazon UK column
-            if pid and price and isinstance(price, (int, float)) and price > 0:
-                prices[pid] = float(price)
-        wb.close()
-        return prices
+        rows = con.execute(
+            "SELECT product_id, price FROM retailer_prices "
+            "WHERE retailer='Amazon UK' AND date=? AND price IS NOT NULL AND price>0",
+            (latest,)
+        ).fetchall()
+        con.close()
+        return {str(r["product_id"]): float(r["price"]) for r in rows}
     except Exception as e:
-        log(f"[Sanity] Could not load Amazon prices: {e}")
+        log(f"[Sanity] Could not load Amazon prices from DB: {e}")
         return {}
 
 
@@ -1863,7 +1795,6 @@ def run_preflight_discovery():
 # ── Main run ──────────────────────────────────────────────────────────────────
 def run(start, end, date_str, notify=False):
     log(f"Starting retailer scrape: rows {start}–{end}, date={date_str}")
-    ensure_output_file(date_str)
 
     id_codes  = load_retailer_ids()
     products  = read_products(start, end)
@@ -1907,7 +1838,6 @@ def run(start, end, date_str, notify=False):
             row_num   = product["row_num"]
             model_no  = product["model_no"]
             msrp      = product["msrp"]
-            excel_row = row_num + 1
 
             if str(row_num) in completed:
                 log(f"Skipping row {row_num} ({model_no}) — already done.")
@@ -1917,10 +1847,6 @@ def run(start, end, date_str, notify=False):
             log(f"\n[{row_num}/{end}] {model_no} ({msrp_str})")
 
             page.mouse.move(random.randint(200,1100), random.randint(150,600))
-
-            # Write blocked retailer cells instantly
-            for r in blocked:
-                write_cell(date_str, excel_row, r["col"], None, msrp, status="BLOCKED")
 
             # Scrape active retailers; collect prices for DB write
             db_prices = {r["name"]: None for r in RETAILERS}  # all retailers default NULL
@@ -1932,20 +1858,16 @@ def run(start, end, date_str, notify=False):
                 if price is not None:
                     below = " ⚠️ BELOW MSRP" if msrp and price < msrp else ""
                     log(f"    [{name}] £{price:.2f}{below}")
-                    write_cell(date_str, excel_row, retailer["col"], price, msrp)
                     db_prices[name] = price
                     found += 1
                 elif status == "OUT_OF_STOCK":
                     log(f"    [{name}] out of stock")
-                    write_cell(date_str, excel_row, retailer["col"], None, msrp, status="OUT_OF_STOCK")
                     not_stocked += 1
                 elif status == "NOT_STOCKED":
                     log(f"    [{name}] not stocked (no ID code)")
-                    write_cell(date_str, excel_row, retailer["col"], None, msrp)
                     not_stocked += 1
                 else:
                     log(f"    [{name}] not found ({status})")
-                    write_cell(date_str, excel_row, retailer["col"], None, msrp)
                     not_found += 1
 
                 time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
@@ -1966,20 +1888,16 @@ def run(start, end, date_str, notify=False):
 
         browser.close()
 
-    sync_ok = sync_onedrive()
     log(f"\nBatch complete. Products={products_done}, Found={found}, Not stocked={not_stocked}, Not found={not_found}")
 
     if notify:
         total_today = len(load_progress(date_str))
-        icon = "✅" if sync_ok else "⚠️"
         send_telegram(
             f"🛒 <b>Retailer Tracker complete</b> — {date_str}\n\n"
             f"✔️ Total today: {total_today} products\n"
             f"💰 Prices found: {found}\n"
             f"🚫 Not stocked: {not_stocked}\n"
-            f"❌ Not found: {not_found}\n"
-            f"{icon} OneDrive: {'synced' if sync_ok else 'FAILED'}\n"
-            f"📁 Retailer_Results_{datetime.now().strftime('%Y-%m')}.xlsx"
+            f"❌ Not found: {not_found}"
         )
 
 # ── Entry point ───────────────────────────────────────────────────────────────
