@@ -11,6 +11,10 @@ rsync -av --delete \
   /opt/openclaw/config/ \
   /opt/openclaw/workspace/ \
   /opt/openclaw/data/ \
+  /opt/openclaw/scripts/ \
+  /opt/openclaw/secrets.json \
+  /opt/openclaw/docker-compose.yml \
+  /opt/openclaw/Dockerfile \
   truenas_admin@192.168.1.158:/mnt/Deep/backups/openclaw/ \
   >> "$LOG" 2>&1
 
