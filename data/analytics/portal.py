@@ -239,6 +239,59 @@ HTML = r"""<!DOCTYPE html>
     border-radius: 2px; cursor: pointer; background: #0078D4; color: #fff; }
   .scrape-trigger-btn:hover:not([disabled]) { background: #106EBE; }
 
+  /* Import / Export tool cards */
+  .ie-tool-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+    gap: 12px; margin-bottom: 20px; }
+  .ie-tool-card { background: #fff; border: 1px solid #EDEBE9; border-radius: 2px;
+    padding: 16px 18px; cursor: pointer; transition: border-color .15s, box-shadow .15s;
+    display: flex; flex-direction: column; gap: 4px; }
+  .ie-tool-card:hover { border-color: #0078D4; box-shadow: 0 2px 8px rgba(0,120,212,0.1); }
+  .ie-tool-card .ie-icon { font-size: 22px; margin-bottom: 4px; }
+  .ie-tool-card .ie-name { font-size: 13px; font-weight: 600; color: #323130; }
+  .ie-tool-card .ie-desc { font-size: 12px; color: #605E5C; line-height: 1.5; }
+  .ie-tool-card .ie-tag { display: inline-block; margin-top: 6px; padding: 2px 8px;
+    border-radius: 2px; font-size: 11px; font-weight: 600; }
+  .ie-tag-import { background: #DFF6DD; color: #107C10; }
+  .ie-tag-export { background: #DEECF9; color: #0078D4; }
+
+  /* Drop zone */
+  .ie-dropzone { border: 2px dashed #C8C6C4; border-radius: 4px; padding: 32px 20px;
+    text-align: center; background: #FAFAFA; cursor: pointer;
+    transition: border-color .15s, background .15s; }
+  .ie-dropzone:hover, .ie-dropzone.drag-over { border-color: #0078D4; background: #EFF6FC; }
+  .ie-dropzone .dz-icon { font-size: 28px; margin-bottom: 8px; color: #A19F9D; }
+  .ie-dropzone .dz-text { font-size: 13px; color: #605E5C; }
+  .ie-dropzone .dz-hint { font-size: 11px; color: #A19F9D; margin-top: 4px; }
+  .ie-dropzone input[type=file] { display: none; }
+
+  /* Import action buttons */
+  .ie-btn { padding: 7px 16px; font-size: 12px; font-weight: 600; border: none;
+    border-radius: 2px; cursor: pointer; font-family: inherit; }
+  .ie-btn-primary { background: #0078D4; color: #fff; }
+  .ie-btn-primary:hover:not([disabled]) { background: #106EBE; }
+  .ie-btn-secondary { background: #fff; color: #323130; border: 1px solid #C8C6C4; }
+  .ie-btn-secondary:hover { background: #F3F2F1; }
+  .ie-btn-success { background: #107C10; color: #fff; }
+  .ie-btn-success:hover:not([disabled]) { background: #0E6A0E; }
+  .ie-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .ie-action-bar { display: flex; gap: 8px; align-items: center; margin: 12px 0 16px; }
+
+  /* Row status pills */
+  .ie-new    { background: #DFF6DD; color: #107C10; padding: 1px 6px; border-radius: 2px;
+               font-size: 11px; font-weight: 600; }
+  .ie-update { background: #DEECF9; color: #0078D4; padding: 1px 6px; border-radius: 2px;
+               font-size: 11px; font-weight: 600; }
+  .ie-error  { background: #FDE7E9; color: #A4262C; padding: 1px 6px; border-radius: 2px;
+               font-size: 11px; font-weight: 600; }
+  .ie-warn   { background: #FFF4CE; color: #8A4B00; padding: 1px 6px; border-radius: 2px;
+               font-size: 11px; font-weight: 600; }
+
+  /* Import summary bar */
+  .ie-summary { display: flex; gap: 16px; padding: 10px 14px; background: #fff;
+    border: 1px solid #EDEBE9; border-radius: 2px; margin-bottom: 12px;
+    font-size: 12px; align-items: center; flex-wrap: wrap; }
+  .ie-summary strong { font-size: 15px; margin-right: 2px; }
+
   /* Charts */
   .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
   .chart-box { background: #fff; border: 1px solid #EDEBE9; border-radius: 2px; padding: 16px; }
@@ -374,6 +427,14 @@ HTML = r"""<!DOCTYPE html>
         <button class="sidebar-btn" onclick="loadScrapeGroups(this)">⟳ Refresh SKUs</button>
       </div>
     </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-header" onclick="toggleSection(this)">
+        Import / Export <span class="arrow">▾</span>
+      </div>
+      <div class="sidebar-items">
+        <button class="sidebar-btn" onclick="loadImportExport(this)">📥 Import / Export</button>
+      </div>
+    </div>
   </div>
 
   <div class="main" id="main-stic">
@@ -429,6 +490,10 @@ HTML = r"""<!DOCTYPE html>
     <!-- Scrape Groups -->
     <div class="content-section" id="stic-scrape">
       <div id="stic-scrape-content"><div class="spinner">Loading…</div></div>
+    </div>
+    <!-- Import / Export -->
+    <div class="content-section" id="stic-import-export">
+      <div id="stic-import-export-content"></div>
     </div>
   </div>
 </div>
@@ -574,7 +639,7 @@ function toggleEOL(pid, event) {
   if (event) event.stopPropagation();
   const marking = !_eolIds.has(pid);
   const label = marking ? 'Mark as EOL?' : 'Remove EOL status?';
-  if (!confirm(label + '\n\nProduct ID: ' + pid)) return;
+  if (!confirm(label + '\n\nProduct: ' + pid)) return;
   const method = marking ? 'POST' : 'DELETE';
   fetch('/api/eol/' + pid, { method }).then(r=>r.json()).then(data => {
     if (data.eol) _eolIds.add(pid); else _eolIds.delete(pid);
@@ -632,7 +697,7 @@ function renderWatchlistReport(data) {
   const dists = data.distributors.filter(d => data.rows.some(r => r.distributors[d] !== undefined));
   let html = `<div class="section-title">★ Watched SKUs <span style="font-size:12px;font-weight:400;color:#605E5C">(${data.rows.length} SKUs — ${fmtDate(data.date)})</span></div>`;
   html += '<div class="tbl-wrap"><table><thead><tr>';
-  html += '<th></th><th>Product ID</th><th>Model</th><th>Manufacturer</th>';
+  html += '<th></th><th>Product</th><th>Model</th><th>Manufacturer</th>';
   dists.forEach(d => html += `<th>${d}</th>`);
   html += '<th>Total</th><th>Δ Yesterday</th></tr></thead><tbody>';
 
@@ -731,7 +796,7 @@ function loadChipsetDrill(chipset) {
         document.getElementById('stic-chipset-drill-tbl').innerHTML = '<p style="color:#A19F9D;padding:20px">No SKUs found</p>';
         return;
       }
-      let html = '<table><thead><tr><th class="wstar"></th><th>Product ID</th><th>Model</th><th>Manufacturer</th><th>Channel Stock</th><th>VIP Stock</th><th>Floor £</th><th>VIP £</th></tr></thead><tbody>';
+      let html = '<table><thead><tr><th class="wstar"></th><th>Product</th><th>Model</th><th>Manufacturer</th><th>Channel Stock</th><th>VIP Stock</th><th>Floor £</th><th>VIP £</th></tr></thead><tbody>';
       rows.forEach(r => {
         html += `<tr class="clickable" onclick="loadSticSku(${r.product_id},'overview')" title="Click for full SKU detail">
           <td class="wstar">${watchStarHtml(r.product_id)}</td>
@@ -757,7 +822,7 @@ function doSticSearch() {
   document.getElementById('stic-search-results').innerHTML = '<div class="spinner">Searching…</div>';
   fetch('/api/stic/search?q=' + encodeURIComponent(q)).then(r=>r.json()).then(rows => {
     if (!rows.length) { document.getElementById('stic-search-results').innerHTML = '<p style="color:#A19F9D;padding:20px">No results</p>'; return; }
-    let html = '<div class="section-title">Results (' + rows.length + ')</div><div class="tbl-wrap"><table><thead><tr><th class="wstar"></th><th>Product ID</th><th>Model</th><th>Manufacturer</th><th>Channel Stock</th><th>VIP Stock</th><th>Floor £</th><th>VIP £</th></tr></thead><tbody>';
+    let html = '<div class="section-title">Results (' + rows.length + ')</div><div class="tbl-wrap"><table><thead><tr><th class="wstar"></th><th>Product</th><th>Model</th><th>Manufacturer</th><th>Channel Stock</th><th>VIP Stock</th><th>Floor £</th><th>VIP £</th></tr></thead><tbody>';
     rows.forEach(r => {
       html += `<tr class="clickable" onclick="loadSticSku(${r.product_id},'search')">
         <td class="wstar">${watchStarHtml(r.product_id)}</td>
@@ -803,7 +868,7 @@ function renderSticSku(data) {
   const { info, snapshot, price_history, stock_history, cheapest_history } = data;
 
   const metaParts = [
-    `Product ID: ${info.product_id}`,
+    `Product: ${info.product_id}`,
     `Manufacturer: ${info.manufacturer}`,
     `Model: ${info.model_no}`,
     `EAN: ${info.ean || '—'}`,
@@ -1051,7 +1116,7 @@ function renderReportTable(name, rows) {
   let cols, rowFn;
 
   if (name === 'vip_out_on_price') {
-    cols = ['Product ID','Model','Manufacturer','Channel Stock','VIP Stock','Floor £','VIP £','Suggested Cost £'];
+    cols = ['Product','Model','Manufacturer','Channel Stock','VIP Stock','Floor £','VIP £','Suggested Cost £'];
     rowFn = r => {
       const sug = r.min_price ? '£'+(r.min_price*0.96).toFixed(2) : '—';
       return `<tr class="clickable" onclick="loadSticSku(${r.product_id},'report')">
@@ -1064,7 +1129,7 @@ function renderReportTable(name, rows) {
       </tr>`;
     };
   } else if (name === 'vip_price_gap') {
-    cols = ['Product ID','Model','Manufacturer','VIP £','Floor £','Gap £'];
+    cols = ['Product','Model','Manufacturer','VIP £','Floor £','Gap £'];
     rowFn = r => `<tr class="clickable" onclick="loadSticSku(${r.product_id},'report')">
       <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer}</td>
       <td>${r.vip_price ? '£'+r.vip_price.toFixed(2) : '—'}</td>
@@ -1072,7 +1137,7 @@ function renderReportTable(name, rows) {
       <td><span class="badge badge-red">+£${r.gap.toFixed(2)}</span></td>
     </tr>`;
   } else if (name === 'daily_changes') {
-    cols = ['Product ID','Model','Distributor','Yesterday £','Today £','Change','Stock'];
+    cols = ['Product','Model','Distributor','Yesterday £','Today £','Change','Stock'];
     rowFn = r => {
       const diff = r.price_today !== null && r.price_yesterday !== null ? r.price_today - r.price_yesterday : null;
       const badge = diff === null ? '' : diff > 0 ? `<span class="badge badge-red">+£${diff.toFixed(2)}</span>` : `<span class="badge badge-green">£${diff.toFixed(2)}</span>`;
@@ -1082,7 +1147,7 @@ function renderReportTable(name, rows) {
         <td>${badge}</td><td>${r.qty_today ?? '—'}</td></tr>`;
     };
   } else if (name === 'price_dropping' || name === 'price_rising') {
-    cols = ['Product ID','Model','Manufacturer','Yesterday £','Today £','Change'];
+    cols = ['Product','Model','Manufacturer','Yesterday £','Today £','Change'];
     rowFn = r => {
       const diff = (r.price_today||0) - (r.price_yesterday||0);
       const badge = diff > 0 ? `<span class="badge badge-red">+£${diff.toFixed(2)}</span>` : `<span class="badge badge-green">£${diff.toFixed(2)}</span>`;
@@ -1093,7 +1158,7 @@ function renderReportTable(name, rows) {
         <td>${badge}</td></tr>`;
     };
   } else {
-    cols = ['Product ID','Model','Manufacturer','Channel Stock','Floor £','VIP £'];
+    cols = ['Product','Model','Manufacturer','Channel Stock','Floor £','VIP £'];
     rowFn = r => `<tr class="clickable" onclick="loadSticSku(${r.product_id},'report')">
       <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer}</td>
       <td>${(r.total_stock||0).toLocaleString()}</td>
@@ -1278,6 +1343,346 @@ function triggerScrapeGroup(label, btn) {
   });
 }
 
+// ── Import / Export ───────────────────────────────────────────────────────────
+
+// Tool registry — add new tools here as they are built
+const IE_TOOLS = [
+  {
+    id:          'new-skus',
+    icon:        '📥',
+    name:        'Add / Update SKUs',
+    desc:        'Import a CSV to add new SKUs or update existing product details. EOL status is not touched.',
+    type:        'import',
+    hasTemplate: true,
+    headers:     'Product,model_no,manufacturer,product_group,description,chipset,ean',
+  },
+  {
+    id:          'eol-status',
+    icon:        '🔄',
+    name:        'Update EOL Status',
+    desc:        'Import a CSV to bulk-update EOL flags from your product status data.',
+    type:        'import',
+    hasTemplate: true,
+    headers:     'Product,Product_Status',
+  },
+  {
+    id:   'export-skus',
+    icon: '📤',
+    name: 'Export Active SKUs',
+    desc: 'Download all active (non-EOL) SKUs as CSV — useful for bulk review or editing before re-importing.',
+    type: 'export',
+  },
+];
+
+let _ieCurrentTool = null;    // tool id currently open
+let _iePreviewRows  = [];     // validated rows from last preview, ready to confirm
+
+function loadImportExport(btn) {
+  if (btn) {
+    document.querySelectorAll('#sidebar-stic .sidebar-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+  document.querySelectorAll('#main-stic .content-section').forEach(s => s.classList.remove('active'));
+  document.getElementById('stic-import-export').classList.add('active');
+  _ieCurrentTool = null;
+  _renderIeToolCards();
+}
+
+function _renderIeToolCards() {
+  const el = document.getElementById('stic-import-export-content');
+  let html = '<h2 style="margin:0 0 4px">Import / Export</h2>';
+  html += '<p style="color:#605E5C;margin:0 0 16px;font-size:13px">Select a tool below. Import tools accept a CSV file; export tools download data directly. New tools will be added here over time.</p>';
+  html += '<div class="ie-tool-cards">';
+  IE_TOOLS.forEach(t => {
+    if (t.type === 'export') {
+      html += `<div class="ie-tool-card" onclick="_ieExport('${t.id}')">
+        <div class="ie-icon">${t.icon}</div>
+        <div class="ie-name">${t.name}</div>
+        <div class="ie-desc">${t.desc}</div>
+        <span class="ie-tag ie-tag-export">Export</span>
+      </div>`;
+    } else {
+      html += `<div class="ie-tool-card" onclick="_ieOpenTool('${t.id}')">
+        <div class="ie-icon">${t.icon}</div>
+        <div class="ie-name">${t.name}</div>
+        <div class="ie-desc">${t.desc}</div>
+        <span class="ie-tag ie-tag-import">Import</span>
+      </div>`;
+    }
+  });
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+function _ieOpenTool(toolId) {
+  _ieCurrentTool = toolId;
+  _iePreviewRows  = [];
+  const tool = IE_TOOLS.find(t => t.id === toolId);
+  if (!tool) return;
+  const el = document.getElementById('stic-import-export-content');
+  const templateBtn = tool.hasTemplate
+    ? `<a href="/api/import/template/${toolId}" download class="ie-btn ie-btn-secondary" style="text-decoration:none">↓ Download CSV Template</a>`
+    : '';
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+      <button class="ie-btn ie-btn-secondary" onclick="_renderIeToolCards()">← Back</button>
+      <h2 style="margin:0">${tool.icon} ${tool.name}</h2>
+    </div>
+    <p style="color:#605E5C;margin:0 0 14px;font-size:13px">${tool.desc}</p>
+
+    ${tool.headers ? `<div style="margin-bottom:14px;background:#fff;border:1px solid #EDEBE9;border-radius:2px;padding:10px 12px">
+      <div style="font-size:11px;font-weight:600;color:#A19F9D;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Required CSV Headers</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <code id="ie-headers-${toolId}" style="flex:1;font-size:12px;background:#F3F2F1;padding:5px 9px;border-radius:2px;border:1px solid #EDEBE9;color:#323130;user-select:all;cursor:text">${tool.headers}</code>
+        <button class="ie-btn ie-btn-secondary" onclick="_ieCopyHeaders('${toolId}')" id="ie-copy-btn-${toolId}" style="white-space:nowrap;flex-shrink:0">Copy</button>
+      </div>
+      <div style="font-size:11px;color:#A19F9D;margin-top:5px">${tool.headersNote || 'Paste this as the first row of your CSV, or use the template below — column order doesn\'t matter as long as the names match exactly.'}</div>
+    </div>` : ''}
+
+    ${tool.hasTemplate ? `<div style="margin-bottom:14px">${templateBtn}
+      <span style="font-size:11px;color:#A19F9D;margin-left:10px">Opens in Excel pre-formatted. Fill in your data, save as CSV, then upload below.</span>
+    </div>` : ''}
+
+    <div class="ie-dropzone" id="ie-dz-${toolId}"
+         onclick="document.getElementById('ie-file-${toolId}').click()"
+         ondragover="event.preventDefault();this.classList.add('drag-over')"
+         ondragleave="this.classList.remove('drag-over')"
+         ondrop="_ieDrop(event,'${toolId}')">
+      <input type="file" id="ie-file-${toolId}" accept=".csv,text/csv"
+             onchange="_ieFileSelected(this,'${toolId}')">
+      <div class="dz-icon">📂</div>
+      <div class="dz-text">Click to browse or drag &amp; drop a CSV file here</div>
+      <div class="dz-hint">CSV format · UTF-8 or UTF-8 BOM · Max 5 000 rows</div>
+    </div>
+    <div id="ie-preview-${toolId}" style="margin-top:16px"></div>
+  `;
+}
+
+function _ieCopyHeaders(toolId) {
+  const code = document.getElementById('ie-headers-' + toolId);
+  const btn  = document.getElementById('ie-copy-btn-' + toolId);
+  navigator.clipboard.writeText(code.textContent).then(() => {
+    btn.textContent = '✓ Copied';
+    btn.style.color = '#107C10';
+    btn.style.borderColor = '#107C10';
+    setTimeout(() => { btn.textContent = 'Copy'; btn.style.color = ''; btn.style.borderColor = ''; }, 2000);
+  }).catch(() => {
+    // Fallback for older browsers
+    const sel = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(code);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    document.execCommand('copy');
+    sel.removeAllRanges();
+    btn.textContent = '✓ Copied';
+    setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+  });
+}
+
+function _ieDrop(event, toolId) {
+  event.preventDefault();
+  document.getElementById('ie-dz-' + toolId).classList.remove('drag-over');
+  const file = event.dataTransfer.files[0];
+  if (file) _ieReadFile(file, toolId);
+}
+
+function _ieFileSelected(input, toolId) {
+  if (input.files[0]) _ieReadFile(input.files[0], toolId);
+}
+
+function _ieReadFile(file, toolId) {
+  const dz = document.getElementById('ie-dz-' + toolId);
+  dz.querySelector('.dz-text').textContent = `Reading: ${file.name}…`;
+  const reader = new FileReader();
+  reader.onload = e => _ieUploadForPreview(toolId, e.target.result, file.name);
+  reader.onerror = () => { dz.querySelector('.dz-text').textContent = 'Error reading file.'; };
+  reader.readAsText(file);   // UTF-8; server strips BOM
+}
+
+function _ieUploadForPreview(toolId, csvText, filename) {
+  const previewEl = document.getElementById('ie-preview-' + toolId);
+  previewEl.innerHTML = '<div class="spinner">Parsing…</div>';
+  fetch('/api/import/' + toolId + '/preview', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({csv: csvText, filename})
+  })
+  .then(r => r.json())
+  .then(data => _ieRenderPreview(toolId, data))
+  .catch(() => {
+    previewEl.innerHTML = '<p style="color:#A4262C;padding:12px">Network error — could not parse file.</p>';
+  });
+}
+
+function _ieRenderPreview(toolId, data) {
+  const previewEl = document.getElementById('ie-preview-' + toolId);
+  if (data.error) {
+    previewEl.innerHTML = `<p style="color:#A4262C;padding:12px">❌ ${data.error}</p>`;
+    return;
+  }
+  const s = data.summary;
+  _iePreviewRows = data.valid_rows;
+
+  // ── eol-status tool: custom summary and table layout ────────────────────────
+  if (toolId === 'eol-status') {
+    let html = `<div class="ie-summary">
+      <span>Total rows: <strong>${s.total}</strong></span>
+      <span style="color:#107C10">→ Set Active: <strong>${s.set_active||0}</strong></span>
+      <span style="color:#A4262C">→ Set EOL: <strong>${s.set_eol||0}</strong></span>
+      ${s.no_change ? `<span style="color:#A19F9D">No change: <strong>${s.no_change}</strong></span>` : ''}
+      ${s.not_found ? `<span style="color:#A19F9D">Not in DB: <strong>${s.not_found}</strong></span>` : ''}
+      ${s.errors  ? `<span style="color:#A4262C">⚠ Errors: <strong>${s.errors}</strong></span>` : ''}
+    </div>`;
+
+    if (_iePreviewRows.length) {
+      html += `<div class="ie-action-bar">
+        <button class="ie-btn ie-btn-success" id="ie-confirm-btn-${toolId}"
+                onclick="_ieConfirm('${toolId}')">✓ Confirm Update (${_iePreviewRows.length} rows)</button>
+        <button class="ie-btn ie-btn-secondary" onclick="_ieOpenTool('${toolId}')">✕ Cancel</button>
+      </div>`;
+    }
+
+    const allRows = [...(data.valid_rows||[]), ...(data.error_rows||[])];
+    if (allRows.length) {
+      html += `<div class="tbl-wrap"><table>
+        <thead><tr>
+          <th>Action</th><th>VIP Code</th><th>Model</th><th>Product Status</th>
+          <th>Current EOL</th><th>New EOL</th><th>Note</th>
+        </tr></thead><tbody>`;
+      allRows.forEach(r => {
+        const actionPill =
+            r._action === 'set_active'  ? '<span class="ie-new">SET ACTIVE</span>'
+          : r._action === 'set_eol'     ? '<span class="ie-error">SET EOL</span>'
+          : r._action === 'no_change'   ? '<span style="color:#A19F9D;font-size:11px">no change</span>'
+          : r._action === 'not_found'   ? '<span style="color:#A19F9D;font-size:11px">not in DB</span>'
+          :                               '<span class="ie-error">ERROR</span>';
+        const curEol = r.current_eol === 1 ? '<span class="ie-error">EOL</span>'
+                     : r.current_eol === 0 ? '<span class="ie-new">Active</span>' : '—';
+        const newEol = r.new_eol === 1 ? '<span class="ie-error">EOL</span>'
+                     : r.new_eol === 0 ? '<span class="ie-new">Active</span>' : '—';
+        html += `<tr>
+          <td>${actionPill}</td>
+          <td>${r.product_id||'—'}</td>
+          <td style="color:#605E5C">${r.model_no||'—'}</td>
+          <td style="text-align:center">${r.product_status??'—'}</td>
+          <td style="text-align:center">${curEol}</td>
+          <td style="text-align:center">${newEol}</td>
+          <td style="color:#605E5C;font-size:11px">${r._note||''}</td>
+        </tr>`;
+      });
+      html += '</tbody></table></div>';
+    }
+
+    if (!_iePreviewRows.length && !data.error_rows?.length) {
+      html += '<p style="color:#A19F9D;padding:12px">No valid rows found in the file.</p>';
+    }
+    previewEl.innerHTML = html;
+    return;
+  }
+
+  // ── Default preview layout (new-skus and future tools) ──────────────────────
+  let html = `<div class="ie-summary">
+    <span>Total rows: <strong>${s.total}</strong></span>
+    <span style="color:#107C10">✚ New: <strong>${s.new}</strong></span>
+    <span style="color:#0078D4">↻ Update: <strong>${s.update}</strong></span>
+    ${s.errors ? `<span style="color:#A4262C">⚠ Errors: <strong>${s.errors}</strong></span>` : ''}
+    ${s.warnings ? `<span style="color:#8A4B00">⚠ Warnings: <strong>${s.warnings}</strong></span>` : ''}
+  </div>`;
+
+  if (_iePreviewRows.length) {
+    html += `<div class="ie-action-bar">
+      <button class="ie-btn ie-btn-success" id="ie-confirm-btn-${toolId}"
+              onclick="_ieConfirm('${toolId}')">✓ Confirm Import (${_iePreviewRows.length} rows)</button>
+      <button class="ie-btn ie-btn-secondary" onclick="_ieOpenTool('${toolId}')">✕ Cancel</button>
+    </div>`;
+  }
+
+  // Preview table — all rows including errors
+  const allRows = [...(data.valid_rows || []), ...(data.error_rows || [])];
+  if (allRows.length) {
+    html += `<div class="tbl-wrap"><table>
+      <thead><tr>
+        <th>Status</th><th>VIP Code</th><th>Model</th><th>Manufacturer</th>
+        <th>Group</th><th>Description</th><th>Chipset</th><th>EAN</th><th>Note</th>
+      </tr></thead><tbody>`;
+    allRows.forEach(r => {
+      const stPill = r._status === 'new'    ? '<span class="ie-new">NEW</span>'
+                   : r._status === 'update' ? '<span class="ie-update">UPDATE</span>'
+                   : r._status === 'warn'   ? '<span class="ie-warn">WARN</span>'
+                   :                          '<span class="ie-error">ERROR</span>';
+      html += `<tr>
+        <td>${stPill}</td>
+        <td>${r.product_id||'—'}</td>
+        <td>${r.model_no||'—'}</td>
+        <td>${r.manufacturer||'—'}</td>
+        <td>${r.product_group||'—'}</td>
+        <td>${r.description||''}</td>
+        <td>${r.chipset||''}</td>
+        <td>${r.ean||''}</td>
+        <td style="color:#605E5C;font-size:11px">${r._note||''}</td>
+      </tr>`;
+    });
+    html += '</tbody></table></div>';
+  }
+
+  if (!_iePreviewRows.length && !data.error_rows?.length) {
+    html += '<p style="color:#A19F9D;padding:12px">No valid rows found in the file.</p>';
+  }
+
+  previewEl.innerHTML = html;
+}
+
+function _ieConfirm(toolId) {
+  if (!_iePreviewRows.length) return;
+  const btn = document.getElementById('ie-confirm-btn-' + toolId);
+  btn.disabled = true;
+  btn.textContent = '⏳ Importing…';
+  fetch('/api/import/' + toolId + '/confirm', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({rows: _iePreviewRows})
+  })
+  .then(r => r.json())
+  .then(data => {
+    const previewEl = document.getElementById('ie-preview-' + toolId);
+    if (data.error) {
+      previewEl.innerHTML = `<p style="color:#A4262C;padding:12px">❌ Import failed: ${data.error}</p>`;
+      return;
+    }
+    let resultHtml = '<div class="ie-summary" style="border-color:#107C10">';
+    if (toolId === 'eol-status') {
+      resultHtml += `
+        <span style="color:#107C10;font-weight:600;font-size:14px">✓ EOL status updated</span>
+        <span style="color:#107C10">Set Active: <strong>${data.set_active}</strong></span>
+        <span style="color:#A4262C">Set EOL: <strong>${data.set_eol}</strong></span>
+        ${data.skipped ? `<span style="color:#A19F9D">Skipped: <strong>${data.skipped}</strong></span>` : ''}`;
+    } else {
+      resultHtml += `
+        <span style="color:#107C10;font-weight:600;font-size:14px">✓ Import complete</span>
+        <span style="color:#107C10">Added: <strong>${data.added}</strong></span>
+        <span style="color:#0078D4">Updated: <strong>${data.updated}</strong></span>
+        ${data.skipped ? `<span style="color:#A19F9D">Skipped: <strong>${data.skipped}</strong></span>` : ''}`;
+    }
+    resultHtml += `</div>
+      <p style="color:#605E5C;font-size:12px;padding:0 0 12px">Changes are live immediately. The nightly sync will push them to OneDrive on the next run.</p>
+      <button class="ie-btn ie-btn-secondary" onclick="_renderIeToolCards()">← Back to tools</button>`;
+    previewEl.innerHTML = resultHtml;
+    _iePreviewRows = [];
+  })
+  .catch(() => {
+    btn.disabled = false;
+    btn.textContent = '✓ Confirm Import';
+    alert('Network error — import may not have completed.');
+  });
+}
+
+function _ieExport(toolId) {
+  if (toolId === 'export-skus') {
+    window.location.href = '/api/export/skus';
+  }
+}
+
 // ── Retailer KPI ──────────────────────────────────────────────────────────────
 let retailerKpiLoaded = false;
 function loadRetailerKpi() {
@@ -1301,7 +1706,7 @@ function doRetSearch() {
   document.getElementById('ret-sku').classList.remove('active');
   fetch('/api/retailer/search?q=' + encodeURIComponent(q)).then(r=>r.json()).then(rows => {
     if (!rows.length) { document.getElementById('ret-search-results').innerHTML = '<p style="color:#A19F9D;padding:20px">No results</p>'; return; }
-    let html = '<div class="section-title">Results (' + rows.length + ')</div><div class="tbl-wrap"><table><thead><tr><th>Product ID</th><th>Model</th><th>Manufacturer</th><th>Lowest Price</th><th>Below MSRP</th></tr></thead><tbody>';
+    let html = '<div class="section-title">Results (' + rows.length + ')</div><div class="tbl-wrap"><table><thead><tr><th>Product</th><th>Model</th><th>Manufacturer</th><th>Lowest Price</th><th>Below MSRP</th></tr></thead><tbody>';
     rows.forEach(r => {
       html += `<tr class="clickable" onclick="loadRetSku(${r.product_id})">
         <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer}</td>
@@ -1333,7 +1738,7 @@ function renderRetSku(data) {
   const { info, snapshot, price_history } = data;
 
   let html = `<h3 style="margin-bottom:8px">${info.manufacturer} ${info.model_no}</h3>
-    <p style="color:#605E5C;margin-bottom:16px">Product ID: ${info.product_id} | MSRP: ${info.msrp ? '£'+info.msrp.toFixed(2) : '—'}</p>`;
+    <p style="color:#605E5C;margin-bottom:16px">Product: ${info.product_id} | MSRP: ${info.msrp ? '£'+info.msrp.toFixed(2) : '—'}</p>`;
 
   html += '<div class="section-title">Current Snapshot</div><div class="tbl-wrap"><table><thead><tr><th>Retailer</th><th>Price</th><th>vs MSRP</th></tr></thead><tbody>';
   snapshot.forEach(r => {
@@ -2162,6 +2567,383 @@ def scrape_group_trigger():
         return jsonify({"started": True, "label": label})
     except Exception as e:
         return jsonify({"started": False, "error": str(e)})
+
+
+@app.route("/api/import/template/new-skus")
+def import_template_new_skus():
+    """Return a CSV template for the Add/Update SKUs import tool."""
+    from flask import Response
+    # UTF-8 BOM so Excel opens it correctly without an import wizard
+    csv = (
+        "\ufeffProduct,model_no,manufacturer,product_group,description,chipset,ean\r\n"
+        "123456,RTX 5090 GAMING OC 32G,GIGABYTE,PROD_VIDEO,GIGABYTE GeForce RTX 5090 Gaming OC 32G,RTX 5090,4719331314224\r\n"
+    )
+    return Response(
+        csv,
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=new-skus-template.csv"},
+    )
+
+
+@app.route("/api/import/new-skus/preview", methods=["POST"])
+def import_new_skus_preview():
+    """Parse uploaded CSV text, validate rows, return preview JSON (no DB writes)."""
+    import csv, io
+    data = request.get_json(silent=True) or {}
+    raw = (data.get("csv") or "").lstrip("\ufeff").strip()   # strip UTF-8 BOM if present
+    if not raw:
+        return jsonify({"error": "No CSV content received."})
+
+    KNOWN_GROUPS = {"PROD_VIDEO", "PROD_MBRD", "PROD_MBRDS"}
+    REQUIRED     = ("product_id", "model_no", "manufacturer", "product_group")
+
+    try:
+        reader = csv.DictReader(io.StringIO(raw))
+    except Exception as e:
+        return jsonify({"error": f"CSV parse error: {e}"})
+
+    # Normalise header names (strip whitespace, lower)
+    raw_rows = list(reader)
+    if not raw_rows:
+        return jsonify({"error": "CSV file appears to be empty (no data rows)."})
+
+    # Check required headers exist (case-insensitive).
+    # Accept "product" as an alias for "product_id" to match VIP system exports.
+    headers_lower = {h.strip().lower(): h for h in (reader.fieldnames or [])}
+    if "product_id" not in headers_lower and "product" in headers_lower:
+        headers_lower["product_id"] = headers_lower["product"]
+        raw_rows = [{("product_id" if k.strip().lower() == "product" else k): v
+                     for k, v in row.items()} for row in raw_rows]
+
+    missing_hdrs  = [f for f in REQUIRED if f not in headers_lower]
+    if missing_hdrs:
+        return jsonify({"error": f"Missing required columns: {', '.join(missing_hdrs)}. "
+                                  "Download the template to see the expected format."})
+
+    # Normalise header key map: column name → canonical field name
+    col = {f: headers_lower[f] for f in REQUIRED}
+    col_opt = {}
+    for f in ("description", "chipset", "ean", "stic_url"):
+        if f in headers_lower:
+            col_opt[f] = headers_lower[f]
+
+    # Load existing product_ids for new/update classification
+    db = get_db()
+    existing_ids = {r["product_id"] for r in db.execute("SELECT product_id FROM products").fetchall()}
+    db.close()
+
+    valid_rows  = []
+    error_rows  = []
+    warn_count  = 0
+
+    for i, row in enumerate(raw_rows, start=2):   # row 1 = header, data starts at 2
+        # Normalise keys
+        r = {k.strip().lower(): (v or "").strip() for k, v in row.items()}
+
+        # Validate required fields
+        err = None
+        pid_raw = r.get("product_id", "")
+        try:
+            pid = int(pid_raw)
+        except ValueError:
+            err = f"product_id must be an integer (got '{pid_raw}')"
+
+        if not err and not r.get("model_no"):
+            err = "model_no is required"
+        if not err and not r.get("manufacturer"):
+            err = "manufacturer is required"
+        if not err and not r.get("product_group"):
+            err = "product_group is required"
+
+        if err:
+            error_rows.append({
+                "product_id": pid_raw, "model_no": r.get("model_no",""),
+                "manufacturer": r.get("manufacturer",""), "product_group": r.get("product_group",""),
+                "description": r.get("description",""), "chipset": r.get("chipset",""),
+                "ean": r.get("ean",""), "_status": "error", "_note": err,
+            })
+            continue
+
+        # Warn if product_group not recognised (but still accept it)
+        note = ""
+        status = "update" if pid in existing_ids else "new"
+        if r.get("product_group") not in KNOWN_GROUPS:
+            note = f"Unrecognised group '{r['product_group']}' (expected PROD_VIDEO, PROD_MBRD, or PROD_MBRDS)"
+            status = "warn"
+            warn_count += 1
+
+        valid_rows.append({
+            "product_id":    pid,
+            "model_no":      r.get("model_no", ""),
+            "manufacturer":  r.get("manufacturer", ""),
+            "product_group": r.get("product_group", ""),
+            "description":   r.get("description", "") or None,
+            "chipset":       r.get("chipset", "") or None,
+            "ean":           r.get("ean", "") or None,
+            "_status":       status,
+            "_note":         note,
+        })
+
+    summary = {
+        "total":    len(raw_rows),
+        "new":      sum(1 for r in valid_rows if r["_status"] == "new"),
+        "update":   sum(1 for r in valid_rows if r["_status"] == "update"),
+        "warnings": warn_count,
+        "errors":   len(error_rows),
+    }
+    return jsonify({"valid_rows": valid_rows, "error_rows": error_rows, "summary": summary})
+
+
+@app.route("/api/import/new-skus/confirm", methods=["POST"])
+def import_new_skus_confirm():
+    """Write previously-previewed rows to the products table."""
+    data = request.get_json(silent=True) or {}
+    rows = data.get("rows") or []
+    if not rows:
+        return jsonify({"error": "No rows to import."})
+
+    db = get_db()
+    existing = {r["product_id"] for r in db.execute("SELECT product_id FROM products").fetchall()}
+
+    added = updated = skipped = 0
+    try:
+        for r in rows:
+            try:
+                pid = int(r["product_id"])
+            except (ValueError, TypeError):
+                skipped += 1
+                continue
+            if not r.get("model_no") or not r.get("manufacturer") or not r.get("product_group"):
+                skipped += 1
+                continue
+            if pid in existing:
+                db.execute(
+                    """UPDATE products SET
+                         model_no=?, manufacturer=?, product_group=?,
+                         description=?, chipset=?, ean=?
+                       WHERE product_id=?""",
+                    (r["model_no"], r["manufacturer"], r["product_group"],
+                     r.get("description"), r.get("chipset"), r.get("ean"), pid)
+                )
+                updated += 1
+            else:
+                db.execute(
+                    """INSERT INTO products
+                         (product_id, model_no, manufacturer, product_group,
+                          description, chipset, ean, eol)
+                       VALUES (?,?,?,?,?,?,?,0)""",
+                    (pid, r["model_no"], r["manufacturer"], r["product_group"],
+                     r.get("description"), r.get("chipset"), r.get("ean"))
+                )
+                added += 1
+        db.commit()
+    except Exception as e:
+        db.close()
+        return jsonify({"error": str(e)})
+    db.close()
+    return jsonify({"added": added, "updated": updated, "skipped": skipped})
+
+
+@app.route("/api/export/skus")
+def export_skus():
+    """Download all active (non-EOL) SKUs as a UTF-8 BOM CSV."""
+    import csv, io
+    from flask import Response
+    rows = qry(
+        "SELECT product_id AS Product, model_no, manufacturer, product_group, description, chipset, ean "
+        "FROM products WHERE eol=0 ORDER BY product_id"
+    )
+    buf = io.StringIO()
+    buf.write("\ufeff")  # UTF-8 BOM for Excel
+    writer = csv.DictWriter(
+        buf,
+        fieldnames=["Product","model_no","manufacturer","product_group","description","chipset","ean"],
+        lineterminator="\r\n",
+    )
+    writer.writeheader()
+    writer.writerows(rows)
+    return Response(
+        buf.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=openclaw-skus.csv"},
+    )
+
+
+@app.route("/api/import/template/eol-status")
+def import_template_eol_status():
+    """Return a CSV template for the Update EOL Status import tool."""
+    from flask import Response
+    csv = (
+        "\ufeffProduct,Product_Status\r\n"
+        "123456,25\r\n"
+        "234567,55\r\n"
+        "345678,42\r\n"
+    )
+    return Response(
+        csv,
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=eol-status-template.csv"},
+    )
+
+
+@app.route("/api/import/eol-status/preview", methods=["POST"])
+def import_eol_status_preview():
+    """Parse uploaded CSV, validate, classify each row, return preview JSON (no DB writes)."""
+    import csv, io
+    data = request.get_json(silent=True) or {}
+    raw = (data.get("csv") or "").lstrip("\ufeff").strip()
+    if not raw:
+        return jsonify({"error": "No CSV content received."})
+
+    try:
+        reader = csv.DictReader(io.StringIO(raw))
+        raw_rows = list(reader)
+    except Exception as e:
+        return jsonify({"error": f"CSV parse error: {e}"})
+
+    if not raw_rows:
+        return jsonify({"error": "CSV file appears to be empty (no data rows)."})
+
+    # Accept "product" as an alias for "product_id" to match VIP system exports.
+    headers_lower = {h.strip().lower() for h in (reader.fieldnames or [])}
+    if "product_id" not in headers_lower and "product" in headers_lower:
+        headers_lower.add("product_id")
+        raw_rows = [{("product_id" if k.strip().lower() == "product" else k): v
+                     for k, v in row.items()} for row in raw_rows]
+
+    missing = [f for f in ("product_id", "product_status") if f not in headers_lower]
+    if missing:
+        return jsonify({"error": f"Missing required columns: {', '.join(missing)}. "
+                                  "Expected: product_id (or Product), product_status"})
+
+    # Load current EOL state and model info from DB
+    db = get_db()
+    products = {
+        r["product_id"]: r
+        for r in db.execute(
+            "SELECT product_id, model_no, eol FROM products"
+        ).fetchall()
+    }
+    db.close()
+
+    # EOL status codes: 0–39 = Active, 40/42 = EOL, 41/43–49 = Active, 50–99 = EOL
+    EOL_CODES = set(range(50, 100)) | {40, 42}
+
+    valid_rows = []
+    error_rows = []
+    set_active = set_eol = no_change = not_found = 0
+
+    for row in raw_rows:
+        r = {k.strip().lower(): (v or "").strip() for k, v in row.items()}
+
+        # Validate product_id
+        pid_raw = r.get("product_id", "")
+        try:
+            pid = int(pid_raw)
+        except ValueError:
+            error_rows.append({
+                "product_id": pid_raw, "product_status": r.get("product_status",""),
+                "model_no": "—", "current_eol": None, "new_eol": None,
+                "_action": "error", "_note": f"product_id must be an integer (got '{pid_raw}')",
+            })
+            continue
+
+        # Validate product_status
+        status_raw = r.get("product_status", "")
+        try:
+            status = int(status_raw)
+            if not (0 <= status <= 99):
+                raise ValueError()
+        except ValueError:
+            error_rows.append({
+                "product_id": pid, "product_status": status_raw,
+                "model_no": "—", "current_eol": None, "new_eol": None,
+                "_action": "error",
+                "_note": f"product_status must be an integer 0–99 (got '{status_raw}')",
+            })
+            continue
+
+        # Look up in DB
+        if pid not in products:
+            error_rows.append({
+                "product_id": pid, "product_status": status,
+                "model_no": "—", "current_eol": None, "new_eol": None,
+                "_action": "not_found", "_note": "VIP code not found in products table",
+            })
+            not_found += 1
+            continue
+
+        prod = products[pid]
+        current_eol = prod["eol"]
+        model_no    = prod["model_no"] or "—"
+
+        # Classify using defined EOL codes
+        new_eol = 1 if status in EOL_CODES else 0
+        if new_eol == current_eol:
+            action = "no_change"
+            no_change += 1
+        elif new_eol == 1:
+            action = "set_eol"
+            set_eol += 1
+        else:
+            action = "set_active"
+            set_active += 1
+
+        entry = {
+            "product_id":     pid,
+            "product_status": status,
+            "model_no":       model_no,
+            "current_eol":    current_eol,
+            "new_eol":        new_eol,
+            "_action":        action,
+            "_note":          "",
+        }
+        if action == "no_change":
+            error_rows.append(entry)   # shown in table but not written to DB
+        else:
+            valid_rows.append(entry)
+
+    summary = {
+        "total":      len(raw_rows),
+        "set_active": set_active,
+        "set_eol":    set_eol,
+        "no_change":  no_change,
+        "not_found":  not_found,
+        "errors":     sum(1 for r in error_rows if r["_action"] == "error"),
+    }
+    return jsonify({"valid_rows": valid_rows, "error_rows": error_rows, "summary": summary})
+
+
+@app.route("/api/import/eol-status/confirm", methods=["POST"])
+def import_eol_status_confirm():
+    """Apply EOL flag changes from previously-previewed rows."""
+    data = request.get_json(silent=True) or {}
+    rows = data.get("rows") or []
+    if not rows:
+        return jsonify({"error": "No rows to update."})
+
+    db = get_db()
+    set_active = set_eol = skipped = 0
+    try:
+        for r in rows:
+            try:
+                pid     = int(r["product_id"])
+                new_eol = int(r["new_eol"])   # 0 or 1
+            except (ValueError, TypeError, KeyError):
+                skipped += 1
+                continue
+            if new_eol not in (0, 1):
+                skipped += 1
+                continue
+            db.execute("UPDATE products SET eol=? WHERE product_id=?", (new_eol, pid))
+            if new_eol == 1: set_eol    += 1
+            else:             set_active += 1
+        db.commit()
+    except Exception as e:
+        db.close()
+        return jsonify({"error": str(e)})
+    db.close()
+    return jsonify({"set_active": set_active, "set_eol": set_eol, "skipped": skipped})
 
 
 @app.route("/api/stic-url/<int:product_id>", methods=["POST"])

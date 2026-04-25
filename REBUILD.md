@@ -273,3 +273,72 @@ chown -R adminclaude:adminclaude /opt/openclaw
 - **TrueNAS backup path** — `/mnt/Deep/backups/openclaw/`
 - **GitHub repo** — `jackd71-ops/syndrome-open-claw`
 - Update this document whenever cron jobs, services, or packages change
+
+---
+
+## Products Table
+
+The `products` table in `prices.db` is the operational SKU catalogue — the scraper and portal read from it directly. It is seeded and kept in sync by `scripts/sync_template.py` (nightly, midnight UK). On a fresh rebuild, seed it manually before running the scraper:
+
+```bash
+python3 /opt/openclaw/scripts/sync_template.py
+```
+
+Schema:
+
+| Column | Type | Notes |
+|---|---|---|
+| product_id | INTEGER PK | VIP 6-digit code (displayed as "Product" in portal/CSV) |
+| model_no | TEXT | |
+| manufacturer | TEXT | |
+| product_group | TEXT | PROD_VIDEO, PROD_MBRD, PROD_MBRDS |
+| description | TEXT | |
+| chipset | TEXT | |
+| ean | TEXT | |
+| eol | INTEGER | 0 = active, 1 = EOL |
+| stic_url | TEXT | Cached STIC product detail URL (auto-populated by scraper) |
+
+EOL flag is managed via the portal Import/Export → Update EOL Status tool or the ⛔ EOL view. The nightly sync flushes EOL changes back to the OneDrive Excel.
+
+---
+
+## Portal Import / Export
+
+The portal (`/api/import/…`, `/api/export/…`) provides CSV-based tools for managing the products table without touching Excel directly. Current tools:
+
+| Tool | Endpoint | Description |
+|---|---|---|
+| Add / Update SKUs | `POST /api/import/new-skus/preview` + `/confirm` | Upsert products; does not touch EOL |
+| Update EOL Status | `POST /api/import/eol-status/preview` + `/confirm` | Bulk-set EOL flag from product status data |
+| Export Active SKUs | `GET /api/export/skus` | CSV download of all non-EOL products |
+| Template download | `GET /api/import/template/<tool-id>` | Pre-formatted CSV template with correct headers |
+
+CSV column named `Product` is the VIP product code (maps to `product_id` in DB). Both tools also accept `product_id` as the column name.
+
+---
+
+## Scraper Groups
+
+STIC scraper runs as 9 manufacturer/product-group segments instead of batches. Each group sends its own Telegram on completion.
+
+| Label | Manufacturer | Group |
+|---|---|---|
+| Palit GPU | PALIT | PROD_VIDEO |
+| PowerColor GPU | POWERCOLOR | PROD_VIDEO |
+| MSI GPU | MSI | PROD_VIDEO |
+| ASUS GPU | ASUS | PROD_VIDEO |
+| Gigabyte GPU | GIGABYTE | PROD_VIDEO |
+| MSI Motherboards | MSI | PROD_MBRD |
+| Gigabyte Motherboards | GIGABYTE | PROD_MBRD |
+| ASUS Motherboards | ASUS | PROD_MBRD |
+| Server / Pro | (all) | PROD_MBRDS |
+
+**CLI:**
+```bash
+python3 stic_scraper.py --runall          # all groups, random 0–10 min start delay
+python3 stic_scraper.py --gpus            # GPU groups only
+python3 stic_scraper.py --group "ASUS GPU"  # single named group, no delay
+python3 stic_scraper.py --rescrape 123456,234567  # re-scrape specific VIP codes
+```
+
+Groups can also be triggered from the portal: STIC → Scraper → Refresh SKUs.
