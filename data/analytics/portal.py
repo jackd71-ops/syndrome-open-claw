@@ -56,6 +56,52 @@ def prev_date(table, current):
     )
     return r["d"] if r else None
 
+
+def _init_products():
+    """Create the products table if it doesn't exist yet, and migrate new columns.
+    sync_template.py populates it nightly from the Excel master."""
+    db = get_db()
+    db.execute("""CREATE TABLE IF NOT EXISTS products (
+        product_id    INTEGER PRIMARY KEY,
+        description   TEXT,
+        model_no      TEXT,
+        manufacturer  TEXT,
+        product_group TEXT,
+        chipset       TEXT,
+        ean           TEXT,
+        eol           INTEGER NOT NULL DEFAULT 0,
+        stic_url      TEXT
+    )""")
+    # Migrate: add stic_url column if upgrading from older schema
+    try:
+        db.execute("ALTER TABLE products ADD COLUMN stic_url TEXT")
+    except Exception:
+        pass  # column already exists
+    db.commit()
+    db.close()
+
+
+def read_template_products():
+    """Return all products from the products DB table as list of dicts."""
+    rows = qry("SELECT * FROM products ORDER BY product_id")
+    for r in rows:
+        r["eol"] = bool(r.get("eol", 0))
+    return rows
+
+
+def write_eol_to_template(product_id: int, mark: bool):
+    """Write EOL flag to the products DB table (DB-only; nightly sync flushes to Excel)."""
+    db = get_db()
+    db.execute(
+        "UPDATE products SET eol=? WHERE product_id=?",
+        (1 if mark else 0, product_id)
+    )
+    changed = db.execute("SELECT changes()").fetchone()[0]
+    db.commit()
+    db.close()
+    return bool(changed)
+
+
 # ── Chipset extraction ─────────────────────────────────────────────────────────
 
 _CHIPSET_RE = re.compile(
@@ -169,6 +215,16 @@ HTML = r"""<!DOCTYPE html>
   .watch-star:hover { color:#FFB900; }
   td.wstar { width:26px; padding:4px 2px !important; text-align:center !important; }
   th.wstar { width:26px; padding:4px 2px !important; }
+  .eol-btn { background:none; border:1px solid #D13438; color:#D13438; border-radius:3px;
+    cursor:pointer; font-size:11px; font-weight:600; padding:2px 7px; line-height:1.4;
+    transition:background .15s,color .15s; white-space:nowrap; }
+  .eol-btn:hover { background:#D13438; color:#fff; }
+  .eol-btn.is-eol { background:#D13438; color:#fff; }
+  .eol-btn.is-eol:hover { background:#A4262C; border-color:#A4262C; }
+  .inv-subsection { margin-bottom:18px; }
+  .inv-subsection-title { font-size:12px; font-weight:600; color:#605E5C; text-transform:uppercase;
+    letter-spacing:.04em; margin-bottom:6px; padding-bottom:4px; border-bottom:1px solid #EDEBE9; }
+  .inv-empty { color:#A19F9D; font-size:13px; padding:6px 0; }
 
   /* Badges */
   .badge { display: inline-block; padding: 2px 6px; border-radius: 2px; font-size: 11px;
@@ -177,6 +233,11 @@ HTML = r"""<!DOCTYPE html>
   .badge-green { background: #DFF6DD; color: #107C10; }
   .badge-orange { background: #FFF4CE; color: #8A4B00; }
   .badge-blue { background: #DEECF9; color: #0078D4; }
+
+  /* Scrape trigger button */
+  .scrape-trigger-btn { padding: 5px 14px; font-size: 12px; font-weight: 600; border: none;
+    border-radius: 2px; cursor: pointer; background: #0078D4; color: #fff; }
+  .scrape-trigger-btn:hover:not([disabled]) { background: #106EBE; }
 
   /* Charts */
   .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
@@ -289,6 +350,30 @@ HTML = r"""<!DOCTYPE html>
         <button class="sidebar-btn" onclick="loadReport('daily_changes',this)">Changes since yesterday</button>
       </div>
     </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-header" onclick="toggleSection(this)">
+        Investigate <span class="arrow">▾</span>
+      </div>
+      <div class="sidebar-items">
+        <button class="sidebar-btn" onclick="loadInvestigateReport(this)">🔍 Investigate</button>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-header" onclick="toggleSection(this)">
+        EOL Products <span class="arrow">▾</span>
+      </div>
+      <div class="sidebar-items">
+        <button class="sidebar-btn" onclick="loadEOLProducts(this)">⛔ View EOL SKUs</button>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-header" onclick="toggleSection(this)">
+        Scraper <span class="arrow">▾</span>
+      </div>
+      <div class="sidebar-items">
+        <button class="sidebar-btn" onclick="loadScrapeGroups(this)">⟳ Refresh SKUs</button>
+      </div>
+    </div>
   </div>
 
   <div class="main" id="main-stic">
@@ -332,6 +417,18 @@ HTML = r"""<!DOCTYPE html>
     <div class="content-section" id="stic-report">
       <button class="back-btn" onclick="showSticSection('overview')">← Back to Overview</button>
       <div id="stic-report-content"><div class="spinner">Loading…</div></div>
+    </div>
+    <!-- Investigate -->
+    <div class="content-section" id="stic-investigate">
+      <div id="stic-investigate-content"><div class="spinner">Loading…</div></div>
+    </div>
+    <!-- EOL Products -->
+    <div class="content-section" id="stic-eol">
+      <div id="stic-eol-content"><div class="spinner">Loading…</div></div>
+    </div>
+    <!-- Scrape Groups -->
+    <div class="content-section" id="stic-scrape">
+      <div id="stic-scrape-content"><div class="spinner">Loading…</div></div>
     </div>
   </div>
 </div>
@@ -451,6 +548,67 @@ function watchStarHtml(pid, cls) {
   const w = _watchedIds.has(pid);
   return `<button class="${cls||'watch-star'}${w?' watched':''}" data-watch-pid="${pid}"
     onclick="toggleWatch(${pid},event)" title="${w?'Remove from watchlist':'Add to watchlist'}">${w?'★':'☆'}</button>`;
+}
+
+// ── EOL state ────────────────────────────────────────────────────────────────
+let _eolIds = new Set();
+
+function loadEOLState() {
+  fetch('/api/eol').then(r=>r.json()).then(data => {
+    _eolIds = new Set(data.products.map(p => p.product_id));
+    _refreshAllEolBtns();
+  });
+}
+
+function _refreshAllEolBtns() {
+  document.querySelectorAll('[data-eol-pid]').forEach(btn => {
+    const pid = parseInt(btn.dataset.eolPid);
+    const isEol = _eolIds.has(pid);
+    btn.textContent = isEol ? '✕ EOL' : 'Mark EOL';
+    btn.classList.toggle('is-eol', isEol);
+    btn.title = isEol ? 'Remove EOL — will resume scraping next cycle' : 'Mark as End of Life — scraper will skip';
+  });
+}
+
+function toggleEOL(pid, event) {
+  if (event) event.stopPropagation();
+  const marking = !_eolIds.has(pid);
+  const label = marking ? 'Mark as EOL?' : 'Remove EOL status?';
+  if (!confirm(label + '\n\nProduct ID: ' + pid)) return;
+  const method = marking ? 'POST' : 'DELETE';
+  fetch('/api/eol/' + pid, { method }).then(r=>r.json()).then(data => {
+    if (data.eol) _eolIds.add(pid); else _eolIds.delete(pid);
+    _refreshAllEolBtns();
+    // Refresh EOL section if it's currently visible
+    const eolSection = document.getElementById('stic-eol');
+    if (eolSection && eolSection.classList.contains('active')) loadEOLProducts();
+  });
+}
+
+function eolBtnHtml(pid) {
+  const isEol = _eolIds.has(pid);
+  return `<button class="eol-btn${isEol?' is-eol':''}" data-eol-pid="${pid}"
+    onclick="toggleEOL(${pid},event)"
+    title="${isEol?'Remove EOL — will resume scraping next cycle':'Mark as End of Life — scraper will skip'}"
+    >${isEol?'✕ EOL':'Mark EOL'}</button>`;
+}
+
+function saveSticUrl(pid) {
+  const input = document.getElementById('stic-url-input-' + pid);
+  const url = input ? input.value.trim() : '';
+  if (!url) { alert('Please paste a STIC URL first'); return; }
+  fetch('/api/stic-url/' + pid, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url })
+  }).then(r => r.json()).then(data => {
+    if (data.saved) {
+      alert('URL saved — scraper will use it as sanity check from next run');
+      loadSticSku(pid, currentSection);  // refresh the product page
+    } else {
+      alert('Save failed');
+    }
+  });
 }
 
 function loadWatchlistReport(btn) {
@@ -628,12 +786,15 @@ function loadSticSku(productId, backSection) {
 }
 
 // ── VIP price cell helper ─────────────────────────────────────────────────────
+// Red  = VIP above floor (priced out)
+// Blue = VIP equals floor (VIP is the cheapest / at floor)
+// No badge = VIP below recorded floor (edge case — VIP has no stock but a lower list price)
 function vipCell(vip, floor) {
   if (vip == null) return '—';
   const fmt = '£' + vip.toFixed(2);
   if (floor == null) return fmt;
   if (vip > floor) return `<span class="badge badge-red">${fmt}</span>`;
-  if (vip < floor) return `<span class="badge badge-green">${fmt}</span>`;
+  if (vip < floor) return fmt;   // below floor — just show the price, no badge needed
   return `<span class="badge badge-blue">${fmt}</span>`;
 }
 
@@ -641,16 +802,36 @@ function renderSticSku(data) {
   const el = document.getElementById('stic-sku-content');
   const { info, snapshot, price_history, stock_history, cheapest_history } = data;
 
-  const desc = info.description ? `<span style="color:#323130"> — ${info.description}</span>` : '';
+  const metaParts = [
+    `Product ID: ${info.product_id}`,
+    `Manufacturer: ${info.manufacturer}`,
+    `Model: ${info.model_no}`,
+    `EAN: ${info.ean || '—'}`,
+    `Group: ${info.product_group || '—'}`,
+  ];
+  if (info.description) metaParts.push(`Description: ${info.description}`);
   let html = `<div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px">
     <div style="flex:1">
-      <h3 style="margin:0 0 4px">${info.manufacturer} ${info.model_no}${desc}</h3>
-      <p style="color:#605E5C;margin:0">Product ID: ${info.product_id} | Group: ${info.product_group||'—'}</p>
+      <h3 style="margin:0 0 4px">${info.manufacturer} — ${info.model_no}</h3>
+      <p style="color:#605E5C;margin:0;font-size:12px">${metaParts.join(' | ')}</p>
     </div>
     <button class="watch-btn" data-watch-pid="${info.product_id}"
       onclick="toggleWatch(${info.product_id},event)"
       title="${_watchedIds.has(info.product_id)?'Remove from watchlist':'Add to watchlist'}"
       style="margin-top:2px">${_watchedIds.has(info.product_id)?'★':'☆'}</button>
+    ${eolBtnHtml(info.product_id)}
+  </div>
+  <div style="margin-bottom:12px;font-size:12px;color:#605E5C">
+    <span style="font-weight:600">STIC URL:</span>
+    ${info.stic_url
+      ? `<a href="${info.stic_url}" target="_blank" style="color:#0078D4;margin-left:6px">${info.stic_url}</a>`
+      : `<span style="margin-left:6px;color:#A19F9D">Not yet cached — will be saved on next successful scrape</span>`}
+    <span style="margin-left:12px">
+      <input id="stic-url-input-${info.product_id}" type="text" placeholder="Paste correct STIC URL to override…"
+        style="width:340px;padding:3px 7px;font-size:12px;border:1px solid #8A8886;border-radius:2px;font-family:inherit"/>
+      <button onclick="saveSticUrl(${info.product_id})"
+        style="margin-left:4px;padding:3px 10px;background:#0078D4;color:#fff;border:none;border-radius:2px;cursor:pointer;font-size:12px">Save</button>
+    </span>
   </div>`;
 
   // Snapshot table
@@ -936,6 +1117,167 @@ function renderReportTable(name, rows) {
   if (savedGrp  && document.getElementById('filter-group')) document.getElementById('filter-group').value = savedGrp;
 }
 
+function loadInvestigateReport(btn) {
+  if (btn) {
+    document.querySelectorAll('#sidebar-stic .sidebar-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+  document.querySelectorAll('#main-stic .content-section').forEach(s=>s.classList.remove('active'));
+  document.getElementById('stic-investigate').classList.add('active');
+  const el = document.getElementById('stic-investigate-content');
+  el.innerHTML = '<div class="spinner">Loading…</div>';
+  fetch('/api/investigate').then(r=>r.json()).then(data => {
+    let html = '<h2 style="margin:0 0 16px">Investigate</h2>';
+
+    // No STIC page
+    html += '<div class="inv-subsection"><div class="inv-subsection-title">No STIC Page (' + data.no_stic_page.length + ')</div>';
+    if (!data.no_stic_page.length) {
+      html += '<div class="inv-empty">None — all active SKUs found on STIC</div>';
+    } else {
+      html += '<div class="tbl-wrap"><table><thead><tr><th>SKU</th><th>Model</th><th>Manufacturer</th><th></th></tr></thead><tbody>';
+      data.no_stic_page.forEach(r => {
+        html += `<tr>
+          <td><a href="#" onclick="loadSticSku(${r.product_id},'investigate');return false">${r.product_id}</a></td>
+          <td><a href="#" onclick="loadSticSku(${r.product_id},'investigate');return false">${r.model_no}</a></td>
+          <td>${r.manufacturer}</td>
+          <td>${eolBtnHtml(r.product_id)}</td></tr>`;
+      });
+      html += '</tbody></table></div>';
+    }
+    html += '</div>';
+
+    // Missing EAN
+    html += '<div class="inv-subsection"><div class="inv-subsection-title">Missing EAN (' + data.missing_ean.length + ')</div>';
+    if (!data.missing_ean.length) {
+      html += '<div class="inv-empty">None — all active SKUs have EAN codes</div>';
+    } else {
+      html += '<div class="tbl-wrap"><table><thead><tr><th>SKU</th><th>Model</th><th>Manufacturer</th></tr></thead><tbody>';
+      data.missing_ean.forEach(r => {
+        html += `<tr>
+          <td><a href="#" onclick="loadSticSku(${r.product_id},'investigate');return false">${r.product_id}</a></td>
+          <td><a href="#" onclick="loadSticSku(${r.product_id},'investigate');return false">${r.model_no}</a></td>
+          <td>${r.manufacturer}</td></tr>`;
+      });
+      html += '</tbody></table></div>';
+    }
+    html += '</div>';
+
+    // Data bleeds
+    html += '<div class="inv-subsection"><div class="inv-subsection-title">Data Bleeds — ' + (data.latest_date||'') + ' (' + data.data_bleeds.length + ')</div>';
+    if (!data.data_bleeds.length) {
+      html += '<div class="inv-empty">✅ No data bleed suspects today</div>';
+    } else {
+      html += '<div class="tbl-wrap"><table><thead><tr><th>SKU A</th><th>Model A</th><th>SKU B</th><th>Model B</th><th>Matching distis</th></tr></thead><tbody>';
+      data.data_bleeds.forEach(r => {
+        html += `<tr>
+          <td><a href="#" onclick="loadSticSku(${r.product_id},'investigate');return false">${r.product_id}</a></td>
+          <td>${r.model_no}</td>
+          <td><a href="#" onclick="loadSticSku(${r.matched_to},'investigate');return false">${r.matched_to}</a></td>
+          <td>${r.matched_model}</td>
+          <td>${r.matching_rows}</td>
+        </tr>`;
+      });
+      html += '</tbody></table></div>';
+    }
+    html += '</div>';
+
+    el.innerHTML = html;
+    _refreshAllEolBtns();
+  });
+}
+
+function loadEOLProducts(btn) {
+  if (btn) {
+    document.querySelectorAll('#sidebar-stic .sidebar-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+  document.querySelectorAll('#main-stic .content-section').forEach(s=>s.classList.remove('active'));
+  document.getElementById('stic-eol').classList.add('active');
+  const el = document.getElementById('stic-eol-content');
+  el.innerHTML = '<div class="spinner">Loading…</div>';
+  fetch('/api/eol').then(r=>r.json()).then(data => {
+    let html = '<h2 style="margin:0 0 4px">EOL Products</h2>';
+    html += '<p style="color:#605E5C;margin:0 0 16px;font-size:13px">These SKUs are marked End of Life. The scraper skips them. Click ✕ EOL to restore and resume scraping on the next cycle.</p>';
+    if (!data.products.length) {
+      html += '<div class="inv-empty">No products currently marked EOL.</div>';
+    } else {
+      html += '<div class="tbl-wrap"><table><thead><tr><th>SKU</th><th>Model</th><th>Manufacturer</th><th>Group</th><th>EAN</th><th></th></tr></thead><tbody>';
+      data.products.forEach(r => {
+        html += `<tr>
+          <td>${r.product_id}</td>
+          <td>${r.model_no}</td>
+          <td>${r.manufacturer}</td>
+          <td>${r.product_group||'—'}</td>
+          <td>${r.ean||'—'}</td>
+          <td>${eolBtnHtml(r.product_id)}</td>
+        </tr>`;
+      });
+      html += '</tbody></table></div>';
+    }
+    el.innerHTML = html;
+    _refreshAllEolBtns();
+  });
+}
+
+// ── Scrape Groups ─────────────────────────────────────────────────────────────
+let _scrapeGroupsRunning = {};   // label → true while a trigger is in-flight
+
+function loadScrapeGroups(btn) {
+  if (btn) {
+    document.querySelectorAll('#sidebar-stic .sidebar-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+  document.querySelectorAll('#main-stic .content-section').forEach(s => s.classList.remove('active'));
+  document.getElementById('stic-scrape').classList.add('active');
+  const el = document.getElementById('stic-scrape-content');
+  el.innerHTML = '<div class="spinner">Loading…</div>';
+  fetch('/api/scrape/groups').then(r => r.json()).then(data => {
+    let html = '<h2 style="margin:0 0 4px">Refresh SKUs</h2>';
+    html += '<p style="color:#605E5C;margin:0 0 16px;font-size:13px">Manually trigger a scrape run for any group. Runs in the background — a Telegram message will confirm when complete. Last scraped dates show when this group was last successfully processed.</p>';
+    html += '<div class="tbl-wrap"><table><thead><tr><th>Group</th><th>Active SKUs</th><th>Last Scraped</th><th></th></tr></thead><tbody>';
+    data.forEach(g => {
+      const running = _scrapeGroupsRunning[g.label];
+      const btnHtml = running
+        ? `<button class="scrape-trigger-btn" disabled style="opacity:0.5;cursor:default">⏳ Running…</button>`
+        : `<button class="scrape-trigger-btn" onclick="triggerScrapeGroup('${g.label.replace(/'/g,"\\'")}',this)">▶ Run</button>`;
+      html += `<tr>
+        <td><strong>${g.label}</strong></td>
+        <td>${g.sku_count}</td>
+        <td>${g.last_scraped ? fmtDate(g.last_scraped) : '<span style="color:#A19F9D">Never</span>'}</td>
+        <td>${btnHtml}</td>
+      </tr>`;
+    });
+    html += '</tbody></table></div>';
+    el.innerHTML = html;
+  });
+}
+
+function triggerScrapeGroup(label, btn) {
+  if (!confirm(`Start scrape for "${label}"?\\n\\nThis will run in the background. You\\'ll get a Telegram notification when done.`)) return;
+  btn.disabled = true;
+  btn.textContent = '⏳ Launching…';
+  _scrapeGroupsRunning[label] = true;
+  fetch('/api/scrape/group', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({label})
+  }).then(r => r.json()).then(data => {
+    if (data.started) {
+      btn.textContent = '⏳ Running…';
+    } else {
+      btn.disabled = false;
+      btn.textContent = '▶ Run';
+      _scrapeGroupsRunning[label] = false;
+      alert('Failed to start: ' + (data.error || 'unknown error'));
+    }
+  }).catch(() => {
+    btn.disabled = false;
+    btn.textContent = '▶ Run';
+    _scrapeGroupsRunning[label] = false;
+    alert('Network error — could not start scrape.');
+  });
+}
+
 // ── Retailer KPI ──────────────────────────────────────────────────────────────
 let retailerKpiLoaded = false;
 function loadRetailerKpi() {
@@ -1027,6 +1369,7 @@ function renderRetSku(data) {
 // ── Init ──────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function() {
   loadWatchlist();
+  loadEOLState();
   loadSticOverview();
 });
 </script>
@@ -1217,10 +1560,10 @@ def stic_sku(product_id):
 
     info = qry_one(
         """SELECT s.product_id, s.model_no, s.manufacturer, s.product_group,
-               (SELECT r.description FROM retailer_prices r
-                WHERE r.product_id=s.product_id AND r.description IS NOT NULL AND r.description != ''
-                LIMIT 1) AS description
-           FROM stic_prices s WHERE s.product_id=? LIMIT 1""",
+               p.stic_url, p.ean, p.description
+           FROM stic_prices s
+           LEFT JOIN products p ON p.product_id = s.product_id
+           WHERE s.product_id=? LIMIT 1""",
         (product_id,)
     ) or {}
 
@@ -1658,6 +2001,184 @@ def watchlist_report():
                     "date": latest, "prev_date": prev})
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# INVESTIGATE + EOL
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/investigate")
+def investigate():
+    # Last 3 dates with stic data
+    recent = [r["date"] for r in qry(
+        "SELECT DISTINCT date FROM stic_prices ORDER BY date DESC LIMIT 3"
+    )]
+
+    # No STIC page: scraped on all 3 recent dates, every row has NULL price and NULL qty
+    no_stic = []
+    if len(recent) >= 3:
+        ph = ",".join("?" * len(recent))
+        no_stic = qry(f"""
+            SELECT product_id, MAX(model_no) AS model_no, MAX(manufacturer) AS manufacturer
+            FROM stic_prices
+            WHERE date IN ({ph})
+            GROUP BY product_id
+            HAVING COUNT(DISTINCT date) >= 3
+            AND SUM(CASE WHEN price IS NOT NULL OR qty IS NOT NULL THEN 1 ELSE 0 END) = 0
+        """, recent)
+
+    # Missing EAN: active (non-EOL) products in template with no EAN
+    products = read_template_products()
+    missing_ean = [
+        {"product_id": p["product_id"], "model_no": p["model_no"],
+         "manufacturer": p["manufacturer"]}
+        for p in products if not p["eol"] and not p.get("ean")
+    ]
+
+    # Data bleeds: same-day pairs with 3+ distributors sharing identical price+qty
+    latest = recent[0] if recent else None
+    bleeds = []
+    if latest:
+        bleeds = qry("""
+            SELECT a.product_id, a.model_no, b.product_id AS matched_to,
+                   b.model_no AS matched_model, COUNT(*) AS matching_rows
+            FROM stic_prices a
+            JOIN stic_prices b
+              ON b.date=a.date AND b.distributor=a.distributor
+             AND b.product_id != a.product_id
+             AND a.price IS NOT NULL AND b.price IS NOT NULL
+             AND a.qty   IS NOT NULL AND b.qty   IS NOT NULL
+             AND a.price = b.price   AND a.qty   = b.qty
+            WHERE a.date=? AND a.product_id < b.product_id
+            GROUP BY a.product_id, b.product_id
+            HAVING matching_rows >= 3
+            ORDER BY matching_rows DESC, a.product_id
+        """, (latest,))
+
+    return jsonify({
+        "no_stic_page": no_stic,
+        "missing_ean":  missing_ean,
+        "data_bleeds":  bleeds,
+        "latest_date":  latest,
+    })
+
+
+@app.route("/api/eol", methods=["GET"])
+def eol_get():
+    products = read_template_products()
+    eol_list = [p for p in products if p["eol"]]
+    return jsonify({"products": eol_list})
+
+
+@app.route("/api/eol/<int:product_id>", methods=["POST", "DELETE"])
+def eol_set(product_id):
+    mark = (request.method == "POST")
+    updated = write_eol_to_template(product_id, mark)
+    return jsonify({"eol": mark, "product_id": product_id, "updated": updated})
+
+
+@app.route("/api/scrape/groups")
+def scrape_groups():
+    """Return the list of scrape groups with active SKU counts and last-scraped dates."""
+    SCRAPE_GROUPS = [
+        ("PALIT",      "PROD_VIDEO", "Palit GPU"),
+        ("POWERCOLOR", "PROD_VIDEO", "PowerColor GPU"),
+        ("MSI",        "PROD_VIDEO", "MSI GPU"),
+        ("ASUS",       "PROD_VIDEO", "ASUS GPU"),
+        ("GIGABYTE",   "PROD_VIDEO", "Gigabyte GPU"),
+        ("MSI",        "PROD_MBRD",  "MSI Motherboards"),
+        ("GIGABYTE",   "PROD_MBRD",  "Gigabyte Motherboards"),
+        ("ASUS",       "PROD_MBRD",  "ASUS Motherboards"),
+        (None,         "PROD_MBRDS", "Server / Pro"),
+    ]
+    db = get_db()
+    result = []
+    for manufacturer, product_group, label in SCRAPE_GROUPS:
+        # Count active SKUs for this group
+        if manufacturer:
+            row = db.execute(
+                "SELECT COUNT(*) AS c FROM products WHERE eol=0 AND manufacturer=? AND product_group=?",
+                (manufacturer, product_group)
+            ).fetchone()
+        else:
+            row = db.execute(
+                "SELECT COUNT(*) AS c FROM products WHERE eol=0 AND product_group=?",
+                (product_group,)
+            ).fetchone()
+        sku_count = row["c"] if row else 0
+
+        # Last date this group had any data in stic_prices
+        if manufacturer:
+            last = db.execute(
+                "SELECT MAX(date) AS d FROM stic_prices WHERE manufacturer=? AND product_group=?",
+                (manufacturer, product_group)
+            ).fetchone()
+        else:
+            last = db.execute(
+                "SELECT MAX(date) AS d FROM stic_prices WHERE product_group=?",
+                (product_group,)
+            ).fetchone()
+        last_scraped = last["d"] if last else None
+
+        result.append({
+            "label":        label,
+            "manufacturer": manufacturer,
+            "product_group": product_group,
+            "sku_count":    sku_count,
+            "last_scraped": last_scraped,
+        })
+    db.close()
+    return jsonify(result)
+
+
+@app.route("/api/scrape/group", methods=["POST"])
+def scrape_group_trigger():
+    """Launch stic_scraper.py --group <label> as a background subprocess."""
+    import subprocess
+    import shlex
+    data = request.get_json(silent=True) or {}
+    label = (data.get("label") or "").strip()
+    if not label:
+        return jsonify({"started": False, "error": "No label provided"})
+
+    VALID_LABELS = {
+        "Palit GPU", "PowerColor GPU", "MSI GPU", "ASUS GPU", "Gigabyte GPU",
+        "MSI Motherboards", "Gigabyte Motherboards", "ASUS Motherboards", "Server / Pro",
+    }
+    if label not in VALID_LABELS:
+        return jsonify({"started": False, "error": f"Unknown group: {label}"})
+
+    try:
+        cmd = [
+            "/usr/bin/python3",
+            "/opt/openclaw/data/stic/stic_scraper.py",
+            "--group", label,
+        ]
+        # Launch detached — portal doesn't wait for it
+        subprocess.Popen(
+            cmd,
+            stdout=open("/opt/openclaw/logs/stic.log", "a"),
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        return jsonify({"started": True, "label": label})
+    except Exception as e:
+        return jsonify({"started": False, "error": str(e)})
+
+
+@app.route("/api/stic-url/<int:product_id>", methods=["POST"])
+def stic_url_set(product_id):
+    """Save a manually-supplied STIC product URL to the products table."""
+    data = request.get_json(silent=True) or {}
+    url = (data.get("url") or "").strip()
+    if not url or "/Product/" not in url:
+        return jsonify({"saved": False, "error": "Invalid URL — must contain /Product/"})
+    db = get_db()
+    db.execute("UPDATE products SET stic_url=? WHERE product_id=?", (url, product_id))
+    changed = db.execute("SELECT changes()").fetchone()[0]
+    db.commit()
+    db.close()
+    return jsonify({"saved": bool(changed), "product_id": product_id, "url": url})
+
+
 def _init_watchlist():
     db = get_db()
     db.execute("""CREATE TABLE IF NOT EXISTS watchlist (
@@ -1668,6 +2189,7 @@ def _init_watchlist():
     db.close()
 
 _init_watchlist()
+_init_products()
 
 if __name__ == "__main__":
     import os

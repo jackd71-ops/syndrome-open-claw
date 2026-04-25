@@ -190,12 +190,10 @@ Add:
 
 ```
 0 3 * * * /opt/openclaw/scripts/backup.sh
-# STIC scraper - batch 1 (8:30am UK time Mon-Fri)
-30 8 * * 1-5 TZ=Europe/London python3 /opt/openclaw/data/stic/stic_scraper.py --batch 1 >> /opt/openclaw/logs/stic_cron.log 2>&1
-# STIC scraper - batch 2 (9:30am UK time Mon-Fri)
-30 9 * * 1-5 TZ=Europe/London python3 /opt/openclaw/data/stic/stic_scraper.py --batch 2 >> /opt/openclaw/logs/stic_cron.log 2>&1
-# STIC scraper - batch 3 (10:30am UK time Mon-Fri)
-30 10 * * 1-5 TZ=Europe/London python3 /opt/openclaw/data/stic/stic_scraper.py --batch 3 >> /opt/openclaw/logs/stic_cron.log 2>&1
+# STIC scraper - morning full run all groups (fires 8:25am, adds 0-10min random delay Mon-Fri)
+25 8 * * 1-5 TZ=Europe/London python3 /opt/openclaw/data/stic/stic_scraper.py --runall >> /opt/openclaw/logs/stic_cron.log 2>&1
+# STIC scraper - afternoon GPU-only run (fires 1:55pm, adds 0-10min random delay Mon-Fri)
+55 13 * * 1-5 TZ=Europe/London python3 /opt/openclaw/data/stic/stic_scraper.py --gpus >> /opt/openclaw/logs/stic_cron.log 2>&1
 # Travel watchlist check - twice daily
 0 8,18 * * * /usr/bin/python3 /opt/openclaw/data/travel/check_watchlist.py >> /opt/openclaw/logs/travel.log 2>&1
 # Retailer tracker - batch 1 (7:00pm UK daily)
@@ -206,6 +204,8 @@ Add:
 0 22 * * * TZ=Europe/London /usr/bin/python3 /opt/openclaw/data/stic/retailer_scraper.py --batch 3 >> /opt/openclaw/logs/retailer_cron.log 2>&1
 # Nightly git sync of source files to GitHub (2am)
 0 2 * * * /opt/openclaw/scripts/git-sync.sh >> /opt/openclaw/logs/git-sync.log 2>&1
+# STIC template sync: Excel→DB pull, upsert products, flush EOL back to Excel, push OneDrive (midnight UK)
+0 0 * * * TZ=Europe/London python3 /opt/openclaw/scripts/sync_template.py >> /opt/openclaw/logs/sync_template.log 2>&1
 ```
 
 ---

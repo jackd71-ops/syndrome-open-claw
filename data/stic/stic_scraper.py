@@ -19,11 +19,9 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from openpyxl import load_workbook
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
 # ── Paths ────────────────────────────────────────────────────────────────────
-MASTER_PATH   = "/opt/openclaw/data/general/STIC Template.xlsx"
 CACHE_PATH    = "/opt/openclaw/data/stic/url_cache.json"
 PROGRESS_PATH = "/opt/openclaw/data/stic/progress_{date}.json"
 SESSION_PATH  = "/opt/openclaw/data/stic/session.json"
@@ -106,17 +104,33 @@ def save_progress(date_str: str, completed: set):
     with open(path, "w") as f:
         json.dump(list(completed), f)
 
-# ── Read products from template ───────────────────────────────────────────────
+# ── Read products from DB (populated nightly by sync_template.py) ────────────
+def _db_products_conn():
+    import sqlite3
+    db = sqlite3.connect(_DB_PATH)
+    db.row_factory = sqlite3.Row
+    return db
+
+def get_stic_url(product_id) -> str | None:
+    """Return the cached STIC product detail URL for this product, or None."""
+    db = _db_products_conn()
+    row = db.execute("SELECT stic_url FROM products WHERE product_id=?", (int(product_id),)).fetchone()
+    db.close()
+    return row["stic_url"] if row and row["stic_url"] else None
+
+def save_stic_url(product_id, url: str):
+    """Persist a confirmed STIC product detail URL to the products table."""
+    db = _db_products_conn()
+    db.execute("UPDATE products SET stic_url=? WHERE product_id=?", (url, int(product_id)))
+    db.commit()
+    db.close()
+
 def count_products() -> int:
-    """Count total products in master template."""
-    wb = load_workbook(MASTER_PATH, read_only=True)
-    ws = wb.worksheets[0]
-    count = 0
-    for row in ws.iter_rows(min_row=3, values_only=True):
-        if row[0] is not None:
-            count += 1
-    wb.close()
-    return count
+    """Count active (non-EOL) products in the products DB table."""
+    db = _db_products_conn()
+    row = db.execute("SELECT COUNT(*) AS c FROM products WHERE eol=0").fetchone()
+    db.close()
+    return row["c"] if row else 0
 
 def batch_ranges(total: int) -> list[tuple[int, int]]:
     """Split total products into 3 roughly equal ranges."""
@@ -131,36 +145,71 @@ def batch_ranges(total: int) -> list[tuple[int, int]]:
         start = end + 1
     return ranges
 
+def _row_to_product(row) -> dict:
+    return {
+        "product_id":    row["product_id"],
+        "description":   row["description"] or "",
+        "model_no":      row["model_no"] or "",
+        "manufacturer":  row["manufacturer"] or "",
+        "product_group": row["product_group"] or None,
+        "chipset":       row["chipset"] or None,
+        "ean":           row["ean"] or None,
+    }
+
 def read_products(start: int, end: int) -> list:
-    """Read products from master template. Returns list of dicts."""
-    wb = load_workbook(MASTER_PATH, read_only=True)
-    # Master sheet is first sheet ("Templae")
-    ws = wb.worksheets[0]
+    """Read active products from DB, ordered by product_id. Row numbers are 1-based."""
+    db = _db_products_conn()
+    rows = db.execute("SELECT * FROM products WHERE eol=0 ORDER BY product_id").fetchall()
+    db.close()
     products = []
-    row_num = 0
-    for row in ws.iter_rows(min_row=3, values_only=True):  # skip 2 header rows
-        if row[0] is None:
-            continue
-        row_num += 1
+    for row_num, row in enumerate(rows, start=1):
         if row_num < start:
             continue
         if row_num > end:
             break
-        eol = row[7] if len(row) > 7 else None
-        if eol:
-            continue  # skip end-of-life products
-        products.append({
-            "row_num":       row_num,
-            "product_id":    row[0],
-            "description":   str(row[1]).strip() if row[1] else "",
-            "model_no":      str(row[2]).strip() if row[2] else "",
-            "manufacturer":  str(row[3]).strip() if row[3] else "",
-            "product_group": str(row[4]).strip() if row[4] else None,
-            "chipset":       str(row[5]).strip() if len(row) > 5 and row[5] else None,
-            "ean":           str(row[6]).strip() if len(row) > 6 and row[6] else None,
-        })
-    wb.close()
+        p = _row_to_product(row)
+        p["row_num"] = row_num
+        products.append(p)
     return products
+
+def read_products_for_group(manufacturer: str | None, product_group: str) -> list:
+    """Read active products for a specific manufacturer + product_group combination.
+    If manufacturer is None, returns all manufacturers for that product_group."""
+    db = _db_products_conn()
+    if manufacturer:
+        rows = db.execute(
+            "SELECT * FROM products WHERE eol=0 AND manufacturer=? AND product_group=? ORDER BY product_id",
+            (manufacturer, product_group)
+        ).fetchall()
+    else:
+        rows = db.execute(
+            "SELECT * FROM products WHERE eol=0 AND product_group=? ORDER BY product_id",
+            (product_group,)
+        ).fetchall()
+    db.close()
+    return [_row_to_product(row) for row in rows]
+
+
+# ── Group configuration ───────────────────────────────────────────────────────
+# Each entry: (manufacturer_or_None, product_group, human_label)
+# Order determines scrape sequence — GPUs first (smaller, faster), boards after.
+SCRAPE_GROUPS = [
+    ("PALIT",      "PROD_VIDEO", "Palit GPU"),
+    ("POWERCOLOR", "PROD_VIDEO", "PowerColor GPU"),
+    ("MSI",        "PROD_VIDEO", "MSI GPU"),
+    ("ASUS",       "PROD_VIDEO", "ASUS GPU"),
+    ("GIGABYTE",   "PROD_VIDEO", "Gigabyte GPU"),
+    ("MSI",        "PROD_MBRD",  "MSI Motherboards"),
+    ("GIGABYTE",   "PROD_MBRD",  "Gigabyte Motherboards"),
+    ("ASUS",       "PROD_MBRD",  "ASUS Motherboards"),
+    (None,         "PROD_MBRDS", "Server / Pro"),
+]
+
+GPU_GROUPS = [g for g in SCRAPE_GROUPS if g[1] == "PROD_VIDEO"]
+
+# Gap between groups: random 2–5 minutes
+GROUP_GAP_MIN = 120
+GROUP_GAP_MAX = 300
 
 # ── Data bleed detection ─────────────────────────────────────────────────────
 def check_data_bleed(iso_date: str) -> list[dict]:
@@ -287,140 +336,162 @@ def login(page, username: str, password: str) -> bool:
         return False
 
 # ── Browser: search and scrape in one step ───────────────────────────────────
-def search_and_scrape(page, model_no: str, cache: dict, product_id: str = None, manufacturer: str = "") -> dict | None:
+def search_and_scrape(page, model_no: str, cache: dict, product_id: str = None, manufacturer: str = "", ean: str = None) -> dict | None:
     """
-    Search for model_no on STIC, scrape the distributor table from the search
-    results page (prices are shown inline — no need to visit product page).
-    If multiple result cards are found, fall back to searching by product_id.
+    Search STIC by VIP SKU (product_id, e.g. 122408), validate by checking
+    the model name (model_no, e.g. "MPG B650I EDGE WIFI") appears in the result card.
+
+    Fallback: search by EAN, same model-name validation.
+    Last resort: product detail page (existing behaviour).
 
     Returns dict: { "Distributor Name": (price_float_or_none, qty_int_or_none) }
     Returns None on page load failure, {} if no matching distributors found.
     """
-    search_url = STIC_SEARCH.format(query=model_no.replace(" ", "+"))
-    log(f"  Searching: {model_no}")
 
-    try:
-        page.goto(search_url, wait_until="domcontentloaded")
+    def _scrape_table_from_card(page_obj, search_query, log_label):
+        """
+        Navigate to STIC search for search_query, find the card whose text contains
+        model_no (case-insensitive), scrape its distributor table.
+        Returns (match_type_str, raw_rows_list, product_url_or_none).
+        match_type is 'model' or 'none'.  product_url is the detail page href from the card.
+        """
+        url = STIC_SEARCH.format(query=str(search_query).replace(" ", "+"))
+        log(f"  Searching ({log_label}): {search_query}")
+        page_obj.goto(url, wait_until="domcontentloaded")
         time.sleep(random.uniform(2, 4))
-
-        # Human-like scroll
-        page.mouse.wheel(0, random.randint(100, 400))
+        page_obj.mouse.wheel(0, random.randint(100, 400))
         time.sleep(random.uniform(0.5, 1.5))
 
-        # Check we got results
-        content = page.content()
+        content = page_obj.content()
         if "0 Results Found" in content or "No results" in content.lower():
-            log(f"  No results for: {model_no}")
-            return {}
+            log(f"  No results on STIC for: {search_query}")
+            return "none", [], None
 
-        # Find the product card whose SKU matches our model_no, then scrape only that table.
-        # Falls back to brand match. Never uses first table blindly — returns match_type='none'
-        # if neither check passes, so we write nulls rather than bleed another SKU's data.
-        result = page.evaluate("""
-            ([modelNo, brand]) => {
+        res = page_obj.evaluate("""
+            (modelNo) => {
+                const modelLower = modelNo.toLowerCase();
                 const tables = document.querySelectorAll('table');
                 if (!tables.length) return { match_type: 'none', rows: [] };
 
-                const brandLower = (brand || '').toLowerCase();
-
-                function cardText(table) {
-                    let el = table.parentElement;
-                    for (let i = 0; i < 12; i++) {
-                        if (!el) break;
-                        el = el.parentElement;
+                // Check whether a card element contains our model name.
+                // A line matches if it includes our model as a substring, BUT we reject
+                // lines that contain variant markers (wifi/wi-fi) that our model doesn't
+                // have — prevents "B650-PLUS" matching a "B650-PLUS WIFI" card, while
+                // allowing "AM5 PROART X870E-CREATOR WIFI" to match "PROART X870E-CREATOR WIFI".
+                const VARIANT_MARKERS = ['wifi', 'wi-fi'];
+                const modelNorm = modelLower.replace(/-/g, ' ');
+                const modelHasVariant = new Set(VARIANT_MARKERS.filter(v => modelNorm.includes(v)));
+                function lineMatchesModel(line) {
+                    if (!line.includes(modelLower)) return false;
+                    const lineNorm = line.replace(/-/g, ' ');
+                    for (const marker of VARIANT_MARKERS) {
+                        if (lineNorm.includes(marker) && !modelHasVariant.has(marker)) return false;
                     }
-                    return '';
+                    return true;
+                }
+                function cardMatchesModel(el) {
+                    const lines = (el.innerText || '').split('\\n').map(l => l.trim().toLowerCase());
+                    return lines.some(l => lineMatchesModel(l));
                 }
 
-                function getCardRoot(table) {
-                    let el = table.parentElement;
-                    for (let i = 0; i < 12; i++) {
-                        if (!el) break;
-                        const text = el.innerText || '';
-                        if (text.includes('SKU:') || text.includes('Brand:') || text.includes('Manufacturer:')) return el;
-                        el = el.parentElement;
-                    }
-                    return table.parentElement;
-                }
-
-                let targetTable = null;
-                let matchType = 'none';
-
-                // Pass 1: exact SKU match
                 for (const table of tables) {
                     let el = table.parentElement;
                     for (let i = 0; i < 12; i++) {
                         if (!el) break;
-                        const text = el.innerText || '';
-                        if (text.includes('SKU: ' + modelNo)) {
-                            targetTable = table;
-                            matchType = 'sku';
-                            break;
+                        if (cardMatchesModel(el)) {
+                            const rows = [];
+                            table.querySelectorAll('tr').forEach((row, idx) => {
+                                if (idx === 0) return;
+                                const cells = row.querySelectorAll('td');
+                                if (cells.length < 2) return;
+                                const distName = cells[0].innerText.trim();
+                                const stockText = cells.length >= 3 ? cells[cells.length - 2].innerText.trim() : '';
+                                const priceText = cells[cells.length - 1].innerText.trim();
+                                if (distName) rows.push({
+                                    distributor: distName,
+                                    stock: stockText,
+                                    price: priceText,
+                                    allCells: Array.from(cells).map(c => c.innerText.trim())
+                                });
+                            });
+                            if (rows.length) {
+                                // Extract product detail URL from the card
+                                let productUrl = null;
+                                const link = el.querySelector('a[href*="/Product/"]');
+                                if (link) productUrl = link.href;
+                                return { match_type: 'model', rows, productUrl };
+                            }
                         }
                         el = el.parentElement;
                     }
-                    if (targetTable) break;
                 }
-
-                // Pass 2: brand match (only if brand provided and no SKU match)
-                if (!targetTable && brandLower) {
-                    for (const table of tables) {
-                        let el = table.parentElement;
-                        for (let i = 0; i < 12; i++) {
-                            if (!el) break;
-                            const text = (el.innerText || '').toLowerCase();
-                            if (text.includes(brandLower)) {
-                                targetTable = table;
-                                matchType = 'brand';
-                                break;
-                            }
-                            el = el.parentElement;
-                        }
-                        if (targetTable) break;
-                    }
-                }
-
-                if (!targetTable) return { match_type: 'none', rows: [] };
-
-                const rows = [];
-                targetTable.querySelectorAll('tr').forEach((row, idx) => {
-                    if (idx === 0) return;
-                    const cells = row.querySelectorAll('td');
-                    if (cells.length < 2) return;
-                    const distName = cells[0].innerText.trim();
-                    const stockText = cells.length >= 3 ? cells[cells.length - 2].innerText.trim() : '';
-                    const priceText = cells[cells.length - 1].innerText.trim();
-                    if (distName) rows.push({
-                        distributor: distName,
-                        stock: stockText,
-                        price: priceText,
-                        allCells: Array.from(cells).map(c => c.innerText.trim())
-                    });
-                });
-
-                return { match_type: matchType, rows };
+                return { match_type: 'none', rows: [], productUrl: null };
             }
-        """, [model_no, manufacturer])
+        """, model_no)
 
-        match_type = result.get("match_type", "none") if isinstance(result, dict) else "none"
-        raw_rows   = result.get("rows", [])         if isinstance(result, dict) else (result or [])
+        mt = res.get("match_type", "none") if isinstance(res, dict) else "none"
+        rr = res.get("rows", []) if isinstance(res, dict) else []
+        pu = res.get("productUrl") if isinstance(res, dict) else None
+        return mt, rr, pu
 
-        if match_type == "none":
-            log(f"  No SKU or brand match on results page — will try product detail fallback.")
-            raw_rows = []
-        elif match_type == "brand":
-            log(f"  WARNING: no SKU match — accepted on brand match only ({manufacturer}). Verify manually.")
+    try:
+        # Load cached STIC URL for this product (if we've successfully found it before)
+        cached_url = get_stic_url(product_id) if product_id else None
+        found_url  = None   # URL confirmed this run — saved to DB on success
+
+        def _check_url(card_url, step_label):
+            """Compare card URL to cached URL. Logs result. Returns True if URL matches cache."""
+            nonlocal found_url
+            if not card_url:
+                return False
+            if cached_url:
+                if card_url == cached_url:
+                    log(f"  URL match confirmed ({step_label}): {card_url}")
+                    found_url = card_url
+                    return True
+                else:
+                    log(f"  URL mismatch ({step_label}): expected {cached_url} got {card_url} — running full validation")
+                    found_url = card_url   # update cache on success later
+                    return False
+            else:
+                found_url = card_url   # first time seen — save on success
+                return False
+
+        # ── Step 1: search by VIP SKU, validate by model name ────────────────
+        if not product_id:
+            log(f"  WARNING: no product_id — cannot search by VIP SKU, skipping.")
+            return {}
+
+        match_type, raw_rows, card_url = _scrape_table_from_card(page, product_id, "VIP SKU")
+
+        if match_type == "model":
+            url_confirmed = _check_url(card_url, "VIP SKU")
+            if url_confirmed:
+                log(f"  VIP SKU search: URL sanity check passed — skipping model validation.")
+            else:
+                log(f"  VIP SKU search matched on model name '{model_no}'.")
+
+        # ── Step 2: EAN fallback — search by EAN, same model-name validation ─
+        if match_type == "none" and ean:
+            log(f"  VIP SKU search failed — trying EAN fallback: {ean}")
+            match_type, raw_rows, card_url = _scrape_table_from_card(page, ean, "EAN")
+            if match_type == "model":
+                url_confirmed = _check_url(card_url, "EAN")
+                if url_confirmed:
+                    log(f"  EAN fallback: URL sanity check passed — skipping model validation.")
+                else:
+                    log(f"  EAN fallback matched on model name '{model_no}'.")
+            else:
+                log(f"  EAN fallback: model '{model_no}' not found in results.")
 
         result = raw_rows
 
-        # If no table found, retry via product ID:
-        # 1. Search by ID to get results page
-        # 2. Click through to the first product detail page
-        # 3. Scrape the 6-column Trade Prices table there
+        # Step 3 (last resort): search by manufacturer + model name, click through to the
+        # product detail page, and scrape the 6-column Trade Prices table there.
+        # Uses a different query and a different page layout from Steps 1 & 2.
         if not result and product_id:
-            # Build fallback query: "asus 121284" if manufacturer known, else just "121284"
-            fallback_query = f"{manufacturer} {product_id}".strip() if manufacturer else str(product_id)
-            log(f"  No table found — retrying via product detail page (query: {fallback_query})")
+            fallback_query = f"{manufacturer} {model_no}".strip() if manufacturer else model_no
+            log(f"  Steps 1+2 failed — trying product detail page (query: {fallback_query})")
             id_url = STIC_SEARCH.format(query=fallback_query.replace(" ", "+"))
             page.goto(id_url, wait_until="domcontentloaded")
             time.sleep(random.uniform(2, 3))
@@ -432,6 +503,7 @@ def search_and_scrape(page, model_no: str, cache: dict, product_id: str = None, 
                 if product_href and not product_href.startswith("http"):
                     product_href = STIC_BASE + product_href
                 log(f"  Following product link: {product_href}")
+                found_url = product_href   # capture for URL cache
                 page.goto(product_href, wait_until="domcontentloaded")
                 time.sleep(random.uniform(2, 4))
                 page.mouse.wheel(0, random.randint(200, 400))
@@ -491,13 +563,43 @@ def search_and_scrape(page, model_no: str, cache: dict, product_id: str = None, 
                     }
                 """)
                 if result:
-                    # Validate brand on the detail page before accepting
+                    # Validate both brand AND model name on the detail page.
+                    # Brand alone is too loose — "ASUS TUF B550M-PLUS" would pass for
+                    # the "ASUS TUF B550M-PLUS WIFI II" detail page.
                     page_text = page.inner_text("body").lower()
                     if manufacturer and manufacturer.lower() not in page_text:
                         log(f"  VALIDATION FAILED: brand '{manufacturer}' not found on detail page — discarding data.")
                         result = []
+                    elif model_no and model_no.lower() not in page_text:
+                        log(f"  VALIDATION FAILED: model '{model_no}' not found on detail page — discarding data.")
+                        result = []
                     else:
-                        log(f"  Product detail page fallback succeeded (brand validated).")
+                        log(f"  Product detail page fallback succeeded (brand + model validated).")
+                        # Filter rows by variant markers: reject any row whose product
+                        # description cell contains WIFI/WI-FI if our model doesn't.
+                        # Prevents base-model SKUs picking up WIFI-variant rows when
+                        # STIC lists both variants in the same trade-prices table.
+                        # If ALL rows are filtered, write nulls — safer than wrong data.
+                        model_words = set(model_no.lower().split())
+                        VARIANT_MARKERS = {'wifi', 'wi-fi'}
+                        extra_markers = VARIANT_MARKERS - model_words
+                        if extra_markers:
+                            filtered = []
+                            for r in result:
+                                cells_r = r.get("allCells", [])
+                                desc = (cells_r[1] if len(cells_r) > 1 else "").lower().replace("-", " ")
+                                desc_words = set(desc.split())
+                                if desc_words & extra_markers:
+                                    log(f"  Skipping variant row ({desc_words & extra_markers}): {desc[:55]}")
+                                else:
+                                    filtered.append(r)
+                            if not filtered:
+                                log(f"  All rows are for a different variant — discarding data.")
+                                result = []
+                            else:
+                                if len(filtered) < len(result):
+                                    log(f"  Kept {len(filtered)}/{len(result)} rows after variant filter.")
+                                result = filtered
                 else:
                     log(f"  Product detail page also found no table.")
             else:
@@ -506,7 +608,11 @@ def search_and_scrape(page, model_no: str, cache: dict, product_id: str = None, 
         if not result:
             return {}
 
-        cache[model_no] = search_url
+        # Save the confirmed STIC URL so future runs use it as sanity check
+        if found_url and product_id:
+            save_stic_url(product_id, found_url)
+
+        cache[model_no] = str(product_id)   # mark as "ever found" for run() failure logging
 
         # Parse into { dist_name: (price, qty) }
         parsed = {}
@@ -566,19 +672,9 @@ def search_and_scrape(page, model_no: str, cache: dict, product_id: str = None, 
 
 # ── OneDrive sync ────────────────────────────────────────────────────────────
 def sync_template_from_onedrive() -> bool:
-    """Pull the latest master template from OneDrive before each run."""
-    import subprocess
-    log("Syncing master template from OneDrive…")
-    result = subprocess.run(
-        ["rclone", "copy", f"{ONEDRIVE_DEST}/STIC Template.xlsx", str(Path(MASTER_PATH).parent)],
-        capture_output=True, text=True
-    )
-    if result.returncode == 0:
-        log("Master template updated from OneDrive.")
-        return True
-    else:
-        log(f"Template sync WARNING (using local copy): {result.stderr.strip()}")
-        return False
+    """No-op: scraper now reads products from DB (populated nightly by sync_template.py)."""
+    log("Products read from DB — no OneDrive sync needed.")
+    return True
 
 
 # ── Telegram notification ─────────────────────────────────────────────────────
@@ -608,6 +704,116 @@ def random_mouse_move(page):
     x = random.randint(200, 1200)
     y = random.randint(200, 700)
     page.mouse.move(x, y)
+
+# ── Re-scrape specific product IDs ───────────────────────────────────────────
+def run_specific(product_ids: list, date_str: str):
+    """
+    Re-scrape a specific list of product IDs.
+    Clears today's DB rows for those IDs first, then re-runs with EAN fallback active.
+    Used to resolve data-bleed suspects flagged in the Telegram nightly report.
+    """
+    import sqlite3 as _sqlite3
+
+    username, password = get_credentials()
+    if not username or not password:
+        log("ERROR: STIC_USERNAME or STIC_PASSWORD not found in secrets.json")
+        sys.exit(1)
+
+    # Convert DD-MM-YYYY to YYYY-MM-DD
+    d, m, y = date_str.split("-")
+    iso_date = f"{y}-{m}-{d}"
+
+    # Delete today's entries for these products so fresh data is written
+    db = _sqlite3.connect(_DB_PATH)
+    db.execute("PRAGMA journal_mode=WAL")
+    placeholders = ",".join("?" for _ in product_ids)
+    deleted = db.execute(
+        f"DELETE FROM stic_prices WHERE date=? AND product_id IN ({placeholders})",
+        [iso_date] + [int(p) for p in product_ids]
+    ).rowcount
+    db.commit()
+    db.close()
+    log(f"Cleared {deleted} existing DB rows for {len(product_ids)} products.")
+
+    sync_template_from_onedrive()
+    all_products = read_products(1, 99999)
+    pid_set = {int(p) for p in product_ids}
+    products = [p for p in all_products if int(p["product_id"]) in pid_set]
+
+    if not products:
+        log("None of the requested product IDs found in the template.")
+        return
+
+    log(f"Re-scraping {len(products)} products: {[p['product_id'] for p in products]}")
+
+    # Remove from today's progress so they are not skipped
+    completed = load_progress(date_str)
+    for p in products:
+        completed.discard(str(p["row_num"]))
+    save_progress(date_str, completed)
+
+    cache = load_cache()
+
+    with sync_playwright() as p_ctx:
+        browser = p_ctx.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"]
+        )
+        context = browser.new_context(
+            viewport={"width": 1366, "height": 768},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            locale="en-GB",
+            timezone_id="Europe/London",
+        )
+        context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            Object.defineProperty(navigator, 'languages', { get: () => ['en-GB', 'en'] });
+            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
+            window.chrome = { runtime: {} };
+        """)
+        page = context.new_page()
+
+        if not login(page, username, password):
+            log("Login failed — aborting.")
+            browser.close()
+            sys.exit(1)
+
+        for product in products:
+            model_no     = product["model_no"]
+            prod_id      = product["product_id"]
+            manufacturer = product["manufacturer"]
+            ean          = product.get("ean")
+
+            log(f"\n[RESCRAPE] {model_no} (ID: {prod_id}, EAN: {ean or 'none'})")
+            random_mouse_move(page)
+
+            dist_data = search_and_scrape(
+                page, model_no, cache,
+                product_id=str(prod_id),
+                manufacturer=manufacturer,
+                ean=ean
+            )
+
+            if dist_data is None:
+                log(f"  Page load failed — skipping.")
+            elif not dist_data:
+                log(f"  FAILED — no result found for: {model_no}")
+            else:
+                write_to_db(date_str, product, dist_data)
+                completed.add(str(product["row_num"]))
+                save_progress(date_str, completed)
+                save_cache(cache)
+
+            time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
+
+        browser.close()
+
+    # Post-run bleed check to confirm fixes
+    remaining = check_data_bleed(iso_date)
+    log(f"\nRe-scrape complete. Post-run bleed check: {len(remaining)} suspect pairs remaining.")
+    for s in remaining:
+        log(f"  • {s['product_id']} {s['model_no']} ↔ {s['matched_to']} {s['matched_model']} ({s['matching_rows']} distis)")
+
 
 # ── Main run ──────────────────────────────────────────────────────────────────
 def run(start: int, end: int, date_str: str, is_final: bool = False):
@@ -680,7 +886,7 @@ def run(start: int, end: int, date_str: str, is_final: bool = False):
             random_mouse_move(page)
 
             # Search and scrape distributor prices from results page
-            dist_data = search_and_scrape(page, model_no, cache, product_id=str(prod_id), manufacturer=manufacturer)
+            dist_data = search_and_scrape(page, model_no, cache, product_id=str(prod_id), manufacturer=manufacturer, ean=product.get("ean"))
 
             if dist_data is None:
                 log(f"  Page load failed — skipping (will retry next run).")
@@ -753,18 +959,193 @@ def run(start: int, end: int, date_str: str, is_final: bool = False):
         )
         send_telegram(msg)
 
+# ── Group-based run ───────────────────────────────────────────────────────────
+def run_groups(groups: list, date_str: str, random_start_delay: bool = True):
+    """
+    Open one browser session and scrape each group in sequence.
+    Sends a Telegram notification after each group.
+    Random 2–5 min gap between groups.
+    Optional random 0–10 min start delay to vary the daily start time.
+    """
+    if random_start_delay:
+        delay = random.uniform(0, 600)
+        log(f"Random start delay: {delay:.0f}s ({delay/60:.1f} min)")
+        time.sleep(delay)
+
+    username, password = get_credentials()
+    if not username or not password:
+        log("ERROR: STIC_USERNAME or STIC_PASSWORD not found in secrets.json")
+        sys.exit(1)
+
+    # Convert date_str (DD-MM-YYYY) to ISO for DB queries
+    d, m, y = date_str.split("-")
+    iso_date = f"{y}-{m}-{d}"
+
+    cache     = load_cache()
+    completed = load_progress(date_str)   # set of str(product_id)s done today
+
+    log(f"run_groups: {len(groups)} groups to scrape, date={date_str}")
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-dev-shm-usage",
+            ]
+        )
+        context = browser.new_context(
+            viewport={"width": 1366, "height": 768},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            locale="en-GB",
+            timezone_id="Europe/London",
+        )
+        context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            Object.defineProperty(navigator, 'languages', { get: () => ['en-GB', 'en'] });
+            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
+            window.chrome = { runtime: {} };
+        """)
+        page = context.new_page()
+
+        if not login(page, username, password):
+            log("Login failed — aborting.")
+            browser.close()
+            sys.exit(1)
+
+        for group_idx, (manufacturer, product_group, label) in enumerate(groups):
+            is_last = (group_idx == len(groups) - 1)
+
+            products = read_products_for_group(manufacturer, product_group)
+            if not products:
+                log(f"\n[GROUP] {label} — no active products, skipping.")
+                continue
+
+            log(f"\n{'='*60}")
+            log(f"[GROUP {group_idx+1}/{len(groups)}] {label} — {len(products)} products")
+            log(f"{'='*60}")
+
+            group_done    = 0
+            group_failed  = 0
+            products_since_pause = 0
+            long_pause_every     = random.randint(30, 50)
+
+            for product in products:
+                prod_id      = str(product["product_id"])
+                model_no     = product["model_no"]
+                manufacturer_p = product["manufacturer"]
+
+                # Skip if already done today
+                if prod_id in completed:
+                    log(f"  Skipping {model_no} (ID: {prod_id}) — already done today.")
+                    continue
+
+                log(f"\n  [{group_done+group_failed+1}/{len(products)}] {model_no} (ID: {prod_id})")
+                random_mouse_move(page)
+
+                dist_data = search_and_scrape(
+                    page, model_no, cache,
+                    product_id=prod_id,
+                    manufacturer=manufacturer_p,
+                    ean=product.get("ean")
+                )
+
+                if dist_data is None:
+                    log(f"  Page load failed — skipping.")
+                    time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
+                    continue
+
+                if not dist_data:
+                    log(f"  FAILED — no result found for: {model_no}")
+                    group_failed += 1
+                else:
+                    write_to_db(date_str, product, dist_data)
+                    group_done += 1
+
+                completed.add(prod_id)
+                save_progress(date_str, completed)
+                save_cache(cache)
+
+                products_since_pause += 1
+                if products_since_pause >= long_pause_every:
+                    pause = random.uniform(LONG_PAUSE_MIN, LONG_PAUSE_MAX)
+                    log(f"  Long pause: {pause:.0f}s")
+                    time.sleep(pause)
+                    products_since_pause = 0
+                    long_pause_every = random.randint(30, 50)
+                else:
+                    delay = random.uniform(DELAY_MIN, DELAY_MAX)
+                    log(f"  Delay: {delay:.1f}s")
+                    time.sleep(delay)
+
+            # ── Per-group Telegram ────────────────────────────────────────────
+            bleed_section = ""
+            if is_last:
+                bleeds = check_data_bleed(iso_date)
+                if bleeds:
+                    lines = [f"\n⚠️ <b>Data bleed suspects ({len(bleeds)} pairs):</b>"]
+                    for s in bleeds:
+                        lines.append(f"  • {s['product_id']} {s['model_no']} ↔ {s['matched_to']} {s['matched_model']}")
+                    bleed_section = "\n".join(lines)
+                else:
+                    bleed_section = "\n✅ No data bleeds detected."
+
+            msg = (
+                f"✅ <b>{label}</b> — {date_str}\n"
+                f"📦 Scraped: {group_done} | ❌ Failed: {group_failed}\n"
+                f"🕐 {datetime.now().strftime('%H:%M')}"
+                f"{bleed_section}"
+            )
+            send_telegram(msg)
+            log(f"[GROUP] {label} complete — {group_done} scraped, {group_failed} failed.")
+
+            # ── Inter-group gap (not after the last group) ────────────────────
+            if not is_last:
+                gap = random.uniform(GROUP_GAP_MIN, GROUP_GAP_MAX)
+                log(f"\nInter-group gap: {gap:.0f}s ({gap/60:.1f} min) before next group…")
+                time.sleep(gap)
+
+        browser.close()
+
+    log(f"\nAll groups complete. Total done today: {len(completed)}")
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--batch", type=int, choices=[1, 2, 3], help="1/2/3 — split dynamically from template count")
-    parser.add_argument("--test",  action="store_true",          help="Test run: first 20 products only")
-    parser.add_argument("--start", type=int,                     help="Custom start row")
-    parser.add_argument("--end",   type=int,                     help="Custom end row")
+    parser.add_argument("--runall",   action="store_true", help="Morning run: all groups in sequence with random start delay")
+    parser.add_argument("--gpus",     action="store_true", help="Afternoon run: GPU groups only with random start delay")
+    parser.add_argument("--group",    type=str,            help="Run a single named group by label, e.g. --group \"ASUS GPU\"")
+    parser.add_argument("--batch",    type=int, choices=[1, 2, 3], help="Legacy: 1/2/3 — split dynamically from product count")
+    parser.add_argument("--test",     action="store_true", help="Test run: first 20 products only")
+    parser.add_argument("--start",    type=int,            help="Custom start row")
+    parser.add_argument("--end",      type=int,            help="Custom end row")
+    parser.add_argument("--rescrape", type=str,            help="Comma-separated product IDs to re-scrape")
     args = parser.parse_args()
 
     date_str = datetime.now().strftime("%d-%m-%Y")
 
-    if args.test:
+    if args.rescrape:
+        pids = [x.strip() for x in args.rescrape.split(",") if x.strip()]
+        log(f"Re-scrape mode: {len(pids)} products — {pids}")
+        run_specific(pids, date_str)
+    elif args.group:
+        label = args.group.strip()
+        matched = [g for g in SCRAPE_GROUPS if g[2].lower() == label.lower()]
+        if not matched:
+            available = ", ".join(f'"{g[2]}"' for g in SCRAPE_GROUPS)
+            log(f"ERROR: group '{label}' not found. Available: {available}")
+            sys.exit(1)
+        log(f"Single-group run: {matched[0][2]}")
+        run_groups(matched, date_str, random_start_delay=False)
+    elif args.runall:
+        log(f"Morning run: {len(SCRAPE_GROUPS)} groups — all products")
+        run_groups(SCRAPE_GROUPS, date_str, random_start_delay=True)
+    elif args.gpus:
+        log(f"Afternoon run: {len(GPU_GROUPS)} GPU groups only")
+        run_groups(GPU_GROUPS, date_str, random_start_delay=True)
+    elif args.test:
         run(1, 20, date_str, is_final=False)
     elif args.batch in (1, 2, 3):
         total = count_products()

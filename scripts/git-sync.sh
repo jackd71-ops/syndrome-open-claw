@@ -23,6 +23,7 @@ cp "$LIVE_STIC/ocuk_scrape.py"        "$DOCS/data/stic/ocuk_scrape.py"
 cp "$LIVE_SCRIPTS/backup.sh"          "$DOCS/scripts/backup.sh"
 cp "$LIVE_SCRIPTS/git-sync.sh"        "$DOCS/scripts/git-sync.sh"
 cp "$LIVE_SCRIPTS/safe-restart.sh"    "$DOCS/scripts/safe-restart.sh"
+cp "$LIVE_SCRIPTS/sync_template.py"   "$DOCS/scripts/sync_template.py"
 
 # ── Check if anything actually changed ───────────────────────────────────────
 cd "$DOCS" || { echo "[$TIMESTAMP] ERROR: could not cd to $DOCS" >> "$LOG"; exit 1; }
@@ -40,6 +41,7 @@ git add data/analytics/portal.py \
         data/stic/very_scrape.py \
         data/stic/box_scrape.py \
         data/stic/ocuk_scrape.py \
+        scripts/sync_template.py \
         scripts/backup.sh \
         scripts/git-sync.sh \
         scripts/safe-restart.sh \
