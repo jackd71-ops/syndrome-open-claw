@@ -204,8 +204,8 @@ Add:
 0 22 * * * TZ=Europe/London /usr/bin/python3 /opt/openclaw/data/stic/retailer_scraper.py --batch 3 >> /opt/openclaw/logs/retailer_cron.log 2>&1
 # Nightly git sync of source files to GitHub (2am)
 0 2 * * * /opt/openclaw/scripts/git-sync.sh >> /opt/openclaw/logs/git-sync.log 2>&1
-# STIC template sync: Excel→DB pull, upsert products, flush EOL back to Excel, push OneDrive (midnight UK)
-0 0 * * * TZ=Europe/London python3 /opt/openclaw/scripts/sync_template.py >> /opt/openclaw/logs/sync_template.log 2>&1
+# STIC template sync: DISABLED - products table now managed via portal Import/Export tools
+# 0 0 * * * TZ=Europe/London python3 /opt/openclaw/scripts/sync_template.py >> /opt/openclaw/logs/sync_template.log 2>&1
 ```
 
 ---
