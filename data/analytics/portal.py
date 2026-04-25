@@ -348,6 +348,7 @@ HTML = r"""<!DOCTYPE html>
   <span class="tab-bar-title">Competition Analysis</span>
   <div class="tab active" id="tab-stic" onclick="switchTab('stic')">STIC</div>
   <div class="tab" id="tab-retailer" onclick="switchTab('retailer')">Retailer</div>
+  <div class="tab" id="tab-catalogue" onclick="switchTab('catalogue')">Catalogue</div>
 </div>
 
 <!-- STIC layout -->
@@ -413,26 +414,10 @@ HTML = r"""<!DOCTYPE html>
     </div>
     <div class="sidebar-section">
       <div class="sidebar-section-header" onclick="toggleSection(this)">
-        EOL Products <span class="arrow">▾</span>
-      </div>
-      <div class="sidebar-items">
-        <button class="sidebar-btn" onclick="loadEOLProducts(this)">⛔ View EOL SKUs</button>
-      </div>
-    </div>
-    <div class="sidebar-section">
-      <div class="sidebar-section-header" onclick="toggleSection(this)">
         Scraper <span class="arrow">▾</span>
       </div>
       <div class="sidebar-items">
         <button class="sidebar-btn" onclick="loadScrapeGroups(this)">⟳ Refresh SKUs</button>
-      </div>
-    </div>
-    <div class="sidebar-section">
-      <div class="sidebar-section-header" onclick="toggleSection(this)">
-        Import / Export <span class="arrow">▾</span>
-      </div>
-      <div class="sidebar-items">
-        <button class="sidebar-btn" onclick="loadImportExport(this)">📥 Import / Export</button>
       </div>
     </div>
   </div>
@@ -483,17 +468,9 @@ HTML = r"""<!DOCTYPE html>
     <div class="content-section" id="stic-investigate">
       <div id="stic-investigate-content"><div class="spinner">Loading…</div></div>
     </div>
-    <!-- EOL Products -->
-    <div class="content-section" id="stic-eol">
-      <div id="stic-eol-content"><div class="spinner">Loading…</div></div>
-    </div>
     <!-- Scrape Groups -->
     <div class="content-section" id="stic-scrape">
       <div id="stic-scrape-content"><div class="spinner">Loading…</div></div>
-    </div>
-    <!-- Import / Export -->
-    <div class="content-section" id="stic-import-export">
-      <div id="stic-import-export-content"></div>
     </div>
   </div>
 </div>
@@ -510,6 +487,52 @@ HTML = r"""<!DOCTYPE html>
     <div class="content-section" id="ret-sku">
       <button class="back-btn" onclick="document.getElementById('ret-sku').classList.remove('active')">← Back</button>
       <div id="ret-sku-content"><div class="spinner">Loading…</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- Catalogue layout -->
+<div class="layout" id="layout-catalogue" style="display:none">
+  <div class="sidebar" id="sidebar-catalogue">
+    <div class="sidebar-section">
+      <div class="sidebar-section-header" onclick="toggleSection(this)">
+        Products <span class="arrow">▾</span>
+      </div>
+      <div class="sidebar-items">
+        <button class="sidebar-btn" onclick="loadCatProducts(this)">📦 View / Search SKUs</button>
+        <button class="sidebar-btn" onclick="loadCatImportExport(this,'new-skus')">📥 Add / Update SKUs</button>
+        <button class="sidebar-btn" onclick="loadCatImportExport(this,'eol-status')">🔄 Update EOL Status</button>
+        <button class="sidebar-btn" onclick="loadCatEOL(this)">⛔ View EOL SKUs</button>
+        <button class="sidebar-btn" onclick="loadCatImportExport(this,'export-skus')">📤 Export Active SKUs</button>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-header" onclick="toggleSection(this)">
+        Retailers <span class="arrow">▾</span>
+      </div>
+      <div class="sidebar-items">
+        <button class="sidebar-btn" onclick="loadCatRetailerIds(this)">🔗 View Retailer IDs</button>
+        <button class="sidebar-btn" onclick="loadCatImportExport(this,'retailer-ids-import')">📥 Import Retailer IDs</button>
+        <button class="sidebar-btn" onclick="loadCatImportExport(this,'retailer-ids-export')">📤 Export Retailer IDs</button>
+      </div>
+    </div>
+  </div>
+  <div class="main" id="main-catalogue">
+    <!-- Products view -->
+    <div class="content-section active" id="cat-products">
+      <div id="cat-products-content"><div class="spinner">Loading…</div></div>
+    </div>
+    <!-- EOL view -->
+    <div class="content-section" id="cat-eol">
+      <div id="cat-eol-content"><div class="spinner">Loading…</div></div>
+    </div>
+    <!-- Import / Export -->
+    <div class="content-section" id="cat-import-export">
+      <div id="cat-import-export-content"></div>
+    </div>
+    <!-- Retailer IDs view -->
+    <div class="content-section" id="cat-retailer-ids">
+      <div id="cat-retailer-ids-content"><div class="spinner">Loading…</div></div>
     </div>
   </div>
 </div>
@@ -541,9 +564,20 @@ function switchTab(tab) {
   currentTab = tab;
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.getElementById('tab-' + tab).classList.add('active');
-  document.getElementById('layout-stic').style.display = (tab === 'stic') ? 'flex' : 'none';
-  document.getElementById('layout-retailer').style.display = (tab === 'retailer') ? 'flex' : 'none';
-  if (tab === 'retailer' && !retailerKpiLoaded) loadRetailerKpi();
+  document.getElementById('layout-stic').style.display      = (tab === 'stic')      ? 'flex' : 'none';
+  document.getElementById('layout-retailer').style.display  = (tab === 'retailer')  ? 'flex' : 'none';
+  document.getElementById('layout-catalogue').style.display = (tab === 'catalogue') ? 'flex' : 'none';
+  if (tab === 'retailer'  && !retailerKpiLoaded)  loadRetailerKpi();
+  if (tab === 'catalogue' && !catProductsLoaded)  loadCatProducts();
+}
+
+// ── Catalogue section management ──────────────────────────────────────────────
+let catProductsLoaded = false;
+function showCatSection(name, btn) {
+  document.querySelectorAll('#main-catalogue .content-section').forEach(s => s.classList.remove('active'));
+  document.getElementById('cat-' + name).classList.add('active');
+  document.querySelectorAll('#sidebar-catalogue .sidebar-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
 }
 
 // ── Sidebar section collapse ──────────────────────────────────────────────────
@@ -645,8 +679,8 @@ function toggleEOL(pid, event) {
     if (data.eol) _eolIds.add(pid); else _eolIds.delete(pid);
     _refreshAllEolBtns();
     // Refresh EOL section if it's currently visible
-    const eolSection = document.getElementById('stic-eol');
-    if (eolSection && eolSection.classList.contains('active')) loadEOLProducts();
+    const eolSection = document.getElementById('cat-eol');
+    if (eolSection && eolSection.classList.contains('active')) loadCatEOL();
   });
 }
 
@@ -1251,14 +1285,9 @@ function loadInvestigateReport(btn) {
   });
 }
 
-function loadEOLProducts(btn) {
-  if (btn) {
-    document.querySelectorAll('#sidebar-stic .sidebar-btn').forEach(b=>b.classList.remove('active'));
-    btn.classList.add('active');
-  }
-  document.querySelectorAll('#main-stic .content-section').forEach(s=>s.classList.remove('active'));
-  document.getElementById('stic-eol').classList.add('active');
-  const el = document.getElementById('stic-eol-content');
+function loadCatEOL(btn) {
+  showCatSection('eol', btn);
+  const el = document.getElementById('cat-eol-content');
   el.innerHTML = '<div class="spinner">Loading…</div>';
   fetch('/api/eol').then(r=>r.json()).then(data => {
     let html = '<h2 style="margin:0 0 4px">EOL Products</h2>';
@@ -1343,7 +1372,84 @@ function triggerScrapeGroup(label, btn) {
   });
 }
 
-// ── Import / Export ───────────────────────────────────────────────────────────
+// ── Catalogue: Products view ──────────────────────────────────────────────────
+function loadCatProducts(btn) {
+  if (!catProductsLoaded) catProductsLoaded = true;
+  showCatSection('products', btn);
+  const el = document.getElementById('cat-products-content');
+  el.innerHTML = '<div class="spinner">Loading…</div>';
+  fetch('/api/catalogue/products').then(r=>r.json()).then(data => {
+    let html = '<h2 style="margin:0 0 4px">Products</h2>';
+    html += `<p style="color:#605E5C;margin:0 0 12px;font-size:13px">${data.products.length} active SKUs · <a href="#" onclick="loadCatEOL();return false">View EOL</a></p>`;
+    html += `<div style="display:flex;gap:8px;margin-bottom:12px">
+      <input id="cat-prod-search" type="text" placeholder="Search model, description, manufacturer…"
+        style="flex:1;padding:6px 10px;border:1px solid #EDEBE9;border-radius:2px;font-size:13px"
+        oninput="_catProdFilter()">
+    </div>`;
+    html += '<div class="tbl-wrap"><table id="cat-prod-tbl"><thead><tr><th>Product</th><th>Model</th><th>Manufacturer</th><th>Group</th><th>Chipset</th><th>EAN</th><th>MSRP</th></tr></thead><tbody>';
+    data.products.forEach(r => {
+      html += `<tr>
+        <td>${r.product_id}</td>
+        <td>${r.model_no||'—'}</td>
+        <td>${r.manufacturer||'—'}</td>
+        <td>${r.product_group||'—'}</td>
+        <td>${r.chipset||'—'}</td>
+        <td>${r.ean||'—'}</td>
+        <td>${r.msrp ? '£'+r.msrp.toFixed(2) : '—'}</td>
+      </tr>`;
+    });
+    html += '</tbody></table></div>';
+    el.innerHTML = html;
+  });
+}
+
+function _catProdFilter() {
+  const q = document.getElementById('cat-prod-search').value.toLowerCase();
+  document.querySelectorAll('#cat-prod-tbl tbody tr').forEach(row => {
+    row.style.display = (!q || row.textContent.toLowerCase().includes(q)) ? '' : 'none';
+  });
+}
+
+// ── Catalogue: Retailer IDs view ──────────────────────────────────────────────
+function loadCatRetailerIds(btn) {
+  showCatSection('retailer-ids', btn);
+  const el = document.getElementById('cat-retailer-ids-content');
+  el.innerHTML = '<div class="spinner">Loading…</div>';
+  fetch('/api/catalogue/retailer-ids').then(r=>r.json()).then(data => {
+    let html = '<h2 style="margin:0 0 4px">Retailer IDs</h2>';
+    html += `<p style="color:#605E5C;margin:0 0 12px;font-size:13px">${data.rows.length} products · IDs used by the retailer scraper to locate products on each site.</p>`;
+    html += `<div style="display:flex;gap:8px;margin-bottom:12px">
+      <input id="cat-ret-search" type="text" placeholder="Search product, model, ASIN, URL…"
+        style="flex:1;padding:6px 10px;border:1px solid #EDEBE9;border-radius:2px;font-size:13px"
+        oninput="_catRetFilter()">
+    </div>`;
+    html += '<div class="tbl-wrap"><table id="cat-ret-tbl"><thead><tr><th>Product</th><th>Model</th><th>Amazon ASIN</th><th>Currys SKU</th><th>Very SKU</th><th>Argos SKU</th><th>OCUK Code</th><th>Scan LN</th><th>Scan URL</th><th>AWD-IT URL</th><th>CCL URL</th><th>Box URL</th><th>Very URL</th></tr></thead><tbody>';
+    data.rows.forEach(r => {
+      html += `<tr>
+        <td>${r.product_id}</td><td>${r.model_no||'—'}</td>
+        <td>${r.amazon_asin||'—'}</td><td>${r.currys_sku||'—'}</td>
+        <td>${r.very_sku||'—'}</td><td>${r.argos_sku||'—'}</td>
+        <td>${r.ocuk_code||'—'}</td><td>${r.scan_ln||'—'}</td>
+        <td>${r.scan_url ? `<a href="${r.scan_url}" target="_blank">↗</a>` : '—'}</td>
+        <td>${r.awdit_url ? `<a href="${r.awdit_url}" target="_blank">↗</a>` : '—'}</td>
+        <td>${r.ccl_url ? `<a href="${r.ccl_url}" target="_blank">↗</a>` : '—'}</td>
+        <td>${r.box_url ? `<a href="${r.box_url}" target="_blank">↗</a>` : '—'}</td>
+        <td>${r.very_url ? `<a href="${r.very_url}" target="_blank">↗</a>` : '—'}</td>
+      </tr>`;
+    });
+    html += '</tbody></table></div>';
+    el.innerHTML = html;
+  });
+}
+
+function _catRetFilter() {
+  const q = document.getElementById('cat-ret-search').value.toLowerCase();
+  document.querySelectorAll('#cat-ret-tbl tbody tr').forEach(row => {
+    row.style.display = (!q || row.textContent.toLowerCase().includes(q)) ? '' : 'none';
+  });
+}
+
+// ── Catalogue: Import / Export ────────────────────────────────────────────────
 
 // Tool registry — add new tools here as they are built
 const IE_TOOLS = [
@@ -1372,24 +1478,39 @@ const IE_TOOLS = [
     desc: 'Download all active (non-EOL) SKUs as CSV — useful for bulk review or editing before re-importing.',
     type: 'export',
   },
+  {
+    id:          'retailer-ids-import',
+    icon:        '📥',
+    name:        'Import Retailer IDs',
+    desc:        'Import a CSV to add or update retailer-specific IDs (ASINs, SKUs, URLs) for each product.',
+    type:        'import',
+    hasTemplate: true,
+    headers:     'Product,amazon_asin,currys_sku,very_sku,argos_sku,ccl_url,awdit_url,scan_ln,scan_url,ocuk_code,box_url',
+  },
+  {
+    id:   'retailer-ids-export',
+    icon: '📤',
+    name: 'Export Retailer IDs',
+    desc: 'Download all retailer IDs as CSV — edit and re-import to update codes in bulk.',
+    type: 'export',
+  },
 ];
 
 let _ieCurrentTool = null;    // tool id currently open
 let _iePreviewRows  = [];     // validated rows from last preview, ready to confirm
 
-function loadImportExport(btn) {
-  if (btn) {
-    document.querySelectorAll('#sidebar-stic .sidebar-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-  }
-  document.querySelectorAll('#main-stic .content-section').forEach(s => s.classList.remove('active'));
-  document.getElementById('stic-import-export').classList.add('active');
+function loadCatImportExport(btn, toolId) {
+  showCatSection('import-export', btn);
   _ieCurrentTool = null;
-  _renderIeToolCards();
+  if (toolId) {
+    _ieOpenTool(toolId);
+  } else {
+    _renderIeToolCards();
+  }
 }
 
 function _renderIeToolCards() {
-  const el = document.getElementById('stic-import-export-content');
+  const el = document.getElementById('cat-import-export-content');
   let html = '<h2 style="margin:0 0 4px">Import / Export</h2>';
   html += '<p style="color:#605E5C;margin:0 0 16px;font-size:13px">Select a tool below. Import tools accept a CSV file; export tools download data directly. New tools will be added here over time.</p>';
   html += '<div class="ie-tool-cards">';
@@ -1419,7 +1540,7 @@ function _ieOpenTool(toolId) {
   _iePreviewRows  = [];
   const tool = IE_TOOLS.find(t => t.id === toolId);
   if (!tool) return;
-  const el = document.getElementById('stic-import-export-content');
+  const el = document.getElementById('cat-import-export-content');
   const templateBtn = tool.hasTemplate
     ? `<a href="/api/import/template/${toolId}" download class="ie-btn ie-btn-secondary" style="text-decoration:none">↓ Download CSV Template</a>`
     : '';
@@ -1581,6 +1702,42 @@ function _ieRenderPreview(toolId, data) {
     return;
   }
 
+  // ── retailer-ids-import tool: custom preview layout ─────────────────────────
+  if (toolId === 'retailer-ids-import') {
+    const inserts = _iePreviewRows.filter(r => r.action === 'insert').length;
+    const updates = _iePreviewRows.filter(r => r.action === 'update').length;
+    let html = `<div class="ie-summary">
+      <span>Total rows: <strong>${s.total}</strong></span>
+      <span style="color:#107C10">✚ New: <strong>${inserts}</strong></span>
+      <span style="color:#0078D4">↻ Update: <strong>${updates}</strong></span>
+      ${s.errors ? `<span style="color:#A4262C">⚠ Errors: <strong>${s.errors}</strong></span>` : ''}
+    </div>`;
+    if (data.errors?.length) {
+      html += `<div style="padding:8px 12px;background:#FDF3F2;border:1px solid #F1B8B3;border-radius:2px;margin-bottom:12px;font-size:12px;color:#A4262C">
+        ${data.errors.slice(0,5).map(e=>`<div>${e}</div>`).join('')}
+        ${data.errors.length > 5 ? `<div>…and ${data.errors.length-5} more</div>` : ''}
+      </div>`;
+    }
+    if (_iePreviewRows.length) {
+      html += `<div class="ie-action-bar">
+        <button class="ie-btn ie-btn-success" id="ie-confirm-btn-${toolId}"
+                onclick="_ieConfirm('${toolId}')">✓ Confirm Update (${_iePreviewRows.length} rows)</button>
+        <button class="ie-btn ie-btn-secondary" onclick="_ieOpenTool('${toolId}')">✕ Cancel</button>
+      </div>`;
+      html += '<div class="tbl-wrap"><table><thead><tr><th>Status</th><th>Product</th><th>Fields Updated</th></tr></thead><tbody>';
+      _iePreviewRows.slice(0, 100).forEach(r => {
+        const tag = r.action === 'insert' ? '<span class="ie-new">NEW</span>' : '<span class="ie-update">UPDATE</span>';
+        const fields = Object.keys(r.updates).join(', ');
+        html += `<tr><td>${tag}</td><td>${r.product_id}</td><td style="font-size:11px;color:#605E5C">${fields}</td></tr>`;
+      });
+      html += '</tbody></table></div>';
+    } else {
+      html += '<p style="color:#A19F9D;padding:12px">No valid rows found in the file.</p>';
+    }
+    previewEl.innerHTML = html;
+    return;
+  }
+
   // ── Default preview layout (new-skus and future tools) ──────────────────────
   let html = `<div class="ie-summary">
     <span>Total rows: <strong>${s.total}</strong></span>
@@ -1657,6 +1814,10 @@ function _ieConfirm(toolId) {
         <span style="color:#107C10">Set Active: <strong>${data.set_active}</strong></span>
         <span style="color:#A4262C">Set EOL: <strong>${data.set_eol}</strong></span>
         ${data.skipped ? `<span style="color:#A19F9D">Skipped: <strong>${data.skipped}</strong></span>` : ''}`;
+    } else if (toolId === 'retailer-ids-import') {
+      resultHtml += `
+        <span style="color:#107C10;font-weight:600;font-size:14px">✓ Retailer IDs updated</span>
+        <span style="color:#0078D4">Updated: <strong>${data.updated}</strong></span>`;
     } else {
       resultHtml += `
         <span style="color:#107C10;font-weight:600;font-size:14px">✓ Import complete</span>
@@ -1665,7 +1826,7 @@ function _ieConfirm(toolId) {
         ${data.skipped ? `<span style="color:#A19F9D">Skipped: <strong>${data.skipped}</strong></span>` : ''}`;
     }
     resultHtml += `</div>
-      <p style="color:#605E5C;font-size:12px;padding:0 0 12px">Changes are live immediately. The nightly sync will push them to OneDrive on the next run.</p>
+      <p style="color:#605E5C;font-size:12px;padding:0 0 12px">Changes are live immediately.</p>
       <button class="ie-btn ie-btn-secondary" onclick="_renderIeToolCards()">← Back to tools</button>`;
     previewEl.innerHTML = resultHtml;
     _iePreviewRows = [];
@@ -1678,9 +1839,8 @@ function _ieConfirm(toolId) {
 }
 
 function _ieExport(toolId) {
-  if (toolId === 'export-skus') {
-    window.location.href = '/api/export/skus';
-  }
+  if (toolId === 'export-skus')         window.location.href = '/api/export/skus';
+  if (toolId === 'retailer-ids-export') window.location.href = '/api/export/retailer-ids';
 }
 
 // ── Retailer KPI ──────────────────────────────────────────────────────────────
@@ -2959,6 +3119,175 @@ def stic_url_set(product_id):
     db.commit()
     db.close()
     return jsonify({"saved": bool(changed), "product_id": product_id, "url": url})
+
+
+# ── Catalogue API ─────────────────────────────────────────────────────────────
+
+@app.route("/api/catalogue/products")
+def catalogue_products():
+    """Return all active products for the Catalogue Products view."""
+    db = get_db()
+    rows = db.execute(
+        "SELECT product_id, model_no, manufacturer, product_group, description, "
+        "chipset, ean, msrp FROM products WHERE eol=0 ORDER BY product_id"
+    ).fetchall()
+    db.close()
+    return jsonify({"products": [dict(r) for r in rows]})
+
+
+@app.route("/api/catalogue/retailer-ids")
+def catalogue_retailer_ids():
+    """Return all retailer IDs joined with product model_no."""
+    db = get_db()
+    rows = db.execute(
+        "SELECT r.product_id, p.model_no, r.amazon_asin, r.currys_sku, r.very_sku, "
+        "r.argos_sku, r.ccl_url, r.awdit_url, r.scan_ln, r.scan_url, r.ocuk_code, "
+        "r.box_url, r.very_url "
+        "FROM retailer_ids r "
+        "LEFT JOIN products p ON p.product_id = r.product_id "
+        "ORDER BY r.product_id"
+    ).fetchall()
+    db.close()
+    return jsonify({"rows": [dict(r) for r in rows]})
+
+
+@app.route("/api/import/template/retailer-ids-import")
+def import_template_retailer_ids():
+    headers = "Product,amazon_asin,currys_sku,very_sku,argos_sku,ccl_url,awdit_url,scan_ln,scan_url,ocuk_code,box_url"
+    from flask import Response
+    return Response(
+        headers + "\n",
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=retailer_ids_template.csv"}
+    )
+
+
+@app.route("/api/import/retailer-ids-import/preview", methods=["POST"])
+def import_retailer_ids_preview():
+    """Preview retailer IDs import: validate CSV and return proposed changes."""
+    import csv as _csv, io
+    data_in = request.get_json(silent=True) or {}
+    raw = (data_in.get("csv") or "").lstrip("﻿").strip()
+    if not raw:
+        return jsonify({"error": "No CSV content received."})
+
+    try:
+        reader   = _csv.DictReader(io.StringIO(raw))
+        raw_rows = list(reader)
+    except Exception as e:
+        return jsonify({"error": f"CSV parse error: {e}"})
+
+    if not raw_rows:
+        return jsonify({"error": "CSV file appears to be empty (no data rows)."})
+
+    # Normalise headers — accept "product" as alias for "product_id"
+    headers_lower = {h.strip().lower(): h for h in (reader.fieldnames or [])}
+    if "product_id" not in headers_lower and "product" in headers_lower:
+        headers_lower["product_id"] = headers_lower["product"]
+        raw_rows = [{("product_id" if k.strip().lower() == "product" else k): v
+                     for k, v in row.items()} for row in raw_rows]
+
+    if "product_id" not in headers_lower:
+        return jsonify({"error": "Missing required column: Product"})
+
+    RET_COLS = ["amazon_asin","currys_sku","very_sku","argos_sku","ccl_url","awdit_url",
+                "scan_ln","scan_url","ocuk_code","box_url","very_url"]
+
+    db = get_db()
+    existing   = {str(r["product_id"]) for r in db.execute("SELECT product_id FROM retailer_ids").fetchall()}
+    valid_pids = {str(r["product_id"]) for r in db.execute("SELECT product_id FROM products").fetchall()}
+    db.close()
+
+    preview_rows, errors = [], []
+    for i, row in enumerate(raw_rows[:5000], 1):
+        pid_raw = row.get("product_id") or ""
+        pid = str(pid_raw).strip()
+        if not pid:
+            continue
+        if pid not in valid_pids:
+            errors.append(f"Row {i}: Product {pid} not found in products table")
+            continue
+        updates = {}
+        for col in RET_COLS:
+            for k, v in row.items():
+                if k.strip().lower() == col.lower() and str(v).strip():
+                    updates[col] = str(v).strip()
+                    break
+        if updates:
+            preview_rows.append({
+                "product_id": pid, "updates": updates,
+                "action": "update" if pid in existing else "insert"
+            })
+
+    return jsonify({
+        "valid_rows": preview_rows,
+        "summary": {"total": len(preview_rows), "errors": len(errors)},
+        "errors": errors[:20],
+    })
+
+
+@app.route("/api/import/retailer-ids-import/confirm", methods=["POST"])
+def import_retailer_ids_confirm():
+    """Apply confirmed retailer IDs import."""
+    data = request.get_json(silent=True) or {}
+    rows = data.get("rows", [])
+    if not rows:
+        return jsonify({"error": "No rows to import"}), 400
+
+    RET_COLS = ["amazon_asin","currys_sku","very_sku","argos_sku","ccl_url","awdit_url",
+                "scan_ln","scan_url","ocuk_code","box_url","very_url"]
+
+    db = get_db()
+    updated = 0
+    try:
+        for row in rows:
+            pid     = int(row["product_id"])
+            updates = {k: v for k, v in row.get("updates", {}).items() if k in RET_COLS}
+            if not updates:
+                continue
+            db.execute("INSERT OR IGNORE INTO retailer_ids (product_id) VALUES (?)", (pid,))
+            set_clause = ", ".join(f"{col}=?" for col in updates)
+            vals       = list(updates.values()) + [pid]
+            db.execute(f"UPDATE retailer_ids SET {set_clause} WHERE product_id=?", vals)
+            updated += 1
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        db.close()
+        return jsonify({"error": str(e)})
+    db.close()
+    return jsonify({"updated": updated})
+
+
+@app.route("/api/export/retailer-ids")
+def export_retailer_ids():
+    """Download all retailer IDs as CSV."""
+    from flask import Response
+    import io, csv as _csv
+    db = get_db()
+    rows = db.execute(
+        "SELECT r.product_id, p.model_no, r.amazon_asin, r.currys_sku, r.very_sku, "
+        "r.argos_sku, r.ccl_url, r.awdit_url, r.scan_ln, r.scan_url, r.ocuk_code, "
+        "r.box_url, r.very_url "
+        "FROM retailer_ids r LEFT JOIN products p ON p.product_id = r.product_id "
+        "ORDER BY r.product_id"
+    ).fetchall()
+    db.close()
+    out = io.StringIO()
+    w   = _csv.writer(out)
+    w.writerow(["Product","model_no","amazon_asin","currys_sku","very_sku","argos_sku",
+                "ccl_url","awdit_url","scan_ln","scan_url","ocuk_code","box_url","very_url"])
+    for r in rows:
+        w.writerow([r["product_id"], r["model_no"] or "",
+                    r["amazon_asin"] or "", r["currys_sku"] or "",
+                    r["very_sku"] or "", r["argos_sku"] or "",
+                    r["ccl_url"] or "", r["awdit_url"] or "",
+                    r["scan_ln"] or "", r["scan_url"] or "",
+                    r["ocuk_code"] or "", r["box_url"] or "", r["very_url"] or ""])
+    from datetime import datetime as _dt
+    fname = f"retailer_ids_{_dt.now().strftime('%Y-%m-%d')}.csv"
+    return Response(out.getvalue(), mimetype="text/csv",
+                    headers={"Content-Disposition": f"attachment; filename={fname}"})
 
 
 def _init_watchlist():

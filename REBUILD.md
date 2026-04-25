@@ -112,11 +112,13 @@ chown -R adminclaude:adminclaude /opt/openclaw
 ```
 
 **Key files restored from TrueNAS:**
-- `data/analytics/prices.db` — all STIC + retailer price/stock history
+- `data/analytics/prices.db` — all STIC + retailer price/stock history (includes products, retailer_ids, retailer_prices)
 - `secrets.json` — Telegram token, STIC login credentials
 - `config/` — OpenClaw platform config, manifest DB, credentials
 - `workspace/` — agent memory and session notes
-- `data/general/*.xlsx` — STIC and Retailer templates
+- `data/general/Retailer_Template.xlsx` — legacy retailer template (used by seed script on first rebuild if prices.db is empty)
+
+> If `prices.db` is restored from backup it will already contain `retailer_ids` and `products.msrp`. Only run `seed_retailer_db.py` if the DB is new/empty and you need to seed from Excel.
 
 ---
 
@@ -276,15 +278,11 @@ chown -R adminclaude:adminclaude /opt/openclaw
 
 ---
 
-## Products Table
+## DB Schema
 
-The `products` table in `prices.db` is the operational SKU catalogue — the scraper and portal read from it directly. It is seeded and kept in sync by `scripts/sync_template.py` (nightly, midnight UK). On a fresh rebuild, seed it manually before running the scraper:
+All operational data lives in `prices.db`. Key tables:
 
-```bash
-python3 /opt/openclaw/scripts/sync_template.py
-```
-
-Schema:
+### `products` — SKU catalogue (shared by STIC and Retailer scrapers)
 
 | Column | Type | Notes |
 |---|---|---|
@@ -297,23 +295,60 @@ Schema:
 | ean | TEXT | |
 | eol | INTEGER | 0 = active, 1 = EOL |
 | stic_url | TEXT | Cached STIC product detail URL (auto-populated by scraper) |
+| msrp | REAL | Recommended retail price |
 
-EOL flag is managed via the portal Import/Export → Update EOL Status tool or the ⛔ EOL view. The nightly sync flushes EOL changes back to the OneDrive Excel.
+### `retailer_ids` — retailer-specific IDs per product
+
+| Column | Type | Notes |
+|---|---|---|
+| product_id | INTEGER PK | FK → products |
+| amazon_asin | TEXT | |
+| currys_sku | TEXT | |
+| very_sku | TEXT | |
+| very_url | TEXT | Direct product URL (auto-discovered) |
+| argos_sku | TEXT | (blocked — Akamai 403) |
+| ccl_url | TEXT | Direct product URL (auto-discovered) |
+| awdit_url | TEXT | Direct product URL (auto-discovered) |
+| scan_ln | TEXT | LN code for Google discovery |
+| scan_url | TEXT | Direct product URL (auto-discovered) |
+| ocuk_code | TEXT | OCUK product code for Overclockers |
+| box_url | TEXT | Direct product URL (auto-discovered) |
+
+**On a fresh rebuild**, seed `retailer_ids` and `products.msrp` from the Excel backup:
+
+```bash
+python3 /opt/openclaw/scripts/seed_retailer_db.py
+```
+
+This script reads `Retailer_Template.xlsx` from `/opt/openclaw/data/general/` — restore this file from TrueNAS backup first. The seed script is safe to re-run (uses INSERT OR REPLACE).
+
+EOL flag is managed via the portal Catalogue → Update EOL Status tool or ⛔ View EOL SKUs.
 
 ---
 
-## Portal Import / Export
+## Portal — Catalogue Tab
 
-The portal (`/api/import/…`, `/api/export/…`) provides CSV-based tools for managing the products table without touching Excel directly. Current tools:
+The portal has three tabs: **STIC** (distributor data), **Retailer** (market prices), and **Catalogue** (product management).
 
-| Tool | Endpoint | Description |
-|---|---|---|
-| Add / Update SKUs | `POST /api/import/new-skus/preview` + `/confirm` | Upsert products; does not touch EOL |
-| Update EOL Status | `POST /api/import/eol-status/preview` + `/confirm` | Bulk-set EOL flag from product status data |
-| Export Active SKUs | `GET /api/export/skus` | CSV download of all non-EOL products |
-| Template download | `GET /api/import/template/<tool-id>` | Pre-formatted CSV template with correct headers |
+The Catalogue tab provides:
 
-CSV column named `Product` is the VIP product code (maps to `product_id` in DB). Both tools also accept `product_id` as the column name.
+**Products section:**
+| Action | Description |
+|---|---|
+| View / Search SKUs | Searchable table of all active products |
+| Add / Update SKUs | CSV import to upsert products (EOL not touched) |
+| Update EOL Status | CSV import to bulk-set EOL flags |
+| View EOL SKUs | List of EOL products with restore button |
+| Export Active SKUs | CSV download of all non-EOL products |
+
+**Retailers section:**
+| Action | Description |
+|---|---|
+| View Retailer IDs | Searchable table of all retailer IDs/URLs |
+| Import Retailer IDs | CSV import to add/update ASINs, SKUs, URLs |
+| Export Retailer IDs | CSV download of all retailer IDs |
+
+CSV column named `Product` is the VIP product code (maps to `product_id` in DB).
 
 ---
 
@@ -342,3 +377,18 @@ python3 stic_scraper.py --rescrape 123456,234567  # re-scrape specific VIP codes
 ```
 
 Groups can also be triggered from the portal: STIC → Scraper → Refresh SKUs.
+
+---
+
+## Retailer Scraper
+
+Reads products from `products` table and retailer IDs from `retailer_ids` table (no Excel dependency).
+
+**CLI:**
+```bash
+python3 retailer_scraper.py --batch 1|2|3    # run one of three equal-sized batches
+python3 retailer_scraper.py --test            # scrape first 20 products
+python3 retailer_scraper.py --discover        # run URL discovery only (for new products)
+```
+
+Pre-flight discovery runs automatically before batch 1 — it finds product URLs for any new products added to `retailer_ids` without URLs yet (AWD-IT, Scan, Box, CCL, Very).

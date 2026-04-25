@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 """
 Retailer price scraper for OpenClaw.
-Uses direct product IDs (ASINs / Currys SKUs) from Retailer_IDs sheet
+Uses direct product IDs (ASINs / Currys SKUs) from the retailer_ids DB table
 for guaranteed accuracy; falls back to model-number search where no ID exists.
+All product data is sourced from the products + retailer_ids DB tables (no Excel).
 
 Retailer status (2026-04):
   ✅ Amazon UK    — dp/{ASIN} direct page (homepage warm-up for cookies)
   ✅ Currys       — search by SKU → direct product redirect
-  ✅ Overclockers — OCUK code search via camoufox (code in col M of template)
+  ✅ Overclockers — OCUK code search via camoufox (ocuk_code in retailer_ids)
   ❌ Argos        — 403 on all URLs (Akamai)
-  ✅ Scan         — patchright + Xvfb; URLs in template (auto-discovered via Google)
+  ✅ Scan         — patchright + Xvfb; URLs in retailer_ids (auto-discovered via Google)
   ✅ Box          — patchright + Xvfb; Angular SPA, price hydrates ~8s post-load
   ✅ CCL Online   — direct product URL → JSON-LD price
   ✅ AWD-IT       — direct product URL → JSON-LD price (URLs auto-discovered)
-  ✅ Very         — patchright + Xvfb; URLs in template (auto-discovered via Google)
+  ✅ Very         — patchright + Xvfb; URLs in retailer_ids (auto-discovered via Google)
 
 Pre-flight discovery (runs automatically before batch 1):
   • AWD-IT: matches new products against cached category catalog; re-scrapes
@@ -28,7 +29,6 @@ Pre-flight discovery (runs automatically before batch 1):
 Usage:
   python3 retailer_scraper.py --batch 1|2|3
   python3 retailer_scraper.py --test
-  python3 retailer_scraper.py --start 1 --end 25
   python3 retailer_scraper.py --discover        # run only the pre-flight phase
 """
 
@@ -46,18 +46,17 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
-from openpyxl import load_workbook
+import sqlite3
 import sys
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 from patchright.sync_api import sync_playwright as patchright_playwright
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-TEMPLATE_PATH      = "/opt/openclaw/data/general/Retailer_Template.xlsx"
+DB_PATH            = "/opt/openclaw/data/analytics/prices.db"
 OUTPUT_DIR         = "/opt/openclaw/data/general"
 PROGRESS_PATH      = "/opt/openclaw/data/stic/retailer_progress_{date}.json"
 LOG_PATH           = "/opt/openclaw/logs/retailer.log"
 SECRETS_PATH       = "/opt/openclaw/secrets.json"
-ONEDRIVE_DEST      = "onedrive:Documents/Retail Review/"
 AWDIT_CATALOG_PATH = "/opt/openclaw/data/stic/awdit_catalog.json"
 SCAN_SCRAPE_PATH   = "/opt/openclaw/data/stic/scan_scrape.py"
 VERY_SCRAPE_PATH   = "/opt/openclaw/data/stic/very_scrape.py"
@@ -130,15 +129,15 @@ GOOGLE_DELAY_MAX = 12
 # id_col : column name in Retailer_IDs sheet (None = search-only, no IDs)
 # blocked: skip entirely, write "—"
 RETAILERS = [
-    {"name": "Amazon UK",    "col": 10, "id_col": "Amazon ASIN", "blocked": False},
-    {"name": "Currys",       "col": 11, "id_col": "Currys SKU",  "blocked": False},
-    {"name": "Argos",        "col": 12, "id_col": "ARGOS  SKU",  "blocked": True, "reason": "403 Akamai"},
-    {"name": "Scan",         "col": 13, "id_col": "Scan URL",    "blocked": False},
-    {"name": "Overclockers", "col": 14, "id_col": None,          "blocked": False},
-    {"name": "Box",          "col": 15, "id_col": "Box URL",    "blocked": False},
-    {"name": "CCL Online",   "col": 16, "id_col": "CCL URL",     "blocked": False},
-    {"name": "AWD-IT",       "col": 17, "id_col": "AWD-IT URL",  "blocked": False},
-    {"name": "Very",         "col": 18, "id_col": "Very URL",    "blocked": False},
+    {"name": "Amazon UK",    "id_col": "amazon_asin", "blocked": False},
+    {"name": "Currys",       "id_col": "currys_sku",  "blocked": False},
+    {"name": "Argos",        "id_col": "argos_sku",   "blocked": True, "reason": "403 Akamai"},
+    {"name": "Scan",         "id_col": "scan_url",    "blocked": False},
+    {"name": "Overclockers", "id_col": None,          "blocked": False},
+    {"name": "Box",          "id_col": "box_url",     "blocked": False},
+    {"name": "CCL Online",   "id_col": "ccl_url",     "blocked": False},
+    {"name": "AWD-IT",       "id_col": "awdit_url",   "blocked": False},
+    {"name": "Very",         "id_col": "very_url",    "blocked": False},
 ]
 
 # ── Timing ────────────────────────────────────────────────────────────────────
@@ -173,75 +172,65 @@ def save_progress(date_str, completed):
 
 # ── Dynamic batch split ───────────────────────────────────────────────────────
 def count_products():
-    wb    = load_workbook(TEMPLATE_PATH, read_only=True)
-    ws    = wb.worksheets[0]
-    count = sum(1 for row in ws.iter_rows(min_row=2, values_only=True) if row[0] is not None)
-    wb.close()
-    return count
+    """Return number of active (non-EOL) products in DB."""
+    con = sqlite3.connect(DB_PATH)
+    row = con.execute("SELECT COUNT(*) FROM products WHERE eol=0").fetchone()
+    con.close()
+    return row[0]
 
 def batch_ranges(total):
+    """Return list of (offset, limit) tuples for 3 equal batches."""
     size, rem = total // 3, total % 3
-    ranges, start = [], 1
+    ranges, offset = [], 0
     for i in range(3):
-        end = start + size + (1 if i < rem else 0) - 1
-        ranges.append((start, end))
-        start = end + 1
+        limit = size + (1 if i < rem else 0)
+        ranges.append((offset, limit))
+        offset += limit
     return ranges
 
-# ── Load Retailer_IDs sheet ───────────────────────────────────────────────────
+# ── Load retailer IDs from DB ─────────────────────────────────────────────────
 def load_retailer_ids():
-    """Returns dict: {product_id: {retailer_id_col_name: code}}"""
-    wb = load_workbook(TEMPLATE_PATH, read_only=True)
-    if "Retailer_IDs" not in wb.sheetnames:
-        wb.close()
-        return {}
-    ws = wb["Retailer_IDs"]
-    # Row 1 = headers; col A = Product ID
-    headers = [ws.cell(row=1, column=i).value for i in range(1, 20)]
+    """Returns dict: {product_id (str): {db_col_name: value}}"""
+    con  = sqlite3.connect(DB_PATH)
+    con.row_factory = sqlite3.Row
+    rows = con.execute("SELECT * FROM retailer_ids").fetchall()
+    con.close()
     mapping = {}
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        prod_id = row[0]
-        if prod_id is None:
-            continue
-        codes = {}
-        for i, hdr in enumerate(headers):
-            if hdr and i >= 4:  # cols E onwards are retailer IDs
-                val = row[i]
-                if val:
-                    codes[hdr] = str(val).strip()
-        mapping[str(prod_id).strip()] = codes
-    wb.close()
+    for row in rows:
+        pid   = str(row["product_id"])
+        codes = {k: row[k] for k in row.keys()
+                 if k != "product_id" and row[k] is not None and str(row[k]).strip()}
+        mapping[pid] = codes
     return mapping
 
-# ── Read products ─────────────────────────────────────────────────────────────
-def read_products(start, end):
-    wb      = load_workbook(TEMPLATE_PATH, read_only=True)
-    ws      = wb.worksheets[0]
-    products, row_num = [], 0
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        if row[0] is None:
-            continue
-        row_num += 1
-        if row_num < start:
-            continue
-        if row_num > end:
-            break
-        msrp = None
-        try:
-            msrp = float(row[7]) if row[7] is not None else None
-        except (ValueError, TypeError):
-            pass
-        products.append({
-            "row_num":       row_num,
-            "product_id":    str(row[0]).strip(),
-            "description":   str(row[1]).strip() if row[1] else "",
-            "model_no":      str(row[2]).strip() if row[2] else "",
-            "manufacturer":  str(row[3]).strip() if row[3] else "",
-            "product_group": str(row[4]).strip() if row[4] else None,
-            "msrp":          msrp,
-        })
-    wb.close()
-    return products
+# ── Read products from DB ──────────────────────────────────────────────────────
+def read_products(offset=0, limit=None):
+    """Return active products ordered by product_id, with optional offset/limit for batching."""
+    con = sqlite3.connect(DB_PATH)
+    con.row_factory = sqlite3.Row
+    if limit is not None:
+        rows = con.execute(
+            "SELECT product_id, description, model_no, manufacturer, product_group, msrp "
+            "FROM products WHERE eol=0 ORDER BY product_id LIMIT ? OFFSET ?",
+            (limit, offset)
+        ).fetchall()
+    else:
+        rows = con.execute(
+            "SELECT product_id, description, model_no, manufacturer, product_group, msrp "
+            "FROM products WHERE eol=0 ORDER BY product_id"
+        ).fetchall()
+    con.close()
+    return [
+        {
+            "product_id":    str(row["product_id"]),
+            "description":   row["description"] or "",
+            "model_no":      row["model_no"] or "",
+            "manufacturer":  row["manufacturer"] or "",
+            "product_group": row["product_group"],
+            "msrp":          row["msrp"],
+        }
+        for row in rows
+    ]
 
 # ── Price parser ──────────────────────────────────────────────────────────────
 def parse_price(text):
@@ -406,7 +395,7 @@ def scrape_product(page, product, retailer, id_codes):
 
     # Scan: patchright + Xvfb subprocess, uses stored Scan URL
     if name == "Scan":
-        url = id_codes.get(product["product_id"], {}).get("Scan URL")
+        url = id_codes.get(product["product_id"], {}).get("scan_url")
         if not url:
             return None, "NOT_STOCKED"
         try:
@@ -418,8 +407,8 @@ def scrape_product(page, product, retailer, id_codes):
 
     # Very: patchright + Xvfb subprocess, uses stored Very URL
     if name == "Very":
-        url = id_codes.get(product["product_id"], {}).get("Very URL")
-        sku = id_codes.get(product["product_id"], {}).get("Very SKU")
+        url = id_codes.get(product["product_id"], {}).get("very_url")
+        sku = id_codes.get(product["product_id"], {}).get("very_sku")
         if not url:
             return None, "OUT_OF_STOCK" if sku else "NOT_STOCKED"
         try:
@@ -431,7 +420,7 @@ def scrape_product(page, product, retailer, id_codes):
 
     # Box: patchright + Xvfb subprocess, uses stored Box URL
     if name == "Box":
-        url = id_codes.get(product["product_id"], {}).get("Box URL")
+        url = id_codes.get(product["product_id"], {}).get("box_url")
         if not url:
             return None, "NOT_STOCKED"
         try:
@@ -441,9 +430,9 @@ def scrape_product(page, product, retailer, id_codes):
             log(f"    [{name}] ERROR: {e}")
             return None, "ERROR"
 
-    # Overclockers: uses OCUK code from product dict, scraped via camoufox subprocess
+    # Overclockers: uses OCUK code from retailer_ids, scraped via camoufox subprocess
     if name == "Overclockers":
-        code = id_codes.get(product["product_id"], {}).get("OCUK Code")
+        code = id_codes.get(product["product_id"], {}).get("ocuk_code")
         if not code:
             return None, "NOT_STOCKED"
         try:
@@ -494,37 +483,7 @@ def send_telegram(message):
     except Exception as e:
         log(f"Telegram error: {e}")
 
-def sync_template_to_onedrive():
-    """Push local Retailer_Template.xlsx to OneDrive (after discovery writes URLs)."""
-    r = subprocess.run(
-        ["rclone", "copyto", TEMPLATE_PATH, f"{ONEDRIVE_DEST}Retailer_Template.xlsx"],
-        capture_output=True, text=True
-    )
-    ok = r.returncode == 0
-    log("Template → OneDrive: OK" if ok else f"Template → OneDrive FAILED: {r.stderr.strip()}")
-    return ok
-
-
-def sync_template_from_onedrive():
-    """
-    Pull Retailer_Template.xlsx from OneDrive if the remote copy is newer.
-    Runs at the start of batch 1 so any codes the user added at work
-    (ASINs, LN codes, CCL URLs etc.) are picked up before scraping begins.
-    """
-    log("Checking OneDrive for updated template...")
-    r = subprocess.run(
-        ["rclone", "copyto", "--update",
-         f"{ONEDRIVE_DEST}Retailer_Template.xlsx", TEMPLATE_PATH],
-        capture_output=True, text=True
-    )
-    if r.returncode == 0:
-        log("Template ← OneDrive: OK (pulled if remote was newer)")
-    else:
-        log(f"Template ← OneDrive FAILED: {r.stderr.strip()} — using local copy")
-
 # ── SQLite DB write ───────────────────────────────────────────────────────────
-_DB_PATH = "/opt/openclaw/data/analytics/prices.db"
-
 _RETAILER_DB_NAME = {
     "Amazon UK":    "Amazon",
     "Currys":       "Currys",
@@ -537,9 +496,8 @@ _RETAILER_DB_NAME = {
     "Very":         "Very",
 }
 
-def write_to_db(date_str, product, retailer_prices_dict):
+def write_to_db(date_str, product, retailer_prices_dict, retailer_in_stock_dict=None):
     """Write one row per retailer for this product. Never raises — logs on failure."""
-    import sqlite3
     try:
         d, m, y = date_str.split("-")
         iso_date = f"{y}-{m}-{d}"
@@ -551,20 +509,24 @@ def write_to_db(date_str, product, retailer_prices_dict):
         product_group = product.get("product_group")
         msrp          = product.get("msrp")
 
-        db = sqlite3.connect(_DB_PATH)
+        if retailer_in_stock_dict is None:
+            retailer_in_stock_dict = {}
+
+        db = sqlite3.connect(DB_PATH)
         db.execute("PRAGMA journal_mode=WAL")
         for retailer_name, price in retailer_prices_dict.items():
             db_retailer = _RETAILER_DB_NAME.get(retailer_name, retailer_name)
             below_msrp = None
             if price is not None and msrp is not None:
                 below_msrp = 1 if price < msrp else 0
+            in_stock = retailer_in_stock_dict.get(retailer_name)
             db.execute(
                 """INSERT OR IGNORE INTO retailer_prices
                    (date, product_id, model_no, description, manufacturer,
-                    product_group, msrp, retailer, price, below_msrp)
-                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    product_group, msrp, retailer, price, below_msrp, in_stock)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                 (iso_date, product_id, model_no, description, manufacturer,
-                 product_group, msrp, db_retailer, price, below_msrp),
+                 product_group, msrp, db_retailer, price, below_msrp, in_stock),
             )
         db.commit()
         db.close()
@@ -576,223 +538,137 @@ def write_to_db(date_str, product, retailer_prices_dict):
 # PRE-FLIGHT URL DISCOVERY
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# ── Helpers: read Retailer_IDs columns ───────────────────────────────────────
-def _ids_sheet_headers():
-    """Return (ws, header→col_index dict) for Retailer_IDs sheet (1-based)."""
-    wb = load_workbook(TEMPLATE_PATH, read_only=True)
-    ws = wb["Retailer_IDs"]
-    headers = {}
-    for cell in ws[1]:
-        if cell.value:
-            headers[str(cell.value).strip()] = cell.column
-    wb.close()
-    return headers
+def _needs_query(extra_where="", extra_cols=""):
+    """Base query joining products + retailer_ids for discovery helper functions."""
+    return (
+        "SELECT p.product_id, p.model_no, p.manufacturer"
+        + (", " + extra_cols if extra_cols else "")
+        + " FROM products p"
+        " LEFT JOIN retailer_ids r ON p.product_id = r.product_id"
+        " WHERE p.eol = 0"
+        + (" AND " + extra_where if extra_where else "")
+    )
 
 
 def load_products_needing_awdit():
     """Return list of {product_id, model_no, manufacturer} rows with no AWD-IT URL."""
-    wb      = load_workbook(TEMPLATE_PATH, read_only=True)
-    ws      = wb["Retailer_IDs"]
-    hdrs    = {str(c.value).strip(): c.column for c in ws[1] if c.value}
-    awdit_c = hdrs.get("AWD-IT URL")
-    mfr_c   = hdrs.get("Manufacturer", 2)
-    model_c = hdrs.get("Model No", 3)
-    rows    = []
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        pid = str(row[0]).strip() if row[0] else None
-        if not pid:
-            continue
-        url = str(row[awdit_c - 1]).strip() if awdit_c and row[awdit_c - 1] else ""
-        if url and url.lower() not in ("none", ""):
-            continue
-        rows.append({
-            "product_id":   pid,
-            "model_no":     str(row[model_c - 1]).strip()  if row[model_c - 1] else "",
-            "manufacturer": str(row[mfr_c - 1]).strip()   if row[mfr_c - 1]  else "",
-        })
-    wb.close()
-    return rows
+    con  = sqlite3.connect(DB_PATH)
+    rows = con.execute(
+        _needs_query("(r.awdit_url IS NULL OR r.awdit_url = '')")
+    ).fetchall()
+    con.close()
+    return [{"product_id": str(r[0]), "model_no": r[1] or "", "manufacturer": r[2] or ""}
+            for r in rows]
 
 
 def load_products_needing_scan_url():
     """Return list of {product_id, ln_code, model_no} rows with Scan LN but no Scan URL."""
-    wb      = load_workbook(TEMPLATE_PATH, read_only=True)
-    ws      = wb["Retailer_IDs"]
-    hdrs    = {str(c.value).strip(): c.column for c in ws[1] if c.value}
-    ln_c    = hdrs.get("Scan LN")
-    url_c   = hdrs.get("Scan URL")
-    model_c = hdrs.get("Model No", 3)
-    if not ln_c or not url_c:
-        wb.close()
-        return []
-    rows = []
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        pid = str(row[0]).strip() if row[0] else None
-        if not pid:
-            continue
-        ln  = str(row[ln_c  - 1]).strip() if row[ln_c  - 1] else ""
-        url = str(row[url_c - 1]).strip() if row[url_c - 1] else ""
-        if not ln or ln.lower() == "none":
-            continue
-        if url and url.lower() not in ("none", ""):
-            continue
-        rows.append({
-            "product_id": pid,
-            "ln_code":    ln,
-            "model_no":   str(row[model_c - 1]).strip() if row[model_c - 1] else "",
-        })
-    wb.close()
-    return rows
+    con  = sqlite3.connect(DB_PATH)
+    rows = con.execute(
+        _needs_query(
+            "r.scan_ln IS NOT NULL AND r.scan_ln != '' "
+            "AND (r.scan_url IS NULL OR r.scan_url = '')",
+            extra_cols="r.scan_ln"
+        )
+    ).fetchall()
+    con.close()
+    return [{"product_id": str(r[0]), "model_no": r[1] or "",
+             "ln_code": r[3]} for r in rows]
 
 
 def load_products_needing_scan_url_by_model():
     """Return products with model_no but no Scan URL (no LN code required)."""
-    wb      = load_workbook(TEMPLATE_PATH, read_only=True)
-    ws      = wb["Retailer_IDs"]
-    hdrs    = {str(c.value).strip(): c.column for c in ws[1] if c.value}
-    url_c   = hdrs.get("Scan URL")
-    model_c = hdrs.get("Model No", 3)
-    mfr_c   = hdrs.get("Manufacturer", 2)
-    if not url_c:
-        wb.close()
-        return []
-    rows = []
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        pid = str(row[0]).strip() if row[0] else None
-        if not pid:
-            continue
-        url   = str(row[url_c   - 1]).strip() if row[url_c   - 1] else ""
-        model = str(row[model_c - 1]).strip() if row[model_c - 1] else ""
-        mfr   = str(row[mfr_c  - 1]).strip() if row[mfr_c  - 1] else ""
-        if url and url.lower() not in ("none", ""):
-            continue
-        if not model:
-            continue
-        rows.append({"product_id": pid, "model_no": model, "manufacturer": mfr})
-    wb.close()
-    return rows
+    con  = sqlite3.connect(DB_PATH)
+    rows = con.execute(
+        _needs_query(
+            "(r.scan_url IS NULL OR r.scan_url = '') "
+            "AND p.model_no IS NOT NULL AND p.model_no != ''"
+        )
+    ).fetchall()
+    con.close()
+    return [{"product_id": str(r[0]), "model_no": r[1] or "", "manufacturer": r[2] or ""}
+            for r in rows]
 
 
 def load_products_needing_very_url():
     """Return list of {product_id, sku, model_no} rows with Very SKU but no Very URL."""
-    wb      = load_workbook(TEMPLATE_PATH, read_only=True)
-    ws      = wb["Retailer_IDs"]
-    hdrs    = {str(c.value).strip(): c.column for c in ws[1] if c.value}
-    sku_c   = hdrs.get("Very SKU")
-    url_c   = hdrs.get("Very URL")
-    model_c = hdrs.get("Model No", 3)
-    if not sku_c:
-        wb.close()
-        return []
-    rows = []
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        pid = str(row[0]).strip() if row[0] else None
-        if not pid:
-            continue
-        sku = str(row[sku_c - 1]).strip() if row[sku_c - 1] else ""
-        url = str(row[url_c - 1]).strip() if url_c and row[url_c - 1] else ""
-        if not sku or sku.lower() == "none":
-            continue
-        if url and url.lower() not in ("none", ""):
-            continue
-        rows.append({
-            "product_id": pid,
-            "sku":        sku,
-            "model_no":   str(row[model_c - 1]).strip() if row[model_c - 1] else "",
-        })
-    wb.close()
-    return rows
+    con  = sqlite3.connect(DB_PATH)
+    rows = con.execute(
+        _needs_query(
+            "r.very_sku IS NOT NULL AND r.very_sku != '' "
+            "AND (r.very_url IS NULL OR r.very_url = '')",
+            extra_cols="r.very_sku"
+        )
+    ).fetchall()
+    con.close()
+    return [{"product_id": str(r[0]), "model_no": r[1] or "",
+             "sku": r[3]} for r in rows]
 
 
 def load_products_needing_box_url():
     """Return list of {product_id, model_no, manufacturer} rows with no Box URL."""
-    wb      = load_workbook(TEMPLATE_PATH, read_only=True)
-    ws      = wb["Retailer_IDs"]
-    hdrs    = {str(c.value).strip(): c.column for c in ws[1] if c.value}
-    url_c   = hdrs.get("Box URL")
-    model_c = hdrs.get("Model No", 3)
-    mfr_c   = hdrs.get("Manufacturer", 2)
-    if not url_c:
-        wb.close()
-        return []
-    rows = []
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        pid = str(row[0]).strip() if row[0] else None
-        if not pid:
-            continue
-        url     = str(row[url_c   - 1]).strip() if row[url_c   - 1] else ""
-        model   = str(row[model_c - 1]).strip() if row[model_c - 1] else ""
-        if url and url.lower() not in ("none", ""):
-            continue
-        if not model:
-            continue
-        rows.append({
-            "product_id":   pid,
-            "model_no":     model,
-            "manufacturer": str(row[mfr_c - 1]).strip() if row[mfr_c - 1] else "",
-        })
-    wb.close()
-    return rows
+    con  = sqlite3.connect(DB_PATH)
+    rows = con.execute(
+        _needs_query(
+            "(r.box_url IS NULL OR r.box_url = '') "
+            "AND p.model_no IS NOT NULL AND p.model_no != ''"
+        )
+    ).fetchall()
+    con.close()
+    return [{"product_id": str(r[0]), "model_no": r[1] or "", "manufacturer": r[2] or ""}
+            for r in rows]
 
 
 def load_products_needing_ccl_url():
     """Return list of {product_id, model_no, manufacturer} rows with no CCL URL."""
-    wb      = load_workbook(TEMPLATE_PATH, read_only=True)
-    ws      = wb["Retailer_IDs"]
-    hdrs    = {str(c.value).strip(): c.column for c in ws[1] if c.value}
-    url_c   = hdrs.get("CCL URL")
-    model_c = hdrs.get("Model No", 3)
-    mfr_c   = hdrs.get("Manufacturer", 2)
-    if not url_c:
-        wb.close()
-        return []
-    rows = []
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        pid = str(row[0]).strip() if row[0] else None
-        if not pid:
-            continue
-        url   = str(row[url_c   - 1]).strip() if row[url_c   - 1] else ""
-        model = str(row[model_c - 1]).strip() if row[model_c - 1] else ""
-        if url and url.lower() not in ("none", ""):
-            continue
-        if not model:
-            continue
-        rows.append({
-            "product_id":   pid,
-            "model_no":     model,
-            "manufacturer": str(row[mfr_c - 1]).strip() if row[mfr_c - 1] else "",
-        })
-    wb.close()
-    return rows
+    con  = sqlite3.connect(DB_PATH)
+    rows = con.execute(
+        _needs_query(
+            "(r.ccl_url IS NULL OR r.ccl_url = '') "
+            "AND p.model_no IS NOT NULL AND p.model_no != ''"
+        )
+    ).fetchall()
+    con.close()
+    return [{"product_id": str(r[0]), "model_no": r[1] or "", "manufacturer": r[2] or ""}
+            for r in rows]
 
+
+_URL_COL_MAP = {
+    "AWD-IT URL": "awdit_url",
+    "Scan URL":   "scan_url",
+    "Very URL":   "very_url",
+    "Box URL":    "box_url",
+    "CCL URL":    "ccl_url",
+}
 
 def _write_discovered_urls(col_name, id_to_url):
-    """Write {product_id: url} into the named column of Retailer_IDs sheet."""
+    """Write {product_id: url} into the retailer_ids DB table."""
     if not id_to_url:
         return 0
-    wb   = load_workbook(TEMPLATE_PATH)
-    ws   = wb["Retailer_IDs"]
-    hdrs = {str(c.value).strip(): c.column for c in ws[1] if c.value}
-    col  = hdrs.get(col_name)
-    if not col:
-        log(f"[Discovery] ERROR: column '{col_name}' not found in Retailer_IDs")
-        wb.close()
+    db_col = _URL_COL_MAP.get(col_name)
+    if not db_col:
+        log(f"[Discovery] ERROR: unknown URL column '{col_name}'")
         return 0
-    id_to_row = {}
-    for row in ws.iter_rows(min_row=2):
-        pid = str(row[0].value).strip() if row[0].value else None
-        if pid:
-            id_to_row[pid] = row[0].row
+    con     = sqlite3.connect(DB_PATH)
     written = 0
     for pid, url in id_to_url.items():
-        row_num = id_to_row.get(pid)
-        if row_num:
-            existing = ws.cell(row=row_num, column=col).value
-            if not existing:
-                ws.cell(row=row_num, column=col).value = url
-                written += 1
-    wb.save(TEMPLATE_PATH)
-    log(f"[Discovery] Wrote {written} URLs to '{col_name}' column.")
+        # Ensure row exists first (some products may not yet be in retailer_ids)
+        con.execute(
+            "INSERT OR IGNORE INTO retailer_ids (product_id) VALUES (?)", (int(pid),)
+        )
+        # Only write if not already set
+        existing = con.execute(
+            f"SELECT {db_col} FROM retailer_ids WHERE product_id=?", (int(pid),)
+        ).fetchone()
+        if existing and not existing[0]:
+            con.execute(
+                f"UPDATE retailer_ids SET {db_col}=? WHERE product_id=?",
+                (url, int(pid))
+            )
+            written += 1
+    con.commit()
+    con.close()
+    log(f"[Discovery] Wrote {written} URLs for '{col_name}'.")
     return written
 
 
@@ -1527,11 +1403,9 @@ def load_amazon_prices():
     Return {product_id (str): amazon_price (float)} from the most recent date
     in retailer_prices DB for Amazon UK. Returns empty dict if unavailable.
     """
-    import sqlite3 as _sqlite3
-    DB_PATH = "/opt/openclaw/data/analytics/prices.db"
     try:
-        con = _sqlite3.connect(DB_PATH)
-        con.row_factory = _sqlite3.Row
+        con = sqlite3.connect(DB_PATH)
+        con.row_factory = sqlite3.Row
         row = con.execute(
             "SELECT MAX(date) AS d FROM retailer_prices WHERE retailer='Amazon UK'"
         ).fetchone()
@@ -1679,9 +1553,9 @@ def run_discovery_sanity_report(page):
 
 def run_preflight_discovery():
     """
-    Run AWD-IT and Scan URL discovery for any new products added since the last
-    run.  Uses its own browser instance so discovery and scraping are isolated.
-    Syncs the updated template to OneDrive if any URLs were written.
+    Run URL discovery for any new products that don't yet have retailer URLs.
+    Uses its own browser instance so discovery and scraping are isolated.
+    Discovered URLs are written directly to the retailer_ids DB table.
     """
     log("\n" + "=" * 65)
     log("PRE-FLIGHT URL DISCOVERY")
@@ -1784,8 +1658,7 @@ def run_preflight_discovery():
                 browser.close()
 
     if total_written:
-        log(f"[Discovery] {total_written} new URLs written — syncing template to OneDrive.")
-        sync_template_to_onedrive()
+        log(f"[Discovery] {total_written} new URLs written to DB.")
     else:
         log("[Discovery] No new URLs found this run.")
 
@@ -1793,15 +1666,14 @@ def run_preflight_discovery():
 
 
 # ── Main run ──────────────────────────────────────────────────────────────────
-def run(start, end, date_str, notify=False):
-    log(f"Starting retailer scrape: rows {start}–{end}, date={date_str}")
+def run(offset, limit, date_str, notify=False):
+    log(f"Starting retailer scrape: offset={offset}, limit={limit}, date={date_str}")
 
     id_codes  = load_retailer_ids()
-    products  = read_products(start, end)
+    products  = read_products(offset, limit)
     completed = load_progress(date_str)
 
-    active  = [r for r in RETAILERS if not r["blocked"]]
-    blocked = [r for r in RETAILERS if r["blocked"]]
+    active = [r for r in RETAILERS if not r["blocked"]]
     log(f"Loaded {len(products)} products | ID codes: {len(id_codes)} | Active: {[r['name'] for r in active]}")
 
     found = 0
@@ -1835,21 +1707,22 @@ def run(start, end, date_str, notify=False):
         page = context.new_page()
 
         for product in products:
-            row_num   = product["row_num"]
-            model_no  = product["model_no"]
-            msrp      = product["msrp"]
+            product_id = product["product_id"]
+            model_no   = product["model_no"]
+            msrp       = product["msrp"]
 
-            if str(row_num) in completed:
-                log(f"Skipping row {row_num} ({model_no}) — already done.")
+            if product_id in completed:
+                log(f"Skipping {product_id} ({model_no}) — already done.")
                 continue
 
             msrp_str = f"£{msrp:.2f}" if msrp else "no MSRP"
-            log(f"\n[{row_num}/{end}] {model_no} ({msrp_str})")
+            log(f"\n[{product_id}] {model_no} ({msrp_str})")
 
             page.mouse.move(random.randint(200,1100), random.randint(150,600))
 
-            # Scrape active retailers; collect prices for DB write
-            db_prices = {r["name"]: None for r in RETAILERS}  # all retailers default NULL
+            # Scrape active retailers; collect prices and in_stock for DB write
+            db_prices   = {}
+            db_in_stock = {}
 
             for retailer in active:
                 name  = retailer["name"]
@@ -1858,24 +1731,31 @@ def run(start, end, date_str, notify=False):
                 if price is not None:
                     below = " ⚠️ BELOW MSRP" if msrp and price < msrp else ""
                     log(f"    [{name}] £{price:.2f}{below}")
-                    db_prices[name] = price
+                    db_prices[name]   = price
+                    db_in_stock[name] = 1
                     found += 1
                 elif status == "OUT_OF_STOCK":
                     log(f"    [{name}] out of stock")
+                    db_prices[name]   = None
+                    db_in_stock[name] = 0
                     not_stocked += 1
                 elif status == "NOT_STOCKED":
                     log(f"    [{name}] not stocked (no ID code)")
+                    db_prices[name]   = None
+                    db_in_stock[name] = None
                     not_stocked += 1
                 else:
                     log(f"    [{name}] not found ({status})")
+                    db_prices[name]   = None
+                    db_in_stock[name] = None
                     not_found += 1
 
                 time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
 
-            write_to_db(date_str, product, db_prices)
+            write_to_db(date_str, product, db_prices, db_in_stock)
 
             products_done += 1
-            completed.add(str(row_num))
+            completed.add(product_id)
             save_progress(date_str, completed)
 
             since_pause += 1
@@ -1909,8 +1789,6 @@ if __name__ == "__main__":
                         help="Scrape first 20 products (includes pre-flight discovery)")
     parser.add_argument("--discover", action="store_true",
                         help="Run only the pre-flight URL discovery, then exit")
-    parser.add_argument("--start",    type=int, help="Start row (manual range)")
-    parser.add_argument("--end",      type=int, help="End row (manual range)")
     args = parser.parse_args()
 
     date_str = datetime.now().strftime("%d-%m-%Y")
@@ -1918,36 +1796,30 @@ if __name__ == "__main__":
     with scraper_lock():
 
       if args.discover:
-        # Standalone discovery run — useful to trigger manually after adding LN/ASIN codes
-        sync_template_from_onedrive()
+        # Standalone discovery run — useful to trigger manually after adding new IDs to DB
         run_preflight_discovery()
 
       elif args.test:
-        # Test mode: pull latest template, run discovery, then scrape first 20 rows
-        sync_template_from_onedrive()
+        # Test mode: run discovery then scrape first 20 products
         run_preflight_discovery()
-        run(1, 20, date_str, notify=False)
+        run(offset=0, limit=20, date_str=date_str, notify=False)
 
       elif args.batch in (1, 2, 3):
         total  = count_products()
         ranges = batch_ranges(total)
-        log(f"Template: {total} products — batch ranges: {ranges}")
-        s, e = ranges[args.batch - 1]
+        log(f"DB: {total} active products — batch ranges (offset, limit): {ranges}")
+        offset, limit = ranges[args.batch - 1]
 
         if args.batch == 1:
-            # Pull latest template first (user may have updated codes at work via OneDrive)
-            # then run URL discovery for any new products before price scraping starts
-            sync_template_from_onedrive()
+            # Run URL discovery for any new products before price scraping starts
             run_preflight_discovery()
-            # Re-read product count after discovery may have updated the file
+            # Re-read count after discovery (new products may have been found in other tables,
+            # but DB product count itself doesn't change here)
             total  = count_products()
             ranges = batch_ranges(total)
-            s, e   = ranges[0]
+            offset, limit = ranges[0]
 
-        run(s, e, date_str, notify=(args.batch == 3))
-
-      elif args.start and args.end:
-        run(args.start, args.end, date_str, notify=False)
+        run(offset, limit, date_str, notify=(args.batch == 3))
 
       else:
         parser.print_help()
