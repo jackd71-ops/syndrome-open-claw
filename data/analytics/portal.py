@@ -659,6 +659,28 @@ HTML = r"""<!DOCTYPE html>
   </div>
 </div>
 
+<!-- Purge dates modal -->
+<div class="modal-backdrop" id="purge-dates-modal" onclick="if(event.target===this)closePurgeDatesModal()">
+  <div class="modal" style="width:420px">
+    <div class="modal-header">
+      <h3 id="pdm-title">Purge dates</h3>
+      <button class="modal-close" onclick="closePurgeDatesModal()">✕</button>
+    </div>
+    <div class="modal-body" style="padding:16px 20px">
+      <p style="font-size:12px;color:#605E5C;margin:0 0 12px">Select individual dates to delete. Retailer ID is left untouched.</p>
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <button onclick="pdmSelectAll(true)"  style="font-size:11px;padding:3px 8px;border:1px solid #C8C6C4;border-radius:2px;cursor:pointer">All</button>
+        <button onclick="pdmSelectAll(false)" style="font-size:11px;padding:3px 8px;border:1px solid #C8C6C4;border-radius:2px;cursor:pointer">None</button>
+      </div>
+      <div id="pdm-dates" style="max-height:280px;overflow-y:auto;border:1px solid #E1E1E1;border-radius:3px;padding:8px"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+        <button onclick="closePurgeDatesModal()" style="padding:6px 14px;border:1px solid #C8C6C4;border-radius:2px;cursor:pointer;background:none">Cancel</button>
+        <button onclick="confirmPurgeDates()" style="padding:6px 14px;border:none;border-radius:2px;cursor:pointer;background:#A4262C;color:#fff;font-weight:600">Purge Selected</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Product edit modal -->
 <div class="modal-backdrop" id="edit-modal" onclick="if(event.target===this)_closeEditModal()">
   <div class="modal edit-modal">
@@ -2415,61 +2437,110 @@ function doRetSearch() {
 }
 
 // ── Retailer SKU drill-down ───────────────────────────────────────────────────
+let _retSkuChart = null;
+let _retSkuHistory = [];
+let _retSkuLinks  = {};
+let _retSkuProductId = null;
+
 function loadRetSku(productId, backSection) {
   showRetSection('sku');
   const backBtn = document.getElementById('ret-sku-back');
   backBtn.dataset.back = backSection || 'overview';
   backBtn.onclick = () => showRetSection(backSection || 'overview');
   document.getElementById('ret-sku-content').innerHTML = '<div class="spinner">Loading…</div>';
-  fetch('/api/retailer/sku/' + productId).then(r=>r.json()).then(data => {
+  _retSkuProductId = productId;
+  if (_retSkuChart) { _retSkuChart.destroy(); _retSkuChart = null; }
+  Promise.all([
+    fetch('/api/retailer/sku/'   + productId).then(r=>r.json()),
+    fetch('/api/retailer/links/' + productId).then(r=>r.json()).catch(()=>({}))
+  ]).then(([data, links]) => {
+    _retSkuLinks   = links  || {};
+    _retSkuHistory = data.price_history || [];
     renderRetSku(data);
   });
 }
 
 function renderRetSku(data) {
   const el = document.getElementById('ret-sku-content');
-  const { info, snapshot, price_history } = data;
+  const { info, snapshot } = data;
 
   let html = `<h3 style="margin-bottom:8px">${info.manufacturer} ${info.model_no}</h3>
     <p style="color:#605E5C;margin-bottom:16px">Product: ${info.product_id} | MSRP: ${info.msrp ? '£'+info.msrp.toFixed(2) : '—'}</p>`;
 
   html += `<div class="section-title">Current Snapshot</div>
-    <p style="font-size:12px;color:#A19F9D;margin:-8px 0 10px">Use 🗑 Purge to wipe all historical price data for a retailer — do this when the scraper matched the wrong listing.</p>
+    <p style="font-size:12px;color:#A19F9D;margin:-8px 0 10px">Click a retailer name to open the scraped listing. Use Purge to wipe bad price history.</p>
     <div class="tbl-wrap"><table><thead><tr><th>Retailer</th><th>Price</th><th>vs MSRP</th><th>In Stock</th><th></th></tr></thead><tbody>`;
+
   snapshot.forEach(r => {
-    const belowBadge  = r.below_msrp === 1
+    const ret       = r.retailer;
+    const retEsc    = ret.replace(/'/g,"\\'");
+    const belowBadge = r.below_msrp === 1
       ? '<span class="badge badge-red">Below MSRP</span>'
       : (r.price ? '<span class="badge badge-green">Above MSRP</span>' : '');
-    const stockCell   = r.in_stock === 1 ? '<span style="color:#107C10">✓ In Stock</span>'
-                      : r.in_stock === 0 ? '<span style="color:#A4262C">✗ OOS</span>' : '—';
-    const purgeBtn    = `<button onclick="purgeRetailerData(${info.product_id},'${r.retailer.replace(/'/g,"\\'")}')"
-        style="background:none;border:1px solid #C8C6C4;border-radius:2px;padding:2px 8px;cursor:pointer;font-size:11px;color:#605E5C"
-        title="Purge all historical price data for ${r.retailer} on this SKU">🗑 Purge</button>`;
+    const stockCell  = r.in_stock === 1 ? '<span style="color:#107C10">✓ In Stock</span>'
+                     : r.in_stock === 0 ? '<span style="color:#A4262C">✗ OOS</span>' : '—';
+    const linkStyle  = _retSkuLinks[ret]
+      ? 'cursor:pointer;color:#0078D4;text-decoration:underline'
+      : 'color:inherit';
+    const linkClick  = _retSkuLinks[ret]
+      ? `onclick="window.open('${_retSkuLinks[ret].replace(/'/g,"\\'")}','_blank')" title="Open ${ret} listing"`
+      : '';
+    const btnStyle   = 'background:none;border:1px solid #C8C6C4;border-radius:2px;padding:2px 7px;cursor:pointer;font-size:11px;color:#605E5C';
+    const actions    = `<span style="display:flex;gap:4px">
+      <button style="${btnStyle}" onclick="purgeRetailerData(${info.product_id},'${retEsc}')" title="Purge all history for ${ret}">🗑 All</button>
+      <button style="${btnStyle}" onclick="openPurgeDatesModal(${info.product_id},'${retEsc}')" title="Choose specific dates to purge">📅 Dates</button>
+    </span>`;
     html += `<tr>
-      <td>${r.retailer}</td>
+      <td><span style="${linkStyle}" ${linkClick}>${ret}</span></td>
       <td>${r.price ? '£'+r.price.toFixed(2) : '<span style="color:#A19F9D">No data</span>'}</td>
       <td>${belowBadge}</td>
       <td>${stockCell}</td>
-      <td>${purgeBtn}</td></tr>`;
+      <td>${actions}</td></tr>`;
   });
   html += '</tbody></table></div>';
 
+  // Chart container + range buttons
+  html += `<div class="chart-box" style="margin-bottom:20px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <h4 style="margin:0">Price Trend by Retailer</h4>
+      <div style="display:flex;gap:4px">
+        ${[30,90,180,365,0].map(d => {
+          const label = d===0?'All':d===365?'1y':d+'d';
+          const active = d===0 ? 'background:#0078D4;color:#fff;border-color:#0078D4' : '';
+          return `<button class="ret-range-btn" data-days="${d}" onclick="setRetChartRange(${d},this)"
+            style="font-size:11px;padding:3px 8px;border:1px solid #C8C6C4;border-radius:2px;cursor:pointer;${active}">${label}</button>`;
+        }).join('')}
+      </div>
+    </div>
+    <canvas id="ret-chart-price" style="max-height:260px"></canvas>
+  </div>`;
+
   el.innerHTML = html;
+  buildRetSkuChart(0);   // default: All history
+}
 
-  // Price history chart
-  const retailers = [...new Set(price_history.map(r => r.retailer))];
-  const dates = [...new Set(price_history.map(r => r.date))].sort();
-  const palette = ['#0078D4','#E88C1A','#8A8886','#FFB900','#107C10','#D13438','#00B7C3','#8764B8','#69797E'];
-
-  const datasets = retailers.map((ret, i) => ({
+function buildRetSkuChart(days) {
+  const history = _retSkuHistory;
+  let filtered  = history;
+  if (days > 0) {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    const cutoffStr = cutoff.toISOString().split('T')[0];
+    filtered = history.filter(r => r.date >= cutoffStr);
+  }
+  const retailers = [...new Set(history.map(r => r.retailer))];
+  const dates     = [...new Set(filtered.map(r => r.date))].sort();
+  const palette   = ['#0078D4','#E88C1A','#8A8886','#FFB900','#107C10','#D13438','#00B7C3','#8764B8','#69797E'];
+  const datasets  = retailers.map((ret, i) => ({
     label: ret,
-    data: dates.map(dt => { const row = price_history.find(r => r.retailer===ret && r.date===dt); return row?.price ?? null; }),
+    data: dates.map(dt => { const row = filtered.find(r => r.retailer===ret && r.date===dt); return row?.price ?? null; }),
     borderColor: palette[i % palette.length], backgroundColor: 'transparent',
     tension: 0.2, spanGaps: true, pointRadius: 2,
   }));
-
-  el.innerHTML += `<div class="chart-box" style="margin-bottom:20px"><h4>Price Trend by Retailer</h4><canvas id="ret-chart-price" style="max-height:220px"></canvas></div>`;
-  new Chart(document.getElementById('ret-chart-price'), {
+  const canvas = document.getElementById('ret-chart-price');
+  if (!canvas) return;
+  if (_retSkuChart) { _retSkuChart.destroy(); _retSkuChart = null; }
+  _retSkuChart = new Chart(canvas, {
     type: 'line',
     data: { labels: dates.map(fmtDate), datasets },
     options: { responsive:true, maintainAspectRatio:true,
@@ -2478,9 +2549,17 @@ function renderRetSku(data) {
   });
 }
 
-// ── Retailer purge ────────────────────────────────────────────────────────────
+function setRetChartRange(days, btn) {
+  document.querySelectorAll('.ret-range-btn').forEach(b => {
+    b.style.background=''; b.style.color=''; b.style.borderColor='#C8C6C4';
+  });
+  if (btn) { btn.style.background='#0078D4'; btn.style.color='#fff'; btn.style.borderColor='#0078D4'; }
+  buildRetSkuChart(days);
+}
+
+// ── Retailer purge (all history) ──────────────────────────────────────────────
 function purgeRetailerData(productId, retailer) {
-  const msg = `Purge ALL historical price data for "${retailer}" on product ${productId}?\n\nThis deletes every row in the price history for this retailer/SKU combination. The retailer ID is kept so you can re-map it when ready.\n\nThis cannot be undone.`;
+  const msg = `Purge ALL historical price data for "${retailer}" on product ${productId}?\n\nEvery date's data for this retailer will be deleted. The retailer ID is kept — remap when ready.\n\nThis cannot be undone.`;
   if (!confirm(msg)) return;
   fetch('/api/retailer/purge', {
     method: 'POST',
@@ -2489,9 +2568,75 @@ function purgeRetailerData(productId, retailer) {
   }).then(r => r.json()).then(d => {
     if (d.error) { alert('Purge failed: ' + d.error); return; }
     alert(`Done — ${d.deleted_rows} row${d.deleted_rows !== 1 ? 's' : ''} deleted for ${retailer}.`);
-    const backSection = document.getElementById('ret-sku-back').dataset.back || 'overview';
-    loadRetSku(productId, backSection);
+    const back = document.getElementById('ret-sku-back').dataset.back || 'overview';
+    loadRetSku(productId, back);
   }).catch(() => alert('Purge failed — check connection.'));
+}
+
+// ── Retailer purge (selected dates) ──────────────────────────────────────────
+let _pdm = { product_id: null, retailer: null };
+
+function openPurgeDatesModal(productId, retailer) {
+  _pdm = { product_id: productId, retailer };
+  document.getElementById('pdm-title').textContent = `Purge dates — ${retailer}`;
+  document.getElementById('pdm-dates').innerHTML   = '<div class="spinner">Loading…</div>';
+  document.getElementById('purge-dates-modal').classList.add('open');
+  // Use already-loaded history if available, otherwise fetch
+  const rows = _retSkuHistory.filter(r => r.retailer === retailer && r.price != null);
+  _pdmRenderDates(rows);
+}
+
+function _pdmRenderDates(rows) {
+  if (!rows.length) {
+    document.getElementById('pdm-dates').innerHTML = '<p style="color:#A19F9D;font-size:13px">No price data for this retailer.</p>';
+    return;
+  }
+  const sorted = [...rows].sort((a,b) => b.date.localeCompare(a.date));
+  document.getElementById('pdm-dates').innerHTML = sorted.map(r =>
+    `<label style="display:flex;align-items:center;gap:10px;padding:5px 2px;border-bottom:1px solid #F3F2F1;cursor:pointer">
+      <input type="checkbox" class="pdm-cb" value="${r.date}" style="cursor:pointer">
+      <span style="min-width:70px;font-size:13px">${fmtDate(r.date)}</span>
+      <span style="color:#605E5C;font-size:13px">£${r.price.toFixed(2)}</span>
+    </label>`
+  ).join('');
+}
+
+function pdmSelectAll(checked) {
+  document.querySelectorAll('.pdm-cb').forEach(cb => cb.checked = checked);
+}
+
+function closePurgeDatesModal() {
+  document.getElementById('purge-dates-modal').classList.remove('open');
+}
+
+function confirmPurgeDates() {
+  const dates = [...document.querySelectorAll('.pdm-cb:checked')].map(cb => cb.value);
+  if (!dates.length) { alert('No dates selected.'); return; }
+  if (!confirm(`Delete ${dates.length} date(s) of ${_pdm.retailer} data? This cannot be undone.`)) return;
+  fetch('/api/retailer/purge-dates', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ product_id: _pdm.product_id, retailer: _pdm.retailer, dates })
+  }).then(r=>r.json()).then(d => {
+    if (d.error) { alert('Failed: ' + d.error); return; }
+    closePurgeDatesModal();
+    alert(`Done — ${d.deleted_rows} row${d.deleted_rows!==1?'s':''} deleted.`);
+    const back = document.getElementById('ret-sku-back').dataset.back || 'overview';
+    loadRetSku(_pdm.product_id, back);
+  }).catch(() => alert('Purge failed — check connection.'));
+}
+
+// ── Retailer link click-through (for report tables) ──────────────────────────
+function openRetailerLink(productId, retailer, event) {
+  if (event) event.stopPropagation();
+  fetch('/api/retailer/links/' + productId)
+    .then(r=>r.json())
+    .then(links => {
+      const url = links[retailer];
+      if (url) window.open(url, '_blank');
+      else alert(`No URL stored for ${retailer} on product ${productId}.`);
+    })
+    .catch(() => alert('Could not fetch retailer link.'));
 }
 
 // ── Retailer section management ───────────────────────────────────────────────
@@ -2700,6 +2845,13 @@ function renderRetReportTable(name, rows) {
 
   let cols, rowFn;
 
+  // Helper: retailer cell with click-through link
+  const retCell = (r) => {
+    const esc = r.retailer.replace(/'/g,"\\'");
+    return `<td onclick="openRetailerLink(${r.product_id},'${esc}',event)"
+      style="cursor:pointer;color:#0078D4;text-decoration:underline" title="Open ${r.retailer} listing">${r.retailer}</td>`;
+  };
+
   if (name === 'daily_changes') {
     cols = ['Product','Model','Manufacturer','Retailer','Yesterday £','Today £','Change','Stock'];
     rowFn = r => {
@@ -2712,7 +2864,7 @@ function renderRetReportTable(name, rows) {
       const stockCell = (r.stock_yesterday !== r.stock_today && r.stock_yesterday !== null && r.stock_today !== null)
         ? `${stockPrev}→${stockNow}` : '—';
       return `<tr class="clickable" onclick="loadRetSku(${r.product_id},'report')">
-        <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer||'—'}</td><td>${r.retailer}</td>
+        <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer||'—'}</td>${retCell(r)}
         <td>${r.price_yesterday != null ? '£'+r.price_yesterday.toFixed(2) : '—'}</td>
         <td>${r.price_today     != null ? '£'+r.price_today.toFixed(2)     : '—'}</td>
         <td>${badge}</td><td style="text-align:center">${stockCell}</td></tr>`;
@@ -2729,7 +2881,7 @@ function renderRetReportTable(name, rows) {
         ? (diff > 0 ? `<span class="badge badge-red">+${diffPct}%</span>` : `<span class="badge badge-green">${diffPct}%</span>`)
         : '—';
       return `<tr class="clickable" onclick="loadRetSku(${r.product_id},'report')">
-        <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer||'—'}</td><td>${r.retailer}</td>
+        <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer||'—'}</td>${retCell(r)}
         <td>${r.price_yesterday != null ? '£'+r.price_yesterday.toFixed(2) : '—'}</td>
         <td>${r.price_today     != null ? '£'+r.price_today.toFixed(2)     : '—'}</td>
         <td>${badge}</td><td>${pBadge}</td></tr>`;
@@ -2746,7 +2898,7 @@ function renderRetReportTable(name, rows) {
         ? (diff > 0 ? `<span class="badge badge-red">+${diffPct}%</span>` : `<span class="badge badge-green">${diffPct}%</span>`)
         : '—';
       return `<tr class="clickable" onclick="loadRetSku(${r.product_id},'report')">
-        <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer||'—'}</td><td>${r.retailer}</td>
+        <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer||'—'}</td>${retCell(r)}
         <td>${r.price_14d   != null ? '£'+r.price_14d.toFixed(2)   : '—'}</td>
         <td>${r.price_today != null ? '£'+r.price_today.toFixed(2) : '—'}</td>
         <td>${badge}</td><td>${pBadge}</td></tr>`;
@@ -2754,7 +2906,7 @@ function renderRetReportTable(name, rows) {
   } else if (name === 'back_in_stock') {
     cols = ['Product','Model','Manufacturer','Retailer','Price Today'];
     rowFn = r => `<tr class="clickable" onclick="loadRetSku(${r.product_id},'report')">
-      <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer||'—'}</td><td>${r.retailer}</td>
+      <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer||'—'}</td>${retCell(r)}
       <td>${r.price != null ? '£'+r.price.toFixed(2) : '—'}</td></tr>`;
   } else if (name === 'price_gaps') {
     cols = ['Product','Model','Manufacturer','Cheapest Retailer','Cheapest £','Dearest Retailer','Dearest £','Gap £','Gap %','MSRP','vs MSRP %'];
@@ -2801,7 +2953,7 @@ function renderRetReportTable(name, rows) {
         ? (parseFloat(gapPct) < 0 ? `<span class="badge badge-red">${gapPct}%</span>` : `<span class="badge badge-green">+${gapPct}%</span>`)
         : '—';
       return `<tr class="clickable" onclick="loadRetSku(${r.product_id},'report')">
-        <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer||'—'}</td><td>${r.retailer}</td>
+        <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer||'—'}</td>${retCell(r)}
         <td>${r.price != null ? '£'+r.price.toFixed(2) : '—'}</td>
         <td>${r.msrp  != null ? '£'+r.msrp.toFixed(2)  : '—'}</td>
         <td>${gap != null ? '£'+gap.toFixed(2) : '—'}</td>
@@ -3367,6 +3519,57 @@ def retailer_sku(product_id):
     )
 
     return jsonify({"info": info, "snapshot": snapshot, "price_history": price_history})
+
+
+@app.route("/api/retailer/links/<int:product_id>")
+def retailer_links(product_id):
+    """Return a {retailer: url} map built from retailer_ids for this product."""
+    row = qry_one("SELECT * FROM retailer_ids WHERE product_id = ?", (product_id,)) or {}
+    links = {}
+    if row.get("amazon_asin"):
+        links["Amazon"]      = f"https://www.amazon.co.uk/dp/{row['amazon_asin']}"
+    if row.get("currys_sku"):
+        links["Currys"]      = f"https://www.currys.co.uk/search?q={row['currys_sku']}"
+    if row.get("very_url"):
+        links["Very"]        = row["very_url"]
+    if row.get("argos_sku"):
+        argos_id = str(row["argos_sku"]).replace(" ", "%20")
+        links["Argos"]       = f"https://www.argos.co.uk/product/{argos_id}/"
+    if row.get("ccl_url"):
+        links["CCL Online"]  = row["ccl_url"]
+    if row.get("awdit_url"):
+        links["AWD-IT"]      = row["awdit_url"]
+    if row.get("scan_url"):
+        links["Scan"]        = row["scan_url"]
+    if row.get("ocuk_code"):
+        links["Overclockers"] = f"https://www.overclockers.co.uk/?query={row['ocuk_code']}"
+    if row.get("box_url"):
+        links["Box"]         = row["box_url"]
+    return jsonify(links)
+
+
+@app.route("/api/retailer/purge-dates", methods=["POST"])
+def retailer_purge_dates():
+    """Delete retailer_prices rows for a specific set of dates."""
+    data = request.get_json(silent=True) or {}
+    product_id = data.get("product_id")
+    retailer   = data.get("retailer", "").strip()
+    dates      = data.get("dates", [])
+    if not product_id or not retailer or not dates:
+        return jsonify({"error": "product_id, retailer and dates are required"}), 400
+    if not isinstance(dates, list) or len(dates) > 366:
+        return jsonify({"error": "dates must be a list of up to 366 date strings"}), 400
+
+    placeholders = ",".join("?" * len(dates))
+    db = get_db()
+    cur = db.execute(
+        f"DELETE FROM retailer_prices WHERE product_id = ? AND retailer = ? AND date IN ({placeholders})",
+        [product_id, retailer] + list(dates)
+    )
+    deleted = cur.rowcount
+    db.commit()
+    db.close()
+    return jsonify({"deleted_rows": deleted, "product_id": product_id, "retailer": retailer})
 
 
 @app.route("/api/retailer/purge", methods=["POST"])
