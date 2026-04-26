@@ -516,6 +516,16 @@ HTML = r"""<!DOCTYPE html>
         <button class="sidebar-btn" onclick="loadCatImportExport(this,'retailer-ids-export')">📤 Export Retailer IDs</button>
       </div>
     </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-header" onclick="toggleSection(this)">
+        MSRP <span class="arrow">▾</span>
+      </div>
+      <div class="sidebar-items">
+        <button class="sidebar-btn" onclick="loadCatImportExport(this,'msrp-by-vip')">💷 Import by VIP Code</button>
+        <button class="sidebar-btn" onclick="loadCatImportExport(this,'msrp-by-ean')">💷 Import by EAN</button>
+        <button class="sidebar-btn" onclick="loadCatImportExport(this,'msrp-by-model')">💷 Import by Model</button>
+      </div>
+    </div>
   </div>
   <div class="main" id="main-catalogue">
     <!-- Products view -->
@@ -1494,6 +1504,33 @@ const IE_TOOLS = [
     desc: 'Download all retailer IDs as CSV — edit and re-import to update codes in bulk.',
     type: 'export',
   },
+  {
+    id:          'msrp-by-vip',
+    icon:        '💷',
+    name:        'MSRP — by VIP Code',
+    desc:        'CSV columns: Product, MSRP. Matches on VIP product code. Use for supplier sheets that include your VIP codes.',
+    type:        'import',
+    hasTemplate: true,
+    headers:     'Product,MSRP',
+  },
+  {
+    id:          'msrp-by-ean',
+    icon:        '💷',
+    name:        'MSRP — by EAN',
+    desc:        'CSV columns: EAN, MSRP. Matches on EAN/barcode. Use when the supplier sheet uses EAN codes.',
+    type:        'import',
+    hasTemplate: true,
+    headers:     'EAN,MSRP',
+  },
+  {
+    id:          'msrp-by-model',
+    icon:        '💷',
+    name:        'MSRP — by Model',
+    desc:        'CSV columns: Model, MSRP. Matches on model number. Use when the supplier sheet lists product model names.',
+    type:        'import',
+    hasTemplate: true,
+    headers:     'Model,MSRP',
+  },
 ];
 
 let _ieCurrentTool = null;    // tool id currently open
@@ -1637,6 +1674,11 @@ function _ieUploadForPreview(toolId, csvText, filename) {
 }
 
 function _ieRenderPreview(toolId, data) {
+  // ── MSRP import tools: delegate to shared renderer ───────────────────────────
+  if (['msrp-by-vip','msrp-by-ean','msrp-by-model'].includes(toolId)) {
+    return _ieRenderMsrpPreview(toolId, data);
+  }
+
   const previewEl = document.getElementById('ie-preview-' + toolId);
   if (data.error) {
     previewEl.innerHTML = `<p style="color:#A4262C;padding:12px">❌ ${data.error}</p>`;
@@ -1818,6 +1860,12 @@ function _ieConfirm(toolId) {
       resultHtml += `
         <span style="color:#107C10;font-weight:600;font-size:14px">✓ Retailer IDs updated</span>
         <span style="color:#0078D4">Updated: <strong>${data.updated}</strong></span>`;
+    } else if (['msrp-by-vip','msrp-by-ean','msrp-by-model'].includes(toolId)) {
+      resultHtml += `
+        <span style="color:#107C10;font-weight:600;font-size:14px">✓ MSRPs updated</span>
+        <span style="color:#107C10">Set: <strong>${data.updated}</strong></span>
+        ${data.skipped ? `<span style="color:#A19F9D">No change: <strong>${data.skipped}</strong></span>` : ''}
+        ${data.not_found ? `<span style="color:#A19F9D">Not matched: <strong>${data.not_found}</strong></span>` : ''}`;
     } else {
       resultHtml += `
         <span style="color:#107C10;font-weight:600;font-size:14px">✓ Import complete</span>
@@ -1841,6 +1889,74 @@ function _ieConfirm(toolId) {
 function _ieExport(toolId) {
   if (toolId === 'export-skus')         window.location.href = '/api/export/skus';
   if (toolId === 'retailer-ids-export') window.location.href = '/api/export/retailer-ids';
+}
+
+// ── MSRP import preview renderer (shared for all 3 MSRP tools) ───────────────
+function _ieRenderMsrpPreview(toolId, data) {
+  const previewEl = document.getElementById('ie-preview-' + toolId);
+  if (data.error) {
+    previewEl.innerHTML = `<p style="color:#A4262C;padding:12px">❌ ${data.error}</p>`;
+    return;
+  }
+  const s = data.summary;
+  _iePreviewRows = data.valid_rows;
+
+  const keyLabel = toolId === 'msrp-by-vip'   ? 'VIP Code'
+                 : toolId === 'msrp-by-ean'   ? 'EAN'
+                 :                              'Model';
+
+  let html = `<div class="ie-summary">
+    <span>Total rows: <strong>${s.total}</strong></span>
+    <span style="color:#107C10">✔ Matched: <strong>${s.matched}</strong></span>
+    ${s.no_change  ? `<span style="color:#A19F9D">No change: <strong>${s.no_change}</strong></span>` : ''}
+    ${s.not_found  ? `<span style="color:#A19F9D">Not found: <strong>${s.not_found}</strong></span>` : ''}
+    ${s.bad_value  ? `<span style="color:#A4262C">⚠ Bad value: <strong>${s.bad_value}</strong></span>` : ''}
+  </div>`;
+
+  if (_iePreviewRows.length) {
+    html += `<div class="ie-action-bar">
+      <button class="ie-btn ie-btn-success" id="ie-confirm-btn-${toolId}"
+              onclick="_ieConfirm('${toolId}')">✓ Confirm — Set ${_iePreviewRows.length} MSRPs</button>
+      <button class="ie-btn ie-btn-secondary" onclick="_ieOpenTool('${toolId}')">✕ Cancel</button>
+    </div>`;
+  }
+
+  const allRows = [...(data.valid_rows||[]), ...(data.error_rows||[])];
+  if (allRows.length) {
+    html += `<div class="tbl-wrap"><table>
+      <thead><tr>
+        <th>${keyLabel}</th><th>Model</th><th>Manufacturer</th>
+        <th style="text-align:right">Current MSRP</th>
+        <th style="text-align:right">New MSRP</th>
+        <th>Status</th>
+      </tr></thead><tbody>`;
+    allRows.forEach(r => {
+      const status =
+          r._action === 'update'    ? '<span class="ie-new">UPDATE</span>'
+        : r._action === 'no_change' ? '<span style="color:#A19F9D;font-size:11px">no change</span>'
+        : r._action === 'not_found' ? '<span style="color:#A19F9D;font-size:11px">not found</span>'
+        : r._action === 'bad_value' ? '<span class="ie-error">bad value</span>'
+        :                             '<span class="ie-error">error</span>';
+      const curMsrp = r.current_msrp != null ? `£${parseFloat(r.current_msrp).toFixed(2)}` : '—';
+      const newMsrpParsed = r._action === 'bad_value' ? r.new_msrp : parseFloat(r.new_msrp);
+      const newMsrp = r.new_msrp != null
+        ? (r._action === 'bad_value' ? `<span style="color:#A4262C;font-size:11px">${r.new_msrp}</span>` : `£${newMsrpParsed.toFixed(2)}`)
+        : '—';
+      html += `<tr>
+        <td style="font-family:monospace;font-size:12px">${r.key_value||'—'}</td>
+        <td>${r.model_no||'—'}</td>
+        <td style="color:#605E5C">${r.manufacturer||'—'}</td>
+        <td style="text-align:right;color:#605E5C">${curMsrp}</td>
+        <td style="text-align:right;font-weight:600">${newMsrp}</td>
+        <td>${status}</td>
+      </tr>`;
+    });
+    html += '</tbody></table></div>';
+  } else {
+    html += '<p style="color:#A19F9D;padding:12px">No rows could be matched.</p>';
+  }
+
+  previewEl.innerHTML = html;
 }
 
 // ── Retailer KPI ──────────────────────────────────────────────────────────────
@@ -3289,6 +3405,228 @@ def export_retailer_ids():
     return Response(out.getvalue(), mimetype="text/csv",
                     headers={"Content-Disposition": f"attachment; filename={fname}"})
 
+
+# ── MSRP import — shared backend logic ───────────────────────────────────────
+
+def _msrp_preview(tool_id, csv_text):
+    """Parse a MSRP import CSV and return preview data.
+    tool_id: 'msrp-by-vip' | 'msrp-by-ean' | 'msrp-by-model'
+    """
+    import csv, io
+    try:
+        reader = csv.DictReader(io.StringIO(csv_text.strip()))
+        raw_rows = list(reader)
+    except Exception as e:
+        return {"error": f"CSV parse error: {e}"}
+
+    if not raw_rows:
+        return {"error": "CSV appears to be empty."}
+
+    # Normalise headers
+    hmap = {h.strip().lower(): h.strip() for h in (reader.fieldnames or [])}
+
+    # Determine key column for this tool
+    if tool_id == "msrp-by-vip":
+        key_col_candidates = ["product", "product_id", "vip", "vip code"]
+        db_lookup = "product_id"
+    elif tool_id == "msrp-by-ean":
+        key_col_candidates = ["ean", "barcode", "ean13"]
+        db_lookup = "ean"
+    else:  # msrp-by-model
+        key_col_candidates = ["model", "model_no", "model no", "model number"]
+        db_lookup = "model_no"
+
+    key_col = next((hmap[c] for c in key_col_candidates if c in hmap), None)
+    msrp_col = next((hmap[c] for c in ["msrp", "rrp", "price", "recommended price"] if c in hmap), None)
+
+    if not key_col:
+        expected = key_col_candidates[0].title()
+        return {"error": f"Missing key column. Expected: {expected}"}
+    if not msrp_col:
+        return {"error": "Missing MSRP column. Expected: MSRP"}
+
+    db = get_db()
+    # Load all products into a lookup dict
+    all_products = db.execute(
+        "SELECT product_id, model_no, manufacturer, ean, msrp FROM products"
+    ).fetchall()
+    db.close()
+
+    lookup = {}
+    for p in all_products:
+        val = str(p[db_lookup] or "").strip()
+        if val:
+            lookup[val.lower()] = p
+
+    valid_rows, error_rows = [], []
+    total = matched = no_change = not_found = bad_value = 0
+
+    for row in raw_rows[:5000]:
+        total += 1
+        key_raw      = str(row.get(key_col,  "") or "").strip()
+        msrp_raw_orig = str(row.get(msrp_col, "") or "").strip()
+        # Robust price parsing: handles £1,234.56 / 1.234,56 (EU) / 299,99 (EU decimal) / "359.00 GBP"
+        import re as _re
+        _m = _re.search(r'(\d[\d,.]*\d|\d)', msrp_raw_orig)
+        if _m:
+            _raw = _m.group(1)
+            _has_dot   = '.' in _raw
+            _has_comma = ',' in _raw
+            if _has_dot and _has_comma:
+                # Whichever separator comes last is the decimal
+                if _raw.rindex('.') > _raw.rindex(','):
+                    msrp_raw = _raw.replace(',', '')          # 1,234.56 → 1234.56
+                else:
+                    msrp_raw = _raw.replace('.', '').replace(',', '.')  # 1.234,56 → 1234.56
+            elif _has_comma and not _has_dot:
+                # Comma-only: if exactly 2 digits follow last comma it's a decimal separator
+                if _re.search(r',\d{2}$', _raw):
+                    msrp_raw = _raw.replace(',', '.')         # 299,99 → 299.99
+                else:
+                    msrp_raw = _raw.replace(',', '')          # 1,234 → 1234
+            else:
+                msrp_raw = _raw                               # 299.99 → 299.99
+        else:
+            msrp_raw = msrp_raw_orig
+
+        if not key_raw:
+            continue
+
+        # Parse MSRP value
+        try:
+            new_msrp = round(float(msrp_raw), 2)
+            if new_msrp <= 0:
+                raise ValueError("zero/negative")
+        except (ValueError, TypeError):
+            bad_value += 1
+            error_rows.append({
+                "key_value": key_raw, "model_no": None, "manufacturer": None,
+                "current_msrp": None, "new_msrp": msrp_raw_orig, "_action": "bad_value",
+            })
+            continue
+
+        # Look up product
+        product = lookup.get(key_raw.lower())
+        if not product:
+            not_found += 1
+            error_rows.append({
+                "key_value": key_raw, "model_no": None, "manufacturer": None,
+                "current_msrp": None, "new_msrp": new_msrp, "_action": "not_found",
+            })
+            continue
+
+        matched += 1
+        cur = product["msrp"]
+        if cur is not None and round(float(cur), 2) == new_msrp:
+            no_change += 1
+            error_rows.append({
+                "key_value": key_raw, "model_no": product["model_no"],
+                "manufacturer": product["manufacturer"],
+                "current_msrp": cur, "new_msrp": new_msrp, "_action": "no_change",
+            })
+        else:
+            valid_rows.append({
+                "product_id": product["product_id"],
+                "key_value":  key_raw,
+                "model_no":   product["model_no"],
+                "manufacturer": product["manufacturer"],
+                "current_msrp": cur,
+                "new_msrp":   new_msrp,
+                "_action":    "update",
+            })
+
+    return {
+        "summary": {
+            "total": total, "matched": matched,
+            "no_change": no_change, "not_found": not_found, "bad_value": bad_value,
+        },
+        "valid_rows": valid_rows,
+        "error_rows": error_rows,
+    }
+
+
+def _msrp_confirm(rows):
+    """Write confirmed MSRP rows to the products table."""
+    db = get_db()
+    updated = skipped = not_found = 0
+    for r in rows:
+        pid = r.get("product_id")
+        val = r.get("new_msrp")
+        if not pid or val is None:
+            skipped += 1
+            continue
+        cur = db.execute("SELECT msrp FROM products WHERE product_id=?", (pid,)).fetchone()
+        if cur is None:
+            not_found += 1
+            continue
+        db.execute("UPDATE products SET msrp=? WHERE product_id=?", (round(float(val), 2), pid))
+        updated += 1
+    db.commit()
+    db.close()
+    return {"updated": updated, "skipped": skipped, "not_found": not_found}
+
+
+# ── MSRP by VIP Code ──────────────────────────────────────────────────────────
+
+@app.route("/api/import/template/msrp-by-vip")
+def msrp_by_vip_template():
+    from flask import Response
+    return Response("Product,MSRP\n123456,299.99\n",
+                    mimetype="text/csv",
+                    headers={"Content-Disposition": "attachment; filename=msrp_by_vip_template.csv"})
+
+@app.route("/api/import/msrp-by-vip/preview", methods=["POST"])
+def msrp_by_vip_preview():
+    data = request.get_json(silent=True) or {}
+    return jsonify(_msrp_preview("msrp-by-vip", data.get("csv", "")))
+
+@app.route("/api/import/msrp-by-vip/confirm", methods=["POST"])
+def msrp_by_vip_confirm():
+    data = request.get_json(silent=True) or {}
+    return jsonify(_msrp_confirm(data.get("rows", [])))
+
+
+# ── MSRP by EAN ───────────────────────────────────────────────────────────────
+
+@app.route("/api/import/template/msrp-by-ean")
+def msrp_by_ean_template():
+    from flask import Response
+    return Response("EAN,MSRP\n4711377086578,299.99\n",
+                    mimetype="text/csv",
+                    headers={"Content-Disposition": "attachment; filename=msrp_by_ean_template.csv"})
+
+@app.route("/api/import/msrp-by-ean/preview", methods=["POST"])
+def msrp_by_ean_preview():
+    data = request.get_json(silent=True) or {}
+    return jsonify(_msrp_preview("msrp-by-ean", data.get("csv", "")))
+
+@app.route("/api/import/msrp-by-ean/confirm", methods=["POST"])
+def msrp_by_ean_confirm():
+    data = request.get_json(silent=True) or {}
+    return jsonify(_msrp_confirm(data.get("rows", [])))
+
+
+# ── MSRP by Model ─────────────────────────────────────────────────────────────
+
+@app.route("/api/import/template/msrp-by-model")
+def msrp_by_model_template():
+    from flask import Response
+    return Response("Model,MSRP\nROG STRIX B650E-E GAMING WIFI,299.99\n",
+                    mimetype="text/csv",
+                    headers={"Content-Disposition": "attachment; filename=msrp_by_model_template.csv"})
+
+@app.route("/api/import/msrp-by-model/preview", methods=["POST"])
+def msrp_by_model_preview():
+    data = request.get_json(silent=True) or {}
+    return jsonify(_msrp_preview("msrp-by-model", data.get("csv", "")))
+
+@app.route("/api/import/msrp-by-model/confirm", methods=["POST"])
+def msrp_by_model_confirm():
+    data = request.get_json(silent=True) or {}
+    return jsonify(_msrp_confirm(data.get("rows", [])))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 
 def _init_watchlist():
     db = get_db()
