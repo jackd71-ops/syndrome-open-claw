@@ -512,16 +512,72 @@ HTML = r"""<!DOCTYPE html>
 
 <!-- Retailer layout -->
 <div class="layout" id="layout-retailer" style="display:none">
-  <div class="main" style="padding:20px">
-    <div id="retailer-kpi" class="kpi-row"><div class="spinner">Loading…</div></div>
-    <div class="search-bar">
-      <input id="ret-search-input" type="text" placeholder="Search by model number or description…" onkeydown="if(event.key==='Enter')doRetSearch()">
-      <button onclick="doRetSearch()">Search</button>
+  <div class="sidebar" id="sidebar-retailer">
+    <div class="sidebar-section">
+      <div class="sidebar-section-header" onclick="toggleSection(this)">
+        Overview <span class="arrow">▾</span>
+      </div>
+      <div class="sidebar-items">
+        <button class="sidebar-btn active" id="ret-btn-overview" onclick="showRetSection('overview',this)">Daily Overview</button>
+        <button class="sidebar-btn" onclick="showRetSection('search',this)">Search SKUs</button>
+      </div>
     </div>
-    <div id="ret-search-results"></div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-header" onclick="toggleSection(this)">
+        Stock Intelligence <span class="arrow">▾</span>
+      </div>
+      <div class="sidebar-items">
+        <button class="sidebar-btn" onclick="loadRetReport('out_of_stock',this)">Out of Stock Today</button>
+        <button class="sidebar-btn" onclick="loadRetReport('back_in_stock',this)">Back in Stock</button>
+        <button class="sidebar-btn" onclick="loadRetReport('never_listed',this)">Never Listed</button>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-header" onclick="toggleSection(this)">
+        Price Intelligence <span class="arrow">▾</span>
+      </div>
+      <div class="sidebar-items">
+        <button class="sidebar-btn" onclick="loadRetReport('price_trends',this)">Price Trends — Top Movers (14d)</button>
+        <button class="sidebar-btn" onclick="loadRetReport('price_dropping',this)">Price Dropping</button>
+        <button class="sidebar-btn" onclick="loadRetReport('price_rising',this)">Price Rising</button>
+        <button class="sidebar-btn" onclick="loadRetReport('price_gaps',this)">Price Gaps Between Retailers</button>
+        <button class="sidebar-btn" onclick="loadRetReport('daily_changes',this)">Changes Since Yesterday</button>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-header" onclick="toggleSection(this)">
+        MSRP Analysis <span class="arrow">▾</span>
+      </div>
+      <div class="sidebar-items">
+        <button class="sidebar-btn" onclick="loadRetReport('below_msrp',this)">Below MSRP</button>
+        <button class="sidebar-btn" onclick="loadRetReport('above_msrp',this)">All Retailers Above MSRP</button>
+        <button class="sidebar-btn" onclick="loadRetReport('msrp_gap',this)">Furthest from MSRP</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="main" id="main-retailer">
+    <!-- Overview / KPI -->
+    <div class="content-section active" id="ret-overview">
+      <div id="retailer-kpi" class="kpi-row"><div class="spinner">Loading…</div></div>
+    </div>
+    <!-- Search -->
+    <div class="content-section" id="ret-search">
+      <div class="search-bar">
+        <input id="ret-search-input" type="text" placeholder="Search by model number or description…" onkeydown="if(event.key==='Enter')doRetSearch()">
+        <button onclick="doRetSearch()">Search</button>
+      </div>
+      <div id="ret-search-results"></div>
+    </div>
+    <!-- SKU drill-down -->
     <div class="content-section" id="ret-sku">
-      <button class="back-btn" onclick="document.getElementById('ret-sku').classList.remove('active')">← Back</button>
+      <button class="back-btn" id="ret-sku-back" onclick="showRetSection('overview')">← Back</button>
       <div id="ret-sku-content"><div class="spinner">Loading…</div></div>
+    </div>
+    <!-- Report results -->
+    <div class="content-section" id="ret-report">
+      <button class="back-btn" onclick="showRetSection('overview')">← Back to Overview</button>
+      <div id="ret-report-content"><div class="spinner">Loading…</div></div>
     </div>
   </div>
 </div>
@@ -2341,13 +2397,13 @@ function loadRetailerKpi() {
 function doRetSearch() {
   const q = document.getElementById('ret-search-input').value.trim();
   if (!q) return;
+  showRetSection('search');
   document.getElementById('ret-search-results').innerHTML = '<div class="spinner">Searching…</div>';
-  document.getElementById('ret-sku').classList.remove('active');
   fetch('/api/retailer/search?q=' + encodeURIComponent(q)).then(r=>r.json()).then(rows => {
     if (!rows.length) { document.getElementById('ret-search-results').innerHTML = '<p style="color:#A19F9D;padding:20px">No results</p>'; return; }
     let html = '<div class="section-title">Results (' + rows.length + ')</div><div class="tbl-wrap"><table><thead><tr><th>Product</th><th>Model</th><th>Manufacturer</th><th>Lowest Price</th><th>Below MSRP</th></tr></thead><tbody>';
     rows.forEach(r => {
-      html += `<tr class="clickable" onclick="loadRetSku(${r.product_id})">
+      html += `<tr class="clickable" onclick="loadRetSku(${r.product_id},'search')">
         <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer}</td>
         <td>${r.min_price ? '£'+r.min_price.toFixed(2) : '—'}</td>
         <td>${r.below_msrp_count > 0 ? '<span class="badge badge-red">Yes ('+r.below_msrp_count+')</span>' : '—'}</td>
@@ -2359,14 +2415,10 @@ function doRetSearch() {
 }
 
 // ── Retailer SKU drill-down ───────────────────────────────────────────────────
-function loadRetSku(productId) {
-  document.getElementById('ret-sku').classList.add('active');
+function loadRetSku(productId, backSection) {
+  showRetSection('sku');
+  document.getElementById('ret-sku-back').onclick = () => showRetSection(backSection || 'overview');
   document.getElementById('ret-sku-content').innerHTML = '<div class="spinner">Loading…</div>';
-  document.getElementById('ret-search-results').style.display = 'none';
-  document.getElementById('ret-sku').querySelector('.back-btn').onclick = () => {
-    document.getElementById('ret-sku').classList.remove('active');
-    document.getElementById('ret-search-results').style.display = '';
-  };
   fetch('/api/retailer/sku/' + productId).then(r=>r.json()).then(data => {
     renderRetSku(data);
   });
@@ -2408,6 +2460,349 @@ function renderRetSku(data) {
                plugins:{legend:{labels:{font:{size:10}}}},
                scales:{x:{ticks:{font:{size:10}}}, y:{ticks:{font:{size:10}}}} }
   });
+}
+
+// ── Retailer section management ───────────────────────────────────────────────
+let currentRetBtn = null;
+function showRetSection(name, btn) {
+  document.querySelectorAll('#main-retailer .content-section').forEach(s => s.classList.remove('active'));
+  document.getElementById('ret-' + name).classList.add('active');
+  document.querySelectorAll('#sidebar-retailer .sidebar-btn').forEach(b => b.classList.remove('active'));
+  if (btn) { btn.classList.add('active'); currentRetBtn = btn; }
+  else if (name === 'overview') document.getElementById('ret-btn-overview')?.classList.add('active');
+}
+
+// ── Retailer reports ──────────────────────────────────────────────────────────
+let _retReportCache = { name: null, rows: [] };
+
+const RET_REPORT_TITLES = {
+  out_of_stock:   'Out of Stock Today',
+  back_in_stock:  'Back in Stock',
+  never_listed:   'Never Listed at Any Retailer',
+  price_trends:   'Price Trends — Top Movers (14 Days)',
+  price_dropping: 'Price Dropping',
+  price_rising:   'Price Rising',
+  price_gaps:     'Price Gaps Between Retailers',
+  daily_changes:  'All Changes Since Yesterday',
+  below_msrp:     'Below MSRP',
+  above_msrp:     'All Retailers Above MSRP',
+  msrp_gap:       'Furthest from MSRP',
+};
+
+const RET_REPORT_HELP = {
+  out_of_stock: {
+    title: 'Out of Stock Today',
+    body: `<p>Shows every SKU where at least one retailer is reporting <strong>out of stock</strong> today. Each retailer gets its own column — <span style="color:#107C10">✓</span> in stock, <span style="color:#A4262C;font-weight:600">✗</span> out of stock, — no data scraped.</p>
+<p><strong>Retailer filter:</strong> select a retailer to narrow the list to only SKUs that are OOS <em>at that specific retailer</em>. Manufacturer and Product Group filters apply on top.</p>
+<p><strong>How to use:</strong> Spot gaps in retail availability at a glance. Cross-reference with the STIC distributor data to see whether OOS is a supply problem or a listing problem.</p>`
+  },
+  back_in_stock: {
+    title: 'Back in Stock',
+    body: `<p>Products that were <strong>out of stock yesterday but are in stock today</strong> at at least one retailer. One row per SKU/retailer transition.</p>
+<p><strong>How to use:</strong> Fast-moving signal — a SKU becoming available again can indicate a new delivery, re-listing, or end of a promotion that cleared stock. Check the price column to see whether it relisted at a different price point.</p>`
+  },
+  never_listed: {
+    title: 'Never Listed at Any Retailer',
+    body: `<p>Products that have <strong>never had a price or stock record at any retailer</strong> across all dates in the database — the scraper found no data.</p>
+<p><strong>How to use:</strong> These SKUs may be missing retailer IDs (ASIN, SKU codes), may not be stocked by this retail channel, or may be very new. Review the Retailer IDs in the Catalogue tab to see what's missing.</p>`
+  },
+  price_trends: {
+    title: 'Price Trends — Top Movers (14 Days)',
+    body: `<p>Products with the <strong>largest absolute price movement</strong> per retailer over the past 14 days — comparing the oldest available date in the 14-day window against today. Sorted by the size of the move.</p>
+<p>Includes both risers and fallers in a single ranked list, with change £ and change % columns.</p>
+<p><strong>How to use:</strong> Spot sustained promotions (large drops held over two weeks) vs overnight corrections. A large drop at one retailer while others hold price often signals a targeted promotional activity.</p>`
+  },
+  price_dropping: {
+    title: 'Price Dropping',
+    body: `<p>Products where at least one retailer's price is <strong>lower today than yesterday</strong>. Sorted by the size of the drop (largest first). Shows change £ and change % per retailer.</p>
+<p><strong>How to use:</strong> Early warning of promotional activity or price competition starting. If the drop takes a product below MSRP, cross-reference with the Below MSRP report.</p>`
+  },
+  price_rising: {
+    title: 'Price Rising',
+    body: `<p>Products where at least one retailer's price is <strong>higher today than yesterday</strong>. Sorted by the size of the rise.</p>
+<p><strong>How to use:</strong> May signal post-promo normalisation, tightening supply, or cost increases being passed through. Cross-reference with STIC distributor data to see if channel stock is also dropping.</p>`
+  },
+  price_gaps: {
+    title: 'Price Gaps Between Retailers',
+    body: `<p>For each SKU with prices from <strong>two or more retailers</strong>, shows the spread between the cheapest and dearest, expressed as £ and %. Sorted by the widest gap % first.</p>
+<p>Also shows the cheapest retail price vs MSRP where MSRP is set — green if above MSRP, red if below.</p>
+<p><strong>How to use:</strong> A wide spread indicates one retailer is discounting aggressively or another is out of step with the market. Use to spot outlier retailers on specific SKUs — the gap % tells you how anomalous the cheapest price is relative to the rest of the market.</p>`
+  },
+  daily_changes: {
+    title: 'All Changes Since Yesterday',
+    body: `<p>Every <strong>price move and in-stock status change across all retailers since yesterday</strong>. Price rises in <span style="color:#A4262C;font-weight:600">red</span>, drops in <span style="color:#107C10;font-weight:600">green</span>. Stock transitions shown as before → after.</p>
+<p><strong>How to use:</strong> Full activity log for the day. Good for a morning review of what moved overnight before drilling into specific reports. Click any row to open the SKU drill-down and see the full history.</p>`
+  },
+  below_msrp: {
+    title: 'Below MSRP',
+    body: `<p>Products where <strong>at least one retailer is currently pricing below MSRP</strong>. The <em># Below MSRP</em> column counts how many retailers are under, and the <em>Retailers Below</em> column names them.</p>
+<p><strong>How to use:</strong> MSRP breaches can indicate promotional clearance, aggressive discounting, or an MSRP that needs reviewing. Filter by manufacturer or product group to focus a category review.</p>`
+  },
+  above_msrp: {
+    title: 'All Retailers Above MSRP',
+    body: `<p>Products where <strong>every retailer that has a price today is at or above MSRP</strong>. The cheapest price available is shown for reference.</p>
+<p><strong>How to use:</strong> Confirms which SKUs are holding their recommended price across all of retail. May indicate strong demand, tight supply, or premium positioning. Useful to flag to the brand that pricing is intact.</p>`
+  },
+  msrp_gap: {
+    title: 'Furthest from MSRP',
+    body: `<p>Individual retailer rows sorted by <strong>how far the retail price is from MSRP as a percentage</strong>. Biggest discounts (furthest below MSRP) float to the top.</p>
+<p>Green badge = above MSRP, red badge = below MSRP. The gap % is (price / MSRP − 1) × 100.</p>
+<p><strong>How to use:</strong> The deepest discounts relative to MSRP. These are the retailer/SKU combinations where pricing has moved furthest from recommended. Use alongside the Below MSRP report — this one ranks by severity rather than by count.</p>`
+  },
+};
+
+function loadRetReport(name, btn) {
+  if (currentRetBtn) currentRetBtn.classList.remove('active');
+  if (btn) { btn.classList.add('active'); currentRetBtn = btn; }
+  showRetSection('report');
+  document.getElementById('ret-report-content').innerHTML = '<div class="spinner">Loading…</div>';
+  fetch('/api/retailer/report/' + name).then(r=>r.json()).then(data => {
+    renderRetReport(name, data);
+  });
+}
+
+function buildRetFilterBar(rows, includeRetailer) {
+  const manufacturers = [...new Set(rows.map(r=>r.manufacturer).filter(Boolean))].sort();
+  const groups        = [...new Set(rows.map(r=>r.product_group).filter(Boolean))].sort();
+  const retailers     = [...new Set(rows.map(r=>r.retailer).filter(Boolean))].sort();
+  const mOpts = ['<option value="">All Manufacturers</option>', ...manufacturers.map(m=>`<option>${m}</option>`)].join('');
+  const gOpts = ['<option value="">All Groups</option>',        ...groups.map(g=>`<option>${g}</option>`)].join('');
+  const rOpts = ['<option value="">All Retailers</option>',     ...retailers.map(r=>`<option>${r}</option>`)].join('');
+  const retSel = includeRetailer
+    ? `<select id="ret-filter-retailer" onchange="applyRetFilters()" style="padding:6px 10px;border:1px solid #C8C6C4;border-radius:4px;font-size:13px;min-width:160px">${rOpts}</select>`
+    : '';
+  return `<div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+    ${retSel}
+    <select id="ret-filter-mfr"   onchange="applyRetFilters()" style="padding:6px 10px;border:1px solid #C8C6C4;border-radius:4px;font-size:13px;min-width:180px">${mOpts}</select>
+    <select id="ret-filter-group" onchange="applyRetFilters()" style="padding:6px 10px;border:1px solid #C8C6C4;border-radius:4px;font-size:13px;min-width:180px">${gOpts}</select>
+  </div>`;
+}
+
+function applyRetFilters() {
+  // OOS matrix handles retailer filter internally (it's a product-level pivot, not row-level)
+  if (_retReportCache.name === 'out_of_stock') {
+    renderRetReportTable('out_of_stock', _retReportCache.rows);
+    return;
+  }
+  const ret = document.getElementById('ret-filter-retailer')?.value || '';
+  const mfr = document.getElementById('ret-filter-mfr')?.value     || '';
+  const grp = document.getElementById('ret-filter-group')?.value   || '';
+  const filtered = _retReportCache.rows.filter(r =>
+    (!ret || r.retailer      === ret) &&
+    (!mfr || r.manufacturer  === mfr) &&
+    (!grp || r.product_group === grp)
+  );
+  renderRetReportTable(_retReportCache.name, filtered);
+}
+
+function renderRetReport(name, rows) {
+  _retReportCache = { name, rows };
+  const title = RET_REPORT_TITLES[name] || name;
+  if (!rows.length) {
+    document.getElementById('ret-report-content').innerHTML =
+      `<div class="section-title">${title}</div><p style="color:#A19F9D;padding:20px">No items match this report.</p>`;
+    return;
+  }
+  renderRetReportTable(name, rows);
+}
+
+function renderRetReportTable(name, rows) {
+  const title    = RET_REPORT_TITLES[name] || name;
+  const savedRet = document.getElementById('ret-filter-retailer')?.value || '';
+  const savedMfr = document.getElementById('ret-filter-mfr')?.value     || '';
+  const savedGrp = document.getElementById('ret-filter-group')?.value   || '';
+
+  // ── Out of Stock: pivot to SKU × Retailer matrix ──────────────────────────
+  if (name === 'out_of_stock') {
+    const filteredRetailer = savedRet;
+    const filteredMfr      = savedMfr;
+    const filteredGrp      = savedGrp;
+    const retailerCols = [...new Set(_retReportCache.rows.map(r=>r.retailer).filter(Boolean))].sort();
+
+    // Build product map, applying mfr / group filters at row level
+    const byProduct = {};
+    _retReportCache.rows.forEach(r => {
+      if (filteredMfr && r.manufacturer  !== filteredMfr) return;
+      if (filteredGrp && r.product_group !== filteredGrp) return;
+      if (!byProduct[r.product_id]) byProduct[r.product_id] = {
+        product_id: r.product_id, model_no: r.model_no,
+        manufacturer: r.manufacturer, product_group: r.product_group, retailers: {}
+      };
+      byProduct[r.product_id].retailers[r.retailer] = r.in_stock;
+    });
+
+    // Apply retailer filter: show only products OOS at that retailer
+    let products = Object.values(byProduct);
+    if (filteredRetailer) {
+      products = products.filter(p => p.retailers[filteredRetailer] === 0);
+    }
+    products.sort((a,b) => a.model_no.localeCompare(b.model_no));
+
+    const filterBar = buildRetFilterBar(_retReportCache.rows, true);
+    const cols = ['Product', 'Model', 'Manufacturer', ...retailerCols];
+    let html = `<div class="section-title">${title} <span style="font-size:12px;font-weight:400;color:#605E5C">(${products.length} SKUs)</span>
+      <button class="info-btn" onclick="showRetHelp('${name}')" title="How this report works">ⓘ</button></div>
+      ${filterBar}<div class="tbl-wrap"><table><thead><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr></thead><tbody>`;
+    products.forEach(p => {
+      const retCells = retailerCols.map(ret => {
+        const s = p.retailers[ret];
+        if (s === 1) return `<td style="color:#107C10;text-align:center" title="${ret}: In Stock">✓</td>`;
+        if (s === 0) return `<td style="color:#A4262C;font-weight:600;text-align:center" title="${ret}: Out of Stock">✗</td>`;
+        return `<td style="color:#C8C6C4;text-align:center" title="${ret}: No data">—</td>`;
+      });
+      html += `<tr class="clickable" onclick="loadRetSku(${p.product_id},'report')">
+        <td>${p.product_id}</td><td>${p.model_no}</td><td>${p.manufacturer||'—'}</td>${retCells.join('')}</tr>`;
+    });
+    html += '</tbody></table></div>';
+    document.getElementById('ret-report-content').innerHTML = html;
+    if (savedRet && document.getElementById('ret-filter-retailer')) document.getElementById('ret-filter-retailer').value = savedRet;
+    if (savedMfr && document.getElementById('ret-filter-mfr'))      document.getElementById('ret-filter-mfr').value     = savedMfr;
+    if (savedGrp && document.getElementById('ret-filter-group'))    document.getElementById('ret-filter-group').value   = savedGrp;
+    return;
+  }
+
+  // ── All other reports ─────────────────────────────────────────────────────
+  const hasRetCol  = ['price_dropping','price_rising','daily_changes','back_in_stock','msrp_gap','price_trends'].includes(name);
+  const hasFilters = !['price_gaps','never_listed'].includes(name);
+  const filterBar  = hasFilters ? buildRetFilterBar(_retReportCache.rows, hasRetCol) : '';
+
+  let cols, rowFn;
+
+  if (name === 'daily_changes') {
+    cols = ['Product','Model','Manufacturer','Retailer','Yesterday £','Today £','Change','Stock'];
+    rowFn = r => {
+      const diff  = (r.price_today != null && r.price_yesterday != null) ? r.price_today - r.price_yesterday : null;
+      const badge = diff === null ? '' : diff > 0
+        ? `<span class="badge badge-red">+£${diff.toFixed(2)}</span>`
+        : `<span class="badge badge-green">£${diff.toFixed(2)}</span>`;
+      const stockPrev = r.stock_yesterday === 1 ? '✓' : r.stock_yesterday === 0 ? '✗' : '?';
+      const stockNow  = r.stock_today    === 1 ? '✓' : r.stock_today    === 0 ? '✗' : '?';
+      const stockCell = (r.stock_yesterday !== r.stock_today && r.stock_yesterday !== null && r.stock_today !== null)
+        ? `${stockPrev}→${stockNow}` : '—';
+      return `<tr class="clickable" onclick="loadRetSku(${r.product_id},'report')">
+        <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer||'—'}</td><td>${r.retailer}</td>
+        <td>${r.price_yesterday != null ? '£'+r.price_yesterday.toFixed(2) : '—'}</td>
+        <td>${r.price_today     != null ? '£'+r.price_today.toFixed(2)     : '—'}</td>
+        <td>${badge}</td><td style="text-align:center">${stockCell}</td></tr>`;
+    };
+  } else if (name === 'price_dropping' || name === 'price_rising') {
+    cols = ['Product','Model','Manufacturer','Retailer','Prev £','Today £','Change £','Change %'];
+    rowFn = r => {
+      const diff    = (r.price_today||0) - (r.price_yesterday||0);
+      const diffPct = r.price_yesterday ? ((diff / r.price_yesterday) * 100).toFixed(1) : '—';
+      const badge   = diff > 0
+        ? `<span class="badge badge-red">+£${diff.toFixed(2)}</span>`
+        : `<span class="badge badge-green">£${diff.toFixed(2)}</span>`;
+      const pBadge  = diffPct !== '—'
+        ? (diff > 0 ? `<span class="badge badge-red">+${diffPct}%</span>` : `<span class="badge badge-green">${diffPct}%</span>`)
+        : '—';
+      return `<tr class="clickable" onclick="loadRetSku(${r.product_id},'report')">
+        <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer||'—'}</td><td>${r.retailer}</td>
+        <td>${r.price_yesterday != null ? '£'+r.price_yesterday.toFixed(2) : '—'}</td>
+        <td>${r.price_today     != null ? '£'+r.price_today.toFixed(2)     : '—'}</td>
+        <td>${badge}</td><td>${pBadge}</td></tr>`;
+    };
+  } else if (name === 'price_trends') {
+    cols = ['Product','Model','Manufacturer','Retailer','14d Ago £','Today £','Change £','Change %'];
+    rowFn = r => {
+      const diff    = (r.price_today||0) - (r.price_14d||0);
+      const diffPct = r.price_14d ? ((diff / r.price_14d) * 100).toFixed(1) : '—';
+      const badge   = diff > 0
+        ? `<span class="badge badge-red">+£${diff.toFixed(2)}</span>`
+        : `<span class="badge badge-green">£${diff.toFixed(2)}</span>`;
+      const pBadge  = diffPct !== '—'
+        ? (diff > 0 ? `<span class="badge badge-red">+${diffPct}%</span>` : `<span class="badge badge-green">${diffPct}%</span>`)
+        : '—';
+      return `<tr class="clickable" onclick="loadRetSku(${r.product_id},'report')">
+        <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer||'—'}</td><td>${r.retailer}</td>
+        <td>${r.price_14d   != null ? '£'+r.price_14d.toFixed(2)   : '—'}</td>
+        <td>${r.price_today != null ? '£'+r.price_today.toFixed(2) : '—'}</td>
+        <td>${badge}</td><td>${pBadge}</td></tr>`;
+    };
+  } else if (name === 'back_in_stock') {
+    cols = ['Product','Model','Manufacturer','Retailer','Price Today'];
+    rowFn = r => `<tr class="clickable" onclick="loadRetSku(${r.product_id},'report')">
+      <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer||'—'}</td><td>${r.retailer}</td>
+      <td>${r.price != null ? '£'+r.price.toFixed(2) : '—'}</td></tr>`;
+  } else if (name === 'price_gaps') {
+    cols = ['Product','Model','Manufacturer','Cheapest Retailer','Cheapest £','Dearest Retailer','Dearest £','Gap £','Gap %','MSRP','vs MSRP %'];
+    rowFn = r => {
+      const gap    = (r.max_price != null && r.min_price != null) ? r.max_price - r.min_price : null;
+      const gapPct = (gap != null && r.min_price) ? ((gap / r.min_price) * 100).toFixed(1) : '—';
+      const msrpPct= (r.msrp && r.min_price) ? (((r.min_price / r.msrp) - 1) * 100).toFixed(1) : '—';
+      const gapBadge  = gapPct !== '—' ? `<span class="badge ${parseFloat(gapPct)>10?'badge-red':'badge-green'}">${gapPct}%</span>` : '—';
+      const msrpBadge = msrpPct !== '—'
+        ? (parseFloat(msrpPct) < 0 ? `<span class="badge badge-red">${msrpPct}%</span>` : `<span class="badge badge-green">+${msrpPct}%</span>`)
+        : '—';
+      return `<tr class="clickable" onclick="loadRetSku(${r.product_id},'report')">
+        <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer||'—'}</td>
+        <td>${r.cheapest_retailer||'—'}</td>
+        <td>${r.min_price != null ? '£'+r.min_price.toFixed(2) : '—'}</td>
+        <td>${r.dearest_retailer||'—'}</td>
+        <td>${r.max_price != null ? '£'+r.max_price.toFixed(2) : '—'}</td>
+        <td>${gap != null ? '£'+gap.toFixed(2) : '—'}</td>
+        <td>${gapBadge}</td>
+        <td>${r.msrp != null ? '£'+r.msrp.toFixed(2) : '—'}</td>
+        <td>${msrpBadge}</td></tr>`;
+    };
+  } else if (name === 'below_msrp') {
+    cols = ['Product','Model','Manufacturer','MSRP','Lowest Price','# Below MSRP','Retailers Below'];
+    rowFn = r => `<tr class="clickable" onclick="loadRetSku(${r.product_id},'report')">
+      <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer||'—'}</td>
+      <td>${r.msrp  != null ? '£'+r.msrp.toFixed(2)      : '—'}</td>
+      <td>${r.min_price != null ? '£'+r.min_price.toFixed(2) : '—'}</td>
+      <td><span class="badge badge-red">${r.below_count}</span></td>
+      <td style="font-size:12px;color:#605E5C">${r.retailers_below||'—'}</td></tr>`;
+  } else if (name === 'above_msrp') {
+    cols = ['Product','Model','Manufacturer','MSRP','Cheapest Price','# Retailers'];
+    rowFn = r => `<tr class="clickable" onclick="loadRetSku(${r.product_id},'report')">
+      <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer||'—'}</td>
+      <td>${r.msrp  != null ? '£'+r.msrp.toFixed(2)      : '—'}</td>
+      <td>${r.min_price != null ? '£'+r.min_price.toFixed(2) : '—'}</td>
+      <td>${r.retailer_count}</td></tr>`;
+  } else if (name === 'msrp_gap') {
+    cols = ['Product','Model','Manufacturer','Retailer','Price','MSRP','Gap £','Gap %'];
+    rowFn = r => {
+      const gap    = (r.msrp && r.price) ? r.price - r.msrp : null;
+      const gapPct = (r.msrp && r.price) ? (((r.price / r.msrp) - 1) * 100).toFixed(1) : '—';
+      const badge  = gapPct !== '—'
+        ? (parseFloat(gapPct) < 0 ? `<span class="badge badge-red">${gapPct}%</span>` : `<span class="badge badge-green">+${gapPct}%</span>`)
+        : '—';
+      return `<tr class="clickable" onclick="loadRetSku(${r.product_id},'report')">
+        <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer||'—'}</td><td>${r.retailer}</td>
+        <td>${r.price != null ? '£'+r.price.toFixed(2) : '—'}</td>
+        <td>${r.msrp  != null ? '£'+r.msrp.toFixed(2)  : '—'}</td>
+        <td>${gap != null ? '£'+gap.toFixed(2) : '—'}</td>
+        <td>${badge}</td></tr>`;
+    };
+  } else if (name === 'never_listed') {
+    cols = ['Product','Model','Manufacturer','Product Group'];
+    rowFn = r => `<tr class="clickable" onclick="loadRetSku(${r.product_id},'report')">
+      <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer||'—'}</td><td>${r.product_group||'—'}</td></tr>`;
+  } else {
+    cols = ['Product','Model','Manufacturer'];
+    rowFn = r => `<tr class="clickable" onclick="loadRetSku(${r.product_id},'report')">
+      <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer||'—'}</td></tr>`;
+  }
+
+  let html = `<div class="section-title">${title} <span style="font-size:12px;font-weight:400;color:#605E5C">(${rows.length} items)</span>
+    <button class="info-btn" onclick="showRetHelp('${name}')" title="How this report works">ⓘ</button></div>
+    ${filterBar}<div class="tbl-wrap"><table><thead><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr></thead><tbody>`;
+  rows.forEach(r => { html += rowFn(r); });
+  html += '</tbody></table></div>';
+  document.getElementById('ret-report-content').innerHTML = html;
+
+  if (savedRet && document.getElementById('ret-filter-retailer')) document.getElementById('ret-filter-retailer').value = savedRet;
+  if (savedMfr && document.getElementById('ret-filter-mfr'))      document.getElementById('ret-filter-mfr').value     = savedMfr;
+  if (savedGrp && document.getElementById('ret-filter-group'))    document.getElementById('ret-filter-group').value   = savedGrp;
+}
+
+function showRetHelp(name) {
+  const h = RET_REPORT_HELP[name];
+  if (!h) return;
+  document.getElementById('modal-title').textContent = h.title;
+  document.getElementById('modal-body').innerHTML = h.body;
+  document.getElementById('info-modal').classList.add('open');
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -2940,6 +3335,204 @@ def retailer_sku(product_id):
     )
 
     return jsonify({"info": info, "snapshot": snapshot, "price_history": price_history})
+
+
+@app.route("/api/retailer/report/<name>")
+def retailer_report(name):
+    latest = latest_date("retailer_prices")
+    if not latest:
+        return jsonify([])
+    prev = prev_date("retailer_prices", latest)
+
+    if name == "out_of_stock":
+        # Return all retailer rows for today; frontend pivots into matrix
+        rows = qry(
+            """SELECT r.product_id, r.model_no, r.manufacturer, r.product_group,
+                      r.retailer, r.price, r.in_stock
+               FROM retailer_prices r
+               WHERE r.date = ?
+               ORDER BY r.model_no, r.retailer""",
+            (latest,)
+        )
+        # Keep only products that have at least one OOS entry
+        oos_ids = {r["product_id"] for r in rows if r["in_stock"] == 0}
+        rows = [r for r in rows if r["product_id"] in oos_ids]
+
+    elif name == "back_in_stock":
+        if not prev:
+            return jsonify([])
+        rows = qry(
+            """SELECT t.product_id, t.model_no, t.manufacturer, t.product_group,
+                      t.retailer, t.price
+               FROM retailer_prices t
+               JOIN retailer_prices y
+                 ON y.product_id = t.product_id AND y.retailer = t.retailer AND y.date = ?
+               WHERE t.date = ? AND t.in_stock = 1 AND y.in_stock = 0
+               ORDER BY t.model_no, t.retailer LIMIT 300""",
+            (prev, latest)
+        )
+
+    elif name == "never_listed":
+        rows = qry(
+            """SELECT product_id, model_no, manufacturer, product_group
+               FROM retailer_prices
+               GROUP BY product_id, model_no, manufacturer, product_group
+               HAVING MAX(price) IS NULL
+               ORDER BY model_no LIMIT 300"""
+        )
+
+    elif name == "price_dropping":
+        if not prev:
+            return jsonify([])
+        rows = qry(
+            """SELECT t.product_id, t.model_no, t.manufacturer, t.product_group,
+                      t.retailer, y.price AS price_yesterday, t.price AS price_today
+               FROM retailer_prices t
+               JOIN retailer_prices y
+                 ON y.product_id = t.product_id AND y.retailer = t.retailer AND y.date = ?
+               WHERE t.date = ?
+                 AND t.price IS NOT NULL AND y.price IS NOT NULL AND t.price < y.price
+               ORDER BY (y.price - t.price) DESC LIMIT 300""",
+            (prev, latest)
+        )
+
+    elif name == "price_rising":
+        if not prev:
+            return jsonify([])
+        rows = qry(
+            """SELECT t.product_id, t.model_no, t.manufacturer, t.product_group,
+                      t.retailer, y.price AS price_yesterday, t.price AS price_today
+               FROM retailer_prices t
+               JOIN retailer_prices y
+                 ON y.product_id = t.product_id AND y.retailer = t.retailer AND y.date = ?
+               WHERE t.date = ?
+                 AND t.price IS NOT NULL AND y.price IS NOT NULL AND t.price > y.price
+               ORDER BY (t.price - y.price) DESC LIMIT 300""",
+            (prev, latest)
+        )
+
+    elif name == "price_trends":
+        # Compare oldest date in 14-day window against today
+        cutoff = qry_one(
+            "SELECT MIN(date) AS d FROM (SELECT DISTINCT date FROM retailer_prices ORDER BY date DESC LIMIT 14)"
+        )
+        cutoff = cutoff["d"] if cutoff else None
+        if not cutoff or cutoff == latest:
+            return jsonify([])
+        rows = qry(
+            """SELECT t.product_id, t.model_no, t.manufacturer, t.product_group,
+                      t.retailer, o.price AS price_14d, t.price AS price_today
+               FROM retailer_prices t
+               JOIN retailer_prices o
+                 ON o.product_id = t.product_id AND o.retailer = t.retailer AND o.date = ?
+               WHERE t.date = ?
+                 AND t.price IS NOT NULL AND o.price IS NOT NULL AND t.price != o.price
+               ORDER BY ABS(t.price - o.price) / o.price DESC LIMIT 300""",
+            (cutoff, latest)
+        )
+
+    elif name == "price_gaps":
+        # Pull all prices for today; compute min/max per product in Python for clean retailer names
+        # Floor at £50 to exclude obvious scraping artefacts (placeholder/accessory prices)
+        all_prices = qry(
+            """SELECT product_id, model_no, manufacturer, product_group, msrp, retailer, price
+               FROM retailer_prices
+               WHERE date = ? AND price >= 50
+               ORDER BY product_id, price""",
+            (latest,)
+        )
+        from collections import defaultdict
+        by_product = defaultdict(list)
+        for r in all_prices:
+            by_product[r["product_id"]].append(r)
+
+        rows = []
+        for pid, price_rows in by_product.items():
+            if len(price_rows) < 2:
+                continue
+            cheapest = price_rows[0]   # already sorted ASC by price
+            dearest  = price_rows[-1]
+            if dearest["price"] <= cheapest["price"]:
+                continue
+            rows.append({
+                "product_id":        pid,
+                "model_no":          cheapest["model_no"],
+                "manufacturer":      cheapest["manufacturer"],
+                "product_group":     cheapest["product_group"],
+                "msrp":              cheapest["msrp"],
+                "min_price":         cheapest["price"],
+                "max_price":         dearest["price"],
+                "cheapest_retailer": cheapest["retailer"],
+                "dearest_retailer":  dearest["retailer"],
+            })
+        rows.sort(
+            key=lambda r: (r["max_price"] - r["min_price"]) / r["min_price"] if r["min_price"] else 0,
+            reverse=True
+        )
+        rows = rows[:300]
+
+    elif name == "daily_changes":
+        if not prev:
+            return jsonify([])
+        rows = qry(
+            """SELECT t.product_id, t.model_no, t.manufacturer, t.product_group,
+                      t.retailer,
+                      y.price    AS price_yesterday, t.price    AS price_today,
+                      y.in_stock AS stock_yesterday, t.in_stock AS stock_today
+               FROM retailer_prices t
+               JOIN retailer_prices y
+                 ON y.product_id = t.product_id AND y.retailer = t.retailer AND y.date = ?
+               WHERE t.date = ?
+                 AND (
+                   COALESCE(t.price,    -999) != COALESCE(y.price,    -999)
+                   OR COALESCE(t.in_stock, -1) != COALESCE(y.in_stock, -1)
+                 )
+               ORDER BY t.model_no, t.retailer LIMIT 500""",
+            (prev, latest)
+        )
+
+    elif name == "below_msrp":
+        rows = qry(
+            """SELECT r.product_id, r.model_no, r.manufacturer, r.product_group, r.msrp,
+                      MIN(CASE WHEN r.price > 0 THEN r.price END) AS min_price,
+                      SUM(CASE WHEN r.below_msrp = 1 THEN 1 ELSE 0 END) AS below_count,
+                      GROUP_CONCAT(CASE WHEN r.below_msrp = 1 THEN r.retailer END) AS retailers_below
+               FROM retailer_prices r
+               WHERE r.date = ?
+               GROUP BY r.product_id, r.model_no, r.manufacturer, r.product_group, r.msrp
+               HAVING SUM(CASE WHEN r.below_msrp = 1 THEN 1 ELSE 0 END) > 0
+               ORDER BY below_count DESC, r.model_no LIMIT 300""",
+            (latest,)
+        )
+
+    elif name == "above_msrp":
+        rows = qry(
+            """SELECT r.product_id, r.model_no, r.manufacturer, r.product_group, r.msrp,
+                      MIN(CASE WHEN r.price > 0 THEN r.price END) AS min_price,
+                      COUNT(CASE WHEN r.price > 0 THEN 1 END) AS retailer_count
+               FROM retailer_prices r
+               WHERE r.date = ? AND r.msrp IS NOT NULL
+               GROUP BY r.product_id, r.model_no, r.manufacturer, r.product_group, r.msrp
+               HAVING COUNT(CASE WHEN r.price > 0 THEN 1 END) > 0
+                  AND SUM(CASE WHEN r.below_msrp = 1 THEN 1 ELSE 0 END) = 0
+               ORDER BY r.model_no LIMIT 300""",
+            (latest,)
+        )
+
+    elif name == "msrp_gap":
+        rows = qry(
+            """SELECT r.product_id, r.model_no, r.manufacturer, r.product_group,
+                      r.retailer, r.price, r.msrp
+               FROM retailer_prices r
+               WHERE r.date = ? AND r.price IS NOT NULL AND r.msrp IS NOT NULL AND r.msrp > 0
+               ORDER BY ABS(r.price - r.msrp) / r.msrp DESC LIMIT 300""",
+            (latest,)
+        )
+
+    else:
+        return jsonify([])
+
+    return jsonify(rows)
 
 
 # ── Main page ─────────────────────────────────────────────────────────────────
