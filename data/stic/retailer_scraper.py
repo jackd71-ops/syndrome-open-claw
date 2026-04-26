@@ -691,16 +691,24 @@ def _write_discovered_urls(col_name, id_to_url):
 
 
 # ── AWD-IT: token matching ────────────────────────────────────────────────────
-def _is_awdit_match(catalog_name, model_no, manufacturer):
+def _awdit_match_score(catalog_name, model_no, manufacturer):
+    """Return token match count if above threshold, else 0. Higher = better match."""
     name_l  = catalog_name.lower()
     model_l = model_no.lower()
     mfr_l   = manufacturer.lower().split()[0] if manufacturer else ""
     tokens  = [t for t in re.split(r'[\s\-/]+', model_l) if len(t) >= 2]
     if not tokens:
-        return False
+        return 0
     match_count = sum(1 for t in tokens if t in name_l)
     mfr_match   = (mfr_l in name_l) if mfr_l else True
-    return mfr_match and match_count >= max(2, len(tokens) * 0.7)
+    if not mfr_match or match_count < max(2, len(tokens) * 0.7):
+        return 0
+    return match_count
+
+
+def _is_awdit_match(catalog_name, model_no, manufacturer):
+    """Boolean wrapper kept for compatibility."""
+    return _awdit_match_score(catalog_name, model_no, manufacturer) > 0
 
 
 # ── AWD-IT: scrape one category page (all paginated pages) ───────────────────
@@ -778,14 +786,15 @@ def discover_awdit_urls(page):
     def try_match(products):
         matched, unmatched = {}, []
         for p in products:
-            hit = None
+            # Score every catalog entry — take the best match, not the first pass
+            best_score, best_url, best_name = 0, None, None
             for cat_name, cat_url in catalog.items():
-                if _is_awdit_match(cat_name, p["model_no"], p["manufacturer"]):
-                    hit = cat_url
-                    break
-            if hit:
-                matched[p["product_id"]] = hit
-                log(f"  [AWD-IT] ✅ {p['model_no'][:40]} (from cache)")
+                score = _awdit_match_score(cat_name, p["model_no"], p["manufacturer"])
+                if score > best_score:
+                    best_score, best_url, best_name = score, cat_url, cat_name
+            if best_url:
+                matched[p["product_id"]] = best_url
+                log(f"  [AWD-IT] ✅ {p['model_no'][:40]} → {best_name[:50]} (score {best_score})")
             else:
                 unmatched.append(p)
         return matched, unmatched
