@@ -50,6 +50,30 @@ def latest_date(table="stic_prices"):
         return today
     return yesterday if yest_c else (today if today_c else None)
 
+
+def latest_date_for_group(group_filter):
+    """Return the most recent date that has meaningful data for a product group.
+    Falls back up to 14 days to handle partial/missed scrape days."""
+    db = get_db()
+    rows = db.execute(
+        f"SELECT sp.date, COUNT(DISTINCT sp.product_id) AS c "
+        f"FROM stic_prices sp "
+        f"JOIN products p ON p.product_id = sp.product_id "
+        f"WHERE {group_filter} "
+        f"GROUP BY sp.date ORDER BY sp.date DESC LIMIT 14"
+    ).fetchall()
+    db.close()
+    if not rows:
+        return None
+    counts = [(r["date"], r["c"]) for r in rows]
+    # Use the most recent date that has at least 50% of the max seen
+    max_c = max(c for _, c in counts)
+    threshold = max(1, max_c * 0.5)
+    for date, c in counts:
+        if c >= threshold:
+            return date
+    return counts[0][0]  # fallback: most recent regardless
+
 def prev_date(table, current):
     r = qry_one(
         f"SELECT MAX(date) AS d FROM {table} WHERE date < ?", (current,)
@@ -318,6 +342,17 @@ HTML = r"""<!DOCTYPE html>
   .modal-body p { margin-bottom: 10px; }
   .modal-body p:last-child { margin-bottom: 0; }
   .modal-body strong { color: #0078D4; }
+  /* Product edit modal */
+  .edit-modal { width: 560px; }
+  .edit-field { margin-bottom: 14px; }
+  .edit-field label { display: block; font-size: 12px; font-weight: 600; color: #605E5C; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .edit-field input, .edit-field select { width: 100%; padding: 6px 10px; border: 1px solid #C8C6C4; border-radius: 2px; font-size: 13px; box-sizing: border-box; }
+  .edit-field input:focus, .edit-field select:focus { outline: none; border-color: #0078D4; box-shadow: 0 0 0 1px #0078D4; }
+  .edit-field input.highlight { border-color: #0078D4; background: #EFF6FC; }
+  .edit-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px; border-top: 1px solid #EDEBE9; flex-shrink: 0; }
+  .edit-msg { font-size: 12px; padding: 4px 0; }
+  .clickable-row { cursor: pointer; }
+  .clickable-row:hover td { background: #F3F2F1; }
 
   /* Info button */
   .cg-btn { background:#fff; border:1px solid #C8C6C4; border-radius:2px; padding:4px 12px;
@@ -524,6 +559,8 @@ HTML = r"""<!DOCTYPE html>
         <button class="sidebar-btn" onclick="loadCatImportExport(this,'msrp-by-vip')">💷 Import by VIP Code</button>
         <button class="sidebar-btn" onclick="loadCatImportExport(this,'msrp-by-ean')">💷 Import by EAN</button>
         <button class="sidebar-btn" onclick="loadCatImportExport(this,'msrp-by-model')">💷 Import by Model</button>
+        <button class="sidebar-btn" onclick="loadMissingMsrp(this)">⚠️ Missing MSRP Report</button>
+        <button class="sidebar-btn" onclick="loadMissingEan(this)">⚠️ Missing EAN Report</button>
       </div>
     </div>
   </div>
@@ -544,6 +581,14 @@ HTML = r"""<!DOCTYPE html>
     <div class="content-section" id="cat-retailer-ids">
       <div id="cat-retailer-ids-content"><div class="spinner">Loading…</div></div>
     </div>
+    <!-- Missing MSRP report -->
+    <div class="content-section" id="cat-missing-msrp">
+      <div id="cat-missing-msrp-content"><div class="spinner">Loading…</div></div>
+    </div>
+    <!-- Missing EAN report -->
+    <div class="content-section" id="cat-missing-ean">
+      <div id="cat-missing-ean-content"><div class="spinner">Loading…</div></div>
+    </div>
   </div>
 </div>
 
@@ -555,6 +600,58 @@ HTML = r"""<!DOCTYPE html>
       <button class="modal-close" onclick="closeHelp()">✕</button>
     </div>
     <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<!-- Product edit modal -->
+<div class="modal-backdrop" id="edit-modal" onclick="if(event.target===this)_closeEditModal()">
+  <div class="modal edit-modal">
+    <div class="modal-header">
+      <h3 id="edit-modal-title">Edit Product</h3>
+      <button class="modal-close" onclick="_closeEditModal()">✕</button>
+    </div>
+    <div class="modal-body" style="padding:16px 20px">
+      <input type="hidden" id="ep-product-id">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
+        <div class="edit-field" style="grid-column:1/-1">
+          <label>Model</label>
+          <input type="text" id="ep-model-no">
+        </div>
+        <div class="edit-field">
+          <label>Manufacturer</label>
+          <input type="text" id="ep-manufacturer">
+        </div>
+        <div class="edit-field">
+          <label>Product Group</label>
+          <select id="ep-product-group">
+            <option value="PROD_VIDEO">GPU (PROD_VIDEO)</option>
+            <option value="PROD_MBRD">Motherboard (PROD_MBRD)</option>
+            <option value="PROD_MBRDS">Server/Pro (PROD_MBRDS)</option>
+          </select>
+        </div>
+        <div class="edit-field" style="grid-column:1/-1">
+          <label>Description</label>
+          <input type="text" id="ep-description">
+        </div>
+        <div class="edit-field">
+          <label>Chipset</label>
+          <input type="text" id="ep-chipset">
+        </div>
+        <div class="edit-field">
+          <label>EAN</label>
+          <input type="text" id="ep-ean" placeholder="13-digit EAN">
+        </div>
+        <div class="edit-field">
+          <label>MSRP (£)</label>
+          <input type="number" id="ep-msrp" step="0.01" min="0" placeholder="0.00">
+        </div>
+      </div>
+      <div id="ep-msg" class="edit-msg"></div>
+    </div>
+    <div class="edit-footer">
+      <button onclick="_closeEditModal()" style="padding:6px 16px;border:1px solid #C8C6C4;background:#fff;border-radius:2px;font-size:13px;cursor:pointer">Cancel</button>
+      <button onclick="_saveProduct()" style="padding:6px 16px;background:#0078D4;color:#fff;border:none;border-radius:2px;font-size:13px;cursor:pointer;font-weight:600">Save</button>
+    </div>
   </div>
 </div>
 
@@ -1120,6 +1217,75 @@ function closeHelp() {
   document.getElementById('info-modal').classList.remove('open');
 }
 
+// ── Product edit modal ─────────────────────────────────────────────────────────
+let _editCallback = null;   // called after a successful save to refresh the parent view
+
+function _openProductEditFocus(productId, focusFieldId) {
+  _openProductEdit(productId, false, focusFieldId);
+}
+
+function _openProductEdit(productId, focusMsrp, focusFieldId) {
+  fetch(`/api/catalogue/product/${productId}`)
+    .then(r => r.json()).then(p => {
+      document.getElementById('ep-product-id').value   = p.product_id;
+      document.getElementById('ep-model-no').value     = p.model_no        || '';
+      document.getElementById('ep-manufacturer').value = p.manufacturer     || '';
+      document.getElementById('ep-product-group').value = p.product_group  || 'PROD_VIDEO';
+      document.getElementById('ep-description').value  = p.description     || '';
+      document.getElementById('ep-chipset').value      = p.chipset         || '';
+      document.getElementById('ep-ean').value          = p.ean             || '';
+      document.getElementById('ep-msrp').value         = p.msrp != null ? p.msrp : '';
+      document.getElementById('ep-msg').textContent    = '';
+      document.getElementById('edit-modal-title').textContent = `Edit Product — ${p.product_id}`;
+
+      // Highlight the appropriate field
+      const targetId = focusFieldId || (focusMsrp ? 'ep-msrp' : 'ep-model-no');
+      ['ep-msrp','ep-ean','ep-chipset'].forEach(id =>
+        document.getElementById(id).classList.remove('highlight'));
+      if (targetId !== 'ep-model-no') document.getElementById(targetId).classList.add('highlight');
+      document.getElementById('edit-modal').classList.add('open');
+      setTimeout(() => {
+        const f = document.getElementById(targetId) || document.getElementById('ep-model-no');
+        f.focus(); if (f.select) f.select();
+      }, 80);
+    });
+}
+
+function _closeEditModal() {
+  document.getElementById('edit-modal').classList.remove('open');
+  _editCallback = null;
+}
+
+function _saveProduct() {
+  const pid  = document.getElementById('ep-product-id').value;
+  const msrpRaw = document.getElementById('ep-msrp').value.trim();
+  const payload = {
+    model_no:      document.getElementById('ep-model-no').value.trim(),
+    manufacturer:  document.getElementById('ep-manufacturer').value.trim(),
+    product_group: document.getElementById('ep-product-group').value,
+    description:   document.getElementById('ep-description').value.trim(),
+    chipset:       document.getElementById('ep-chipset').value.trim(),
+    ean:           document.getElementById('ep-ean').value.trim(),
+    msrp:          msrpRaw === '' ? null : parseFloat(msrpRaw),
+  };
+  const msg = document.getElementById('ep-msg');
+  msg.style.color = '#605E5C';
+  msg.textContent = 'Saving…';
+  fetch(`/api/catalogue/product/${pid}`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload)
+  }).then(r => r.json()).then(d => {
+    if (d.error) {
+      msg.style.color = '#A4262C'; msg.textContent = d.error;
+    } else {
+      msg.style.color = '#107C10'; msg.textContent = '✓ Saved';
+      if (_editCallback) _editCallback(pid, payload);
+      setTimeout(_closeEditModal, 700);
+    }
+  }).catch(() => { msg.style.color='#A4262C'; msg.textContent='Save failed — check connection.'; });
+}
+
 let _reportCache = { name: null, rows: [] };
 
 function buildReportFilterBar(rows) {
@@ -1396,20 +1562,39 @@ function loadCatProducts(btn) {
         style="flex:1;padding:6px 10px;border:1px solid #EDEBE9;border-radius:2px;font-size:13px"
         oninput="_catProdFilter()">
     </div>`;
+    html += '<p style="color:#605E5C;font-size:12px;margin:-8px 0 10px">Click any row to edit.</p>';
     html += '<div class="tbl-wrap"><table id="cat-prod-tbl"><thead><tr><th>Product</th><th>Model</th><th>Manufacturer</th><th>Group</th><th>Chipset</th><th>EAN</th><th>MSRP</th></tr></thead><tbody>';
     data.products.forEach(r => {
-      html += `<tr>
+      const eanFlag = !r.ean ? ' style="color:#A4262C"' : '';
+      html += `<tr class="clickable-row" onclick="_openProductEdit(${r.product_id}, false)">
         <td>${r.product_id}</td>
         <td>${r.model_no||'—'}</td>
         <td>${r.manufacturer||'—'}</td>
         <td>${r.product_group||'—'}</td>
         <td>${r.chipset||'—'}</td>
-        <td>${r.ean||'—'}</td>
-        <td>${r.msrp ? '£'+r.msrp.toFixed(2) : '—'}</td>
+        <td${eanFlag}>${r.ean||'missing'}</td>
+        <td>${r.msrp ? '£'+r.msrp.toFixed(2) : '<span style="color:#A4262C">—</span>'}</td>
       </tr>`;
     });
     html += '</tbody></table></div>';
     el.innerHTML = html;
+    // Set callback: update the row in-place after save
+    _editCallback = (pid, p) => {
+      const rows = document.querySelectorAll('#cat-prod-tbl tbody tr');
+      rows.forEach(row => {
+        if (row.cells[0].textContent == pid) {
+          row.cells[1].textContent = p.model_no      || '—';
+          row.cells[2].textContent = p.manufacturer  || '—';
+          row.cells[3].textContent = p.product_group || '—';
+          row.cells[4].textContent = p.chipset       || '—';
+          row.cells[5].textContent = p.ean           || 'missing';
+          row.cells[5].style.color = p.ean ? '' : '#A4262C';
+          row.cells[6].innerHTML   = p.msrp != null ? `£${parseFloat(p.msrp).toFixed(2)}` : '<span style="color:#A4262C">—</span>';
+        }
+      });
+      // Re-run the filter so rows that no longer match the search term disappear
+      _catProdFilter();
+    };
   });
 }
 
@@ -1532,6 +1717,184 @@ const IE_TOOLS = [
     headers:     'Model,MSRP',
   },
 ];
+
+// ── Catalogue: Missing MSRP report ───────────────────────────────────────────
+function loadMissingMsrp(btn) {
+  showCatSection('missing-msrp', btn);
+  _missingMsrpRender();
+}
+
+function _missingMsrpRender() {
+  const el = document.getElementById('cat-missing-msrp-content');
+  const mfr   = document.getElementById('mm-mfr')   ? document.getElementById('mm-mfr').value   : '';
+  const grp   = document.getElementById('mm-grp')   ? document.getElementById('mm-grp').value   : '';
+  el.innerHTML = '<div class="spinner">Loading…</div>';
+  fetch(`/api/catalogue/missing-msrp?mfr=${encodeURIComponent(mfr)}&grp=${encodeURIComponent(grp)}`)
+    .then(r => r.json()).then(data => {
+      const grpLabel = { PROD_VIDEO: 'GPU', PROD_MBRD: 'Motherboard', PROD_MBRDS: 'Server/Pro' };
+      let html = '<h2 style="margin:0 0 4px">Missing MSRP Report</h2>';
+
+      // Summary table
+      html += '<div style="margin-bottom:16px">';
+      html += '<table style="border-collapse:collapse;font-size:13px"><thead><tr>'
+        + '<th style="text-align:left;padding:4px 12px 4px 0;border-bottom:1px solid #EDEBE9">Manufacturer</th>'
+        + '<th style="text-align:left;padding:4px 12px 4px 0;border-bottom:1px solid #EDEBE9">Group</th>'
+        + '<th style="text-align:right;padding:4px 8px;border-bottom:1px solid #EDEBE9">Total</th>'
+        + '<th style="text-align:right;padding:4px 8px;border-bottom:1px solid #EDEBE9">Has MSRP</th>'
+        + '<th style="text-align:right;padding:4px 8px;border-bottom:1px solid #EDEBE9;color:#A4262C">Missing</th>'
+        + '</tr></thead><tbody>';
+      data.summary.forEach(s => {
+        const pct = s.total ? Math.round(100 * s.has_msrp / s.total) : 0;
+        const bar = `<span style="display:inline-block;width:${pct}px;max-width:80px;height:6px;background:#107C10;border-radius:2px;vertical-align:middle"></span>`;
+        html += `<tr>
+          <td style="padding:4px 12px 4px 0">${s.manufacturer}</td>
+          <td style="padding:4px 12px 4px 0">${grpLabel[s.product_group]||s.product_group}</td>
+          <td style="text-align:right;padding:4px 8px">${s.total}</td>
+          <td style="text-align:right;padding:4px 8px">${bar} ${s.has_msrp}</td>
+          <td style="text-align:right;padding:4px 8px;color:${s.missing>0?'#A4262C':'#107C10'};font-weight:${s.missing>0?'600':'400'}">${s.missing||'✓'}</td>
+        </tr>`;
+      });
+      html += '</tbody></table></div>';
+
+      // Filters
+      const mfrs = [...new Set(data.summary.map(s => s.manufacturer))].sort();
+      const grps = [...new Set(data.summary.map(s => s.product_group))].sort();
+      html += `<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+        <select id="mm-mfr" onchange="_missingMsrpRender()" style="padding:5px 8px;border:1px solid #EDEBE9;border-radius:2px;font-size:13px">
+          <option value="">All Manufacturers</option>
+          ${mfrs.map(m => `<option value="${m}"${m===mfr?' selected':''}>${m}</option>`).join('')}
+        </select>
+        <select id="mm-grp" onchange="_missingMsrpRender()" style="padding:5px 8px;border:1px solid #EDEBE9;border-radius:2px;font-size:13px">
+          <option value="">All Groups</option>
+          ${grps.map(g => `<option value="${g}"${g===grp?' selected':''}>${grpLabel[g]||g}</option>`).join('')}
+        </select>
+        <span style="font-size:12px;color:#605E5C">${data.products.length} product${data.products.length!==1?'s':''} missing MSRP</span>
+      </div>`;
+
+      // Product rows
+      if (data.products.length === 0) {
+        html += '<p style="color:#107C10;font-weight:600">✓ All products have an MSRP for the selected filter.</p>';
+      } else {
+        html += '<p style="color:#605E5C;font-size:12px;margin:-4px 0 10px">Click any row to add MSRP or edit fields.</p>';
+        html += '<div class="tbl-wrap"><table id="mm-tbl"><thead><tr>'
+          + '<th>Product</th><th>Model</th><th>Manufacturer</th><th>Group</th><th>Chipset</th><th>EAN</th>'
+          + '</tr></thead><tbody>';
+        data.products.forEach(r => {
+          const eanStyle = !r.ean ? 'color:#A4262C' : '';
+          html += `<tr class="clickable-row" onclick="_openProductEdit(${r.product_id}, true)">
+            <td>${r.product_id}</td>
+            <td>${r.model_no||'—'}</td>
+            <td>${r.manufacturer||'—'}</td>
+            <td>${grpLabel[r.product_group]||r.product_group||'—'}</td>
+            <td>${r.chipset||'—'}</td>
+            <td style="${eanStyle}">${r.ean||'missing'}</td>
+          </tr>`;
+        });
+        html += '</tbody></table></div>';
+      }
+      el.innerHTML = html;
+      // After save: remove the row from the missing list and refresh summary
+      _editCallback = (pid, p) => {
+        if (p.msrp != null && p.msrp > 0) {
+          const rows = document.querySelectorAll('#mm-tbl tbody tr');
+          rows.forEach(row => { if (row.cells[0].textContent == pid) row.remove(); });
+          // Update count text
+          const remaining = document.querySelectorAll('#mm-tbl tbody tr').length;
+          const countEl = document.querySelector('#cat-missing-msrp-content span[data-mm-count]');
+          if (countEl) countEl.textContent = `${remaining} product${remaining!==1?'s':''} missing MSRP`;
+          // Refresh summary
+          _missingMsrpRender();
+        }
+      };
+    });
+}
+
+// ── Catalogue: Missing EAN report ────────────────────────────────────────────
+function loadMissingEan(btn) {
+  showCatSection('missing-ean', btn);
+  _missingEanRender();
+}
+
+function _missingEanRender() {
+  const el  = document.getElementById('cat-missing-ean-content');
+  const mfr = document.getElementById('me-mfr') ? document.getElementById('me-mfr').value : '';
+  const grp = document.getElementById('me-grp') ? document.getElementById('me-grp').value : '';
+  el.innerHTML = '<div class="spinner">Loading…</div>';
+  fetch(`/api/catalogue/missing-ean?mfr=${encodeURIComponent(mfr)}&grp=${encodeURIComponent(grp)}`)
+    .then(r => r.json()).then(data => {
+      const grpLabel = { PROD_VIDEO: 'GPU', PROD_MBRD: 'Motherboard', PROD_MBRDS: 'Server/Pro' };
+      let html = '<h2 style="margin:0 0 4px">Missing EAN Report</h2>';
+
+      // Summary table
+      html += '<div style="margin-bottom:16px">';
+      html += '<table style="border-collapse:collapse;font-size:13px"><thead><tr>'
+        + '<th style="text-align:left;padding:4px 12px 4px 0;border-bottom:1px solid #EDEBE9">Manufacturer</th>'
+        + '<th style="text-align:left;padding:4px 12px 4px 0;border-bottom:1px solid #EDEBE9">Group</th>'
+        + '<th style="text-align:right;padding:4px 8px;border-bottom:1px solid #EDEBE9">Total</th>'
+        + '<th style="text-align:right;padding:4px 8px;border-bottom:1px solid #EDEBE9">Has EAN</th>'
+        + '<th style="text-align:right;padding:4px 8px;border-bottom:1px solid #EDEBE9;color:#A4262C">Missing</th>'
+        + '</tr></thead><tbody>';
+      data.summary.forEach(s => {
+        const pct = s.total ? Math.round(80 * s.has_ean / s.total) : 0;
+        const bar = `<span style="display:inline-block;width:${pct}px;max-width:80px;height:6px;background:#107C10;border-radius:2px;vertical-align:middle"></span>`;
+        html += `<tr>
+          <td style="padding:4px 12px 4px 0">${s.manufacturer}</td>
+          <td style="padding:4px 12px 4px 0">${grpLabel[s.product_group]||s.product_group}</td>
+          <td style="text-align:right;padding:4px 8px">${s.total}</td>
+          <td style="text-align:right;padding:4px 8px">${bar} ${s.has_ean}</td>
+          <td style="text-align:right;padding:4px 8px;color:${s.missing>0?'#A4262C':'#107C10'};font-weight:${s.missing>0?'600':'400'}">${s.missing||'✓'}</td>
+        </tr>`;
+      });
+      html += '</tbody></table></div>';
+
+      // Filters
+      const mfrs = [...new Set(data.summary.map(s => s.manufacturer))].sort();
+      const grps = [...new Set(data.summary.map(s => s.product_group))].sort();
+      html += `<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+        <select id="me-mfr" onchange="_missingEanRender()" style="padding:5px 8px;border:1px solid #EDEBE9;border-radius:2px;font-size:13px">
+          <option value="">All Manufacturers</option>
+          ${mfrs.map(m => `<option value="${m}"${m===mfr?' selected':''}>${m}</option>`).join('')}
+        </select>
+        <select id="me-grp" onchange="_missingEanRender()" style="padding:5px 8px;border:1px solid #EDEBE9;border-radius:2px;font-size:13px">
+          <option value="">All Groups</option>
+          ${grps.map(g => `<option value="${g}"${g===grp?' selected':''}>${grpLabel[g]||g}</option>`).join('')}
+        </select>
+        <span style="font-size:12px;color:#605E5C">${data.products.length} product${data.products.length!==1?'s':''} missing EAN</span>
+      </div>`;
+
+      // Product rows
+      if (data.products.length === 0) {
+        html += '<p style="color:#107C10;font-weight:600">✓ All products have an EAN for the selected filter.</p>';
+      } else {
+        html += '<p style="color:#605E5C;font-size:12px;margin:-4px 0 10px">Click any row to add EAN or edit fields.</p>';
+        html += '<div class="tbl-wrap"><table id="me-tbl"><thead><tr>'
+          + '<th>Product</th><th>Model</th><th>Manufacturer</th><th>Group</th><th>Chipset</th><th>MSRP</th>'
+          + '</tr></thead><tbody>';
+        data.products.forEach(r => {
+          html += `<tr class="clickable-row" onclick="_openProductEditFocus(${r.product_id}, 'ep-ean')">
+            <td>${r.product_id}</td>
+            <td>${r.model_no||'—'}</td>
+            <td>${r.manufacturer||'—'}</td>
+            <td>${grpLabel[r.product_group]||r.product_group||'—'}</td>
+            <td>${r.chipset||'—'}</td>
+            <td>${r.msrp != null ? '£'+parseFloat(r.msrp).toFixed(2) : '<span style="color:#A19F9D">—</span>'}</td>
+          </tr>`;
+        });
+        html += '</tbody></table></div>';
+      }
+      el.innerHTML = html;
+
+      // After save: remove the row if EAN now set
+      _editCallback = (pid, p) => {
+        if (p.ean) {
+          document.querySelectorAll('#me-tbl tbody tr').forEach(row => {
+            if (row.cells[0].textContent == pid) row.remove();
+          });
+          _missingEanRender();
+        }
+      };
+    });
+}
 
 let _ieCurrentTool = null;    // tool id currently open
 let _iePreviewRows  = [];     // validated rows from last preview, ready to confirm
@@ -2098,20 +2461,24 @@ def stic_kpi():
 
 @app.route("/api/stic/chipset-overview")
 def stic_chipset_overview():
-    latest = latest_date("stic_prices")
+    group = request.args.get("group", "mbrd")
+    group_filter = {
+        "mbrd":   "p.product_group = 'PROD_MBRD'",
+        "server": "p.product_group = 'PROD_MBRDS'",
+        "gpu":    "p.product_group = 'PROD_VIDEO'",
+    }.get(group, "p.product_group = 'PROD_MBRD'")
+
+    latest = latest_date_for_group(group_filter)
     if not latest:
         return jsonify([])
 
-    group = request.args.get("group", "mbrd")
-    group_filter = {
-        "mbrd":   "product_group = 'PROD_MBRD'",
-        "server": "product_group = 'PROD_MBRDS'",
-        "gpu":    "product_group = 'PROD_VIDEO'",
-    }.get(group, "product_group = 'PROD_MBRD'")
-
     rows = qry(
-        f"""SELECT product_id, model_no, chipset, distributor, price, qty
-           FROM stic_prices WHERE date=? AND {group_filter}""", (latest,)
+        f"""SELECT sp.product_id, sp.model_no,
+               COALESCE(p.chipset, sp.chipset) AS chipset,
+               sp.distributor, sp.price, sp.qty
+           FROM stic_prices sp
+           JOIN products p ON p.product_id = sp.product_id
+           WHERE sp.date=? AND {group_filter}""", (latest,)
     )
 
     chipset_fn = extract_gpu_chipset if group == "gpu" else extract_chipset
@@ -2144,24 +2511,28 @@ def stic_chipset_overview():
 
 @app.route("/api/stic/chipset-skus")
 def stic_chipset_skus():
-    latest = latest_date("stic_prices")
-    if not latest:
-        return jsonify([])
-
     group   = request.args.get("group", "mbrd")
     chipset = request.args.get("chipset", "").strip()
     if not chipset:
         return jsonify([])
 
     group_filter = {
-        "mbrd":   "product_group = 'PROD_MBRD'",
-        "server": "product_group = 'PROD_MBRDS'",
-        "gpu":    "product_group = 'PROD_VIDEO'",
-    }.get(group, "product_group = 'PROD_MBRD'")
+        "mbrd":   "p.product_group = 'PROD_MBRD'",
+        "server": "p.product_group = 'PROD_MBRDS'",
+        "gpu":    "p.product_group = 'PROD_VIDEO'",
+    }.get(group, "p.product_group = 'PROD_MBRD'")
+
+    latest = latest_date_for_group(group_filter)
+    if not latest:
+        return jsonify([])
 
     rows = qry(
-        f"""SELECT product_id, model_no, manufacturer, chipset, distributor, price, qty
-           FROM stic_prices WHERE date=? AND {group_filter}""", (latest,)
+        f"""SELECT sp.product_id, sp.model_no, sp.manufacturer,
+               COALESCE(p.chipset, sp.chipset) AS chipset,
+               sp.distributor, sp.price, sp.qty
+           FROM stic_prices sp
+           JOIN products p ON p.product_id = sp.product_id
+           WHERE sp.date=? AND {group_filter}""", (latest,)
     )
 
     chipset_fn = extract_gpu_chipset if group == "gpu" else extract_chipset
@@ -3267,6 +3638,137 @@ def catalogue_retailer_ids():
     return jsonify({"rows": [dict(r) for r in rows]})
 
 
+@app.route("/api/catalogue/missing-msrp")
+def catalogue_missing_msrp():
+    """Return products missing MSRP with optional manufacturer/group filters."""
+    mfr = request.args.get("mfr", "").strip()
+    grp = request.args.get("grp", "").strip()
+    db = get_db()
+
+    # Summary — always unfiltered so the summary table shows everything
+    summary_rows = db.execute(
+        "SELECT manufacturer, product_group, "
+        "COUNT(*) as total, "
+        "SUM(CASE WHEN msrp IS NOT NULL AND msrp > 0 THEN 1 ELSE 0 END) as has_msrp, "
+        "SUM(CASE WHEN msrp IS NULL OR msrp = 0 THEN 1 ELSE 0 END) as missing "
+        "FROM products WHERE eol = 0 "
+        "GROUP BY manufacturer, product_group "
+        "ORDER BY manufacturer, product_group"
+    ).fetchall()
+
+    # Product list — filtered, only missing MSRP
+    where = ["eol = 0", "(msrp IS NULL OR msrp = 0)"]
+    params = []
+    if mfr:
+        where.append("manufacturer = ?")
+        params.append(mfr)
+    if grp:
+        where.append("product_group = ?")
+        params.append(grp)
+    products = db.execute(
+        f"SELECT product_id, model_no, manufacturer, product_group, chipset, ean "
+        f"FROM products WHERE {' AND '.join(where)} "
+        f"ORDER BY manufacturer, product_group, model_no",
+        params
+    ).fetchall()
+    db.close()
+
+    return jsonify({
+        "summary":  [dict(r) for r in summary_rows],
+        "products": [dict(r) for r in products],
+    })
+
+
+@app.route("/api/catalogue/missing-ean")
+def catalogue_missing_ean():
+    """Return products missing EAN with optional manufacturer/group filters."""
+    mfr = request.args.get("mfr", "").strip()
+    grp = request.args.get("grp", "").strip()
+    db = get_db()
+
+    summary_rows = db.execute(
+        "SELECT manufacturer, product_group, "
+        "COUNT(*) as total, "
+        "SUM(CASE WHEN ean IS NOT NULL AND ean != '' THEN 1 ELSE 0 END) as has_ean, "
+        "SUM(CASE WHEN ean IS NULL OR ean = '' THEN 1 ELSE 0 END) as missing "
+        "FROM products WHERE eol = 0 "
+        "GROUP BY manufacturer, product_group "
+        "ORDER BY manufacturer, product_group"
+    ).fetchall()
+
+    where = ["eol = 0", "(ean IS NULL OR ean = '')"]
+    params = []
+    if mfr:
+        where.append("manufacturer = ?")
+        params.append(mfr)
+    if grp:
+        where.append("product_group = ?")
+        params.append(grp)
+    products = db.execute(
+        f"SELECT product_id, model_no, manufacturer, product_group, chipset, msrp "
+        f"FROM products WHERE {' AND '.join(where)} "
+        f"ORDER BY manufacturer, product_group, model_no",
+        params
+    ).fetchall()
+    db.close()
+
+    return jsonify({
+        "summary":  [dict(r) for r in summary_rows],
+        "products": [dict(r) for r in products],
+    })
+
+
+@app.route("/api/catalogue/product/<int:product_id>", methods=["GET", "POST"])
+def catalogue_product(product_id):
+    db = get_db()
+    if request.method == "GET":
+        row = db.execute(
+            "SELECT product_id, model_no, manufacturer, product_group, description, chipset, ean, msrp "
+            "FROM products WHERE product_id = ?", (product_id,)
+        ).fetchone()
+        db.close()
+        if not row:
+            return jsonify({"error": "Product not found"}), 404
+        return jsonify(dict(row))
+
+    # POST — update product
+    data = request.get_json(silent=True) or {}
+    allowed = ["model_no", "manufacturer", "product_group", "description", "chipset", "ean", "msrp"]
+    sets, params = [], []
+    for field in allowed:
+        if field in data:
+            val = data[field]
+            # Validate MSRP
+            if field == "msrp":
+                if val is None or val == "":
+                    val = None
+                else:
+                    try:
+                        val = round(float(val), 2)
+                        if val < 0:
+                            db.close()
+                            return jsonify({"error": "MSRP cannot be negative"})
+                    except (ValueError, TypeError):
+                        db.close()
+                        return jsonify({"error": f"Invalid MSRP value: {val}"})
+            # Validate product_group
+            if field == "product_group" and val not in ("PROD_VIDEO", "PROD_MBRD", "PROD_MBRDS", None, ""):
+                db.close()
+                return jsonify({"error": f"Invalid product_group: {val}"})
+            sets.append(f"{field} = ?")
+            params.append(val)
+
+    if not sets:
+        db.close()
+        return jsonify({"error": "No fields to update"})
+
+    params.append(product_id)
+    db.execute(f"UPDATE products SET {', '.join(sets)} WHERE product_id = ?", params)
+    db.commit()
+    db.close()
+    return jsonify({"ok": True})
+
+
 @app.route("/api/import/template/retailer-ids-import")
 def import_template_retailer_ids():
     headers = "Product,amazon_asin,currys_sku,very_sku,argos_sku,ccl_url,awdit_url,scan_ln,scan_url,ocuk_code,box_url"
@@ -3464,6 +3966,10 @@ def _msrp_preview(tool_id, csv_text):
     for row in raw_rows[:5000]:
         total += 1
         key_raw      = str(row.get(key_col,  "") or "").strip()
+        # Strip Excel float artifact: "4711387932445.00" → "4711387932445"
+        if key_raw.endswith('.0') or '.00' in key_raw:
+            import re as _re2
+            key_raw = _re2.sub(r'\.0+$', '', key_raw)
         msrp_raw_orig = str(row.get(msrp_col, "") or "").strip()
         # Robust price parsing: handles £1,234.56 / 1.234,56 (EU) / 299,99 (EU decimal) / "359.00 GBP"
         import re as _re
@@ -3534,6 +4040,31 @@ def _msrp_preview(tool_id, csv_text):
                 "new_msrp":   new_msrp,
                 "_action":    "update",
             })
+
+    # ── Write import debug log ───────────────────────────────────────────────
+    try:
+        import json as _json
+        _log_path = "/opt/openclaw/logs/import.log"
+        _ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        _bad_rows  = [r for r in error_rows if r["_action"] == "bad_value"]
+        _miss_rows = [r for r in error_rows if r["_action"] == "not_found"]
+        _log_entry = {
+            "ts": _ts, "tool": tool_id,
+            "columns_in_file": list(hmap.keys()),
+            "key_col_matched":  key_col,
+            "msrp_col_matched": msrp_col,
+            "summary": {
+                "total": total, "matched": matched,
+                "no_change": no_change, "not_found": not_found, "bad_value": bad_value,
+            },
+            "bad_value_rows":  [{"key": r["key_value"], "raw_msrp": r["new_msrp"]} for r in _bad_rows],
+            "not_found_rows":  [{"key": r["key_value"], "new_msrp": r["new_msrp"]}  for r in _miss_rows[:50]],
+        }
+        with open(_log_path, "a") as _f:
+            _f.write(_json.dumps(_log_entry) + "\n")
+    except Exception:
+        pass  # never break the import on logging failure
+    # ────────────────────────────────────────────────────────────────────────
 
     return {
         "summary": {

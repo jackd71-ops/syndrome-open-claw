@@ -61,6 +61,7 @@ AWDIT_CATALOG_PATH = "/opt/openclaw/data/stic/awdit_catalog.json"
 SCAN_SCRAPE_PATH   = "/opt/openclaw/data/stic/scan_scrape.py"
 VERY_SCRAPE_PATH   = "/opt/openclaw/data/stic/very_scrape.py"
 BOX_SCRAPE_PATH    = "/opt/openclaw/data/stic/box_scrape.py"
+ARGOS_SCRAPE_PATH  = "/opt/openclaw/data/stic/argos_scrape.py"
 LOCK_PATH          = "/opt/openclaw/data/stic/retailer_scraper.lock"
 
 # Populated by discover_* functions; consumed by run_discovery_sanity_report()
@@ -131,7 +132,7 @@ GOOGLE_DELAY_MAX = 12
 RETAILERS = [
     {"name": "Amazon UK",    "id_col": "amazon_asin", "blocked": False},
     {"name": "Currys",       "id_col": "currys_sku",  "blocked": False},
-    {"name": "Argos",        "id_col": "argos_sku",   "blocked": True, "reason": "403 Akamai"},
+    {"name": "Argos",        "id_col": "argos_sku",   "blocked": False},
     {"name": "Scan",         "id_col": "scan_url",    "blocked": False},
     {"name": "Overclockers", "id_col": None,          "blocked": False},
     {"name": "Box",          "id_col": "box_url",     "blocked": False},
@@ -372,14 +373,29 @@ def scrape_box(url):
     return None
 
 
-# ── Overclockers scraper (camoufox subprocess) ───────────────────────────────
+# ── Argos scraper (patchright + Xvfb subprocess) ─────────────────────────────
+def scrape_argos(sku):
+    try:
+        result = subprocess.run(
+            ["xvfb-run", "--auto-servernum", "/usr/bin/python3", ARGOS_SCRAPE_PATH, sku],
+            capture_output=True, text=True, timeout=90
+        )
+        out = result.stdout.strip()
+        if out and out != "NOT_FOUND":
+            return float(out)
+    except (subprocess.TimeoutExpired, ValueError, Exception):
+        pass
+    return None
+
+
+# ── Overclockers scraper (camoufox + Xvfb subprocess) ────────────────────────
 OCUK_SCRAPE_PATH = "/opt/openclaw/data/stic/ocuk_scrape.py"
 
 def scrape_overclockers(code):
     try:
         result = subprocess.run(
-            ["/usr/bin/python3", OCUK_SCRAPE_PATH, code],
-            capture_output=True, text=True, timeout=60
+            ["xvfb-run", "--auto-servernum", "/usr/bin/python3", OCUK_SCRAPE_PATH, code],
+            capture_output=True, text=True, timeout=90
         )
         out = result.stdout.strip()
         if out and out != "NOT_FOUND":
@@ -454,6 +470,8 @@ def scrape_product(page, product, retailer, id_codes):
             price = scrape_amazon(page, code)
         elif name == "Currys":
             price = scrape_currys(page, code)
+        elif name == "Argos":
+            price = scrape_argos(code)
         elif name == "CCL Online":
             price = scrape_ccl(page, code)
         elif name == "AWD-IT":
@@ -1047,68 +1065,104 @@ def discover_scan_urls_by_model(page):
 
 
 # ── Combined pre-flight orchestrator ─────────────────────────────────────────
-def _google_very_url(page, sku):
-    """Search Google UK for <sku> site:very.co.uk; return first .prd product URL or None."""
-    search_url = (
-        f"https://www.google.co.uk/search"
-        f"?q={sku}+site%3Avery.co.uk&hl=en-GB&gl=GB&num=5"
-    )
+def _very_search_url(page, sku):
+    """Search Very's own search box for <sku>; intercept the .prd redirect URL.
+    Works even when Akamai blocks the product page — the redirect URL fires in
+    network traffic before the block page renders."""
+    intercepted = []
+
+    def _on_response(resp):
+        u = resp.url
+        if ".prd" in u and "very.co.uk" in u:
+            intercepted.append(u)
+
+    page.on("response", _on_response)
     try:
-        page.goto(search_url, wait_until="domcontentloaded", timeout=20000)
-        time.sleep(random.uniform(3, 5))
+        page.fill("#header-searchInput", sku)
+        time.sleep(random.uniform(0.5, 1.0))
+        page.keyboard.press("Enter")
+        time.sleep(random.uniform(4, 6))
     except Exception as e:
-        log(f"  [Very] Navigation error for {sku}: {e}")
-        return None
+        log(f"  [Very] Search input error for {sku}: {e}")
+    finally:
+        try:
+            page.remove_listener("response", _on_response)
+        except Exception:
+            pass
 
-    body = page.inner_text("body")[:400].lower()
-    if "before you continue" in body or "i'm not a robot" in body:
-        log(f"  [Very] ⚠️  Google consent/CAPTCHA for {sku}")
-        return None
+    if intercepted:
+        return intercepted[0]
 
-    urls = page.evaluate(r"""() => {
-        const found = [];
-        for (const a of document.querySelectorAll('a[href]')) {
-            const h = a.href || '';
-            const m = h.match(/[?&]q=(https?:\/\/(?:www\.)?very\.co\.uk\/[^&]+\.prd[^&]*)/);
-            if (m) { found.push(decodeURIComponent(m[1])); continue; }
-            if (/very\.co\.uk\/.*\.prd/.test(h) && !h.includes('google.'))
-                found.push(h);
-        }
-        return [...new Set(found)];
-    }""")
+    # Fallback: scrape .prd links from page if somehow we landed on a results page
+    try:
+        links = page.evaluate("""() => {
+            return [...document.querySelectorAll('a[href*=".prd"]')]
+                .map(a => a.href)
+                .filter(h => h.includes('very.co.uk'));
+        }""")
+        if links:
+            return links[0]
+    except Exception:
+        pass
 
-    if urls:
-        return urls[0]
-
-    raw = page.content()
-    matches = re.findall(r'https?://(?:www\.)?very\.co\.uk/[^\s"\'<>]+\.prd', raw)
-    if matches:
-        cleaned = [re.sub(r'["\'>]+$', '', m) for m in matches]
-        if cleaned:
-            return cleaned[0]
     return None
 
 
+def _very_ensure_homepage(page):
+    """Navigate back to Very homepage if we've drifted to a product/error page."""
+    try:
+        url = page.url
+        if url != "https://www.very.co.uk/" and ".prd" not in url:
+            return  # probably still on results page — fine
+        if ".prd" in url or "access" in page.title().lower():
+            page.goto("https://www.very.co.uk/", wait_until="domcontentloaded", timeout=20000)
+            time.sleep(random.uniform(2, 3))
+    except Exception:
+        pass
+
+
 def discover_very_urls(page):
-    """Discover Very product URLs for products that have a Very SKU but no Very URL."""
+    """Discover Very product URLs for products that have a Very SKU but no Very URL.
+    Uses Very's own search box + network response interception — works even when
+    Akamai blocks the product page, because the redirect URL fires before the block."""
     needs = load_products_needing_very_url()
     if not needs:
         log("[Discovery] Very: all SKUs already have URLs — skipping.")
         return 0
-    log(f"[Discovery] Very: {len(needs)} products need URLs.")
+    log(f"[Discovery] Very: {len(needs)} products need URLs (searching via Very search box).")
+
+    # Ensure we're on the Very homepage with cookies accepted
+    try:
+        if "very.co.uk" not in page.url:
+            page.goto("https://www.very.co.uk/", wait_until="domcontentloaded", timeout=25000)
+            time.sleep(4)
+        page.evaluate("""() => {
+            const btn = [...document.querySelectorAll('button')]
+                .find(b => /accept all|allow all|accept cookies/i.test(b.textContent));
+            if (btn) btn.click();
+        }""")
+        time.sleep(2)
+    except Exception as e:
+        log(f"  [Very] Homepage warm-up error: {e}")
+
     found_urls, failed = {}, []
     for i, p in enumerate(needs, 1):
         sku   = p["sku"]
         model = p["model_no"]
         log(f"  [Very] [{i}/{len(needs)}] {sku}  ({model[:40]})")
         time.sleep(random.uniform(GOOGLE_DELAY_MIN, GOOGLE_DELAY_MAX))
-        url = _google_very_url(page, sku)
+
+        url = _very_search_url(page, sku)
         if url:
             found_urls[p["product_id"]] = url
             log(f"  [Very] ✅ {url}")
         else:
             failed.append(sku)
             log(f"  [Very] ❌ not found")
+
+        # Return to homepage between searches so search box is available
+        _very_ensure_homepage(page)
+
     log(f"[Discovery] Very: found {len(found_urls)}/{len(needs)} URLs.")
     if failed:
         log(f"[Discovery] Very: unresolved SKUs: {', '.join(failed[:20])}")
@@ -1683,14 +1737,14 @@ def run(offset, limit, date_str, notify=False):
     since_pause   = 0
     long_pause_every = random.randint(20, 35)
 
-    with sync_playwright() as p:
+    with virtual_display():
+      with patchright_playwright() as p:
         browser = p.chromium.launch(
-            headless=True,
-            args=["--no-sandbox","--disable-blink-features=AutomationControlled","--disable-dev-shm-usage"]
+            headless=False,
+            args=["--no-sandbox","--disable-dev-shm-usage"]
         )
         context = browser.new_context(
             viewport={"width":1366,"height":768},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             locale="en-GB", timezone_id="Europe/London",
             extra_http_headers={
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
@@ -1698,12 +1752,6 @@ def run(offset, limit, date_str, notify=False):
                 "DNT": "1",
             }
         )
-        context.add_init_script("""
-            Object.defineProperty(navigator,'webdriver',{get:()=>undefined});
-            Object.defineProperty(navigator,'languages',{get:()=>['en-GB','en']});
-            Object.defineProperty(navigator,'plugins',{get:()=>[1,2,3]});
-            window.chrome={runtime:{}};
-        """)
         page = context.new_page()
 
         for product in products:

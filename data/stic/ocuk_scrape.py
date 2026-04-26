@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Standalone OCUK price scraper using camoufox.
+Standalone OCUK price scraper using camoufox (headed via Xvfb).
 Called as subprocess by retailer_scraper.py.
-Usage: python3 ocuk_scrape.py GRA-GIG-07639
+Usage: xvfb-run --auto-servernum python3 ocuk_scrape.py GRA-GIG-07639
 Prints: price as float, or NOT_FOUND
 """
 import sys
@@ -22,7 +22,7 @@ if len(sys.argv) < 2:
 code = sys.argv[1]
 
 try:
-    with Camoufox(headless=True, geoip=True, humanize=True) as browser:
+    with Camoufox(headless=False, geoip=True, humanize=True) as browser:
         page = browser.new_page()
         page.goto(f'https://www.overclockers.co.uk/?query={code}',
                   wait_until='domcontentloaded', timeout=25000)

@@ -306,7 +306,7 @@ All operational data lives in `prices.db`. Key tables:
 | currys_sku | TEXT | |
 | very_sku | TEXT | |
 | very_url | TEXT | Direct product URL (auto-discovered) |
-| argos_sku | TEXT | (blocked — Akamai 403) |
+| argos_sku | TEXT | Direct product ID (e.g. "WL 3063295"); scraped via patchright + Xvfb |
 | ccl_url | TEXT | Direct product URL (auto-discovered) |
 | awdit_url | TEXT | Direct product URL (auto-discovered) |
 | scan_ln | TEXT | LN code for Google discovery |
@@ -335,7 +335,7 @@ The Catalogue tab provides:
 **Products section:**
 | Action | Description |
 |---|---|
-| View / Search SKUs | Searchable table of all active products |
+| View / Search SKUs | Searchable table of all active products — click any row to edit inline |
 | Add / Update SKUs | CSV import to upsert products (EOL not touched) |
 | Update EOL Status | CSV import to bulk-set EOL flags |
 | View EOL SKUs | List of EOL products with restore button |
@@ -348,7 +348,24 @@ The Catalogue tab provides:
 | Import Retailer IDs | CSV import to add/update ASINs, SKUs, URLs |
 | Export Retailer IDs | CSV download of all retailer IDs |
 
+**MSRP section:**
+| Action | Description |
+|---|---|
+| Import by VIP Code | CSV: `Product,MSRP` — matches on VIP 6-digit code |
+| Import by EAN | CSV: `EAN,MSRP` — matches on EAN (strips Excel `.00` float suffix automatically) |
+| Import by Model | CSV: `Model,MSRP` — matches on model_no |
+| Missing MSRP Report | Summary by manufacturer/group + filterable product list; click row to add MSRP inline |
+| Missing EAN Report | Summary by manufacturer/group + filterable product list; click row to add EAN inline |
+
 CSV column named `Product` is the VIP product code (maps to `product_id` in DB).
+
+**Inline product editing:** Clicking any row in View/Search SKUs or either missing report opens an edit modal. All fields are editable: Model, Manufacturer, Product Group, Description, Chipset, EAN, MSRP. In missing reports the relevant field (MSRP or EAN) is highlighted and auto-focused. After saving, the search filter re-runs and the row disappears if it no longer matches.
+
+**MSRP import notes:**
+- Parser handles `£299.99`, `299.99 GBP`, European decimal `299,99`, European thousands `1.234,56`
+- EANs exported as floats from Excel (`4711387932445.00`) are stripped automatically
+- Broken Excel cells (`#REF!`, blank) are flagged as bad value — fix in the source spreadsheet
+- Every preview is logged to `/opt/openclaw/logs/import.log` (JSON lines) for diagnostics
 
 ---
 
@@ -392,3 +409,28 @@ python3 retailer_scraper.py --discover        # run URL discovery only (for new 
 ```
 
 Pre-flight discovery runs automatically before batch 1 — it finds product URLs for any new products added to `retailer_ids` without URLs yet (AWD-IT, Scan, Box, CCL, Very).
+
+**Bot detection bypass — headed mode:**
+All scrapers run patchright (patched Chromium) in **headed mode** (`headless=False`) via Xvfb virtual display. This bypasses Cloudflare and Akamai Bot Manager on a residential IP. Key requirements:
+- `xvfb` must be installed (`apt-get install xvfb`)
+- `patchright` installed and browser binary fetched (`python3 -m patchright install chromium`)
+
+**Standalone scrapers** (called as subprocesses via `xvfb-run --auto-servernum`):
+
+| File | Retailer | Notes |
+|---|---|---|
+| `argos_scrape.py` | Argos | Takes `"WL XXXXXXX"` SKU; navigates product page directly; JSON-LD price extraction |
+| `very_scrape.py` | Very | Takes full `.prd` URL; searches by numeric product ID; reads price from search results (avoids Akamai-blocked product page) |
+| `ocuk_scrape.py` | Overclockers | Takes OCUK product code |
+
+**Very URL discovery:**
+Very SKUs in `retailer_ids.very_sku` are WGDSH-style codes. Discovery uses Very's own search box + network response interception to capture the redirect URL (`.prd` format), stored in `retailer_ids.very_url`.
+
+**STIC daily overview — chipset source of truth:**
+The chipset overview reads `COALESCE(products.chipset, stic_prices.chipset)` — edits to chipset in the Catalogue tab are reflected immediately in the overview without waiting for a rescrape. If you bulk-rename chipsets in the `products` table, run:
+```sql
+UPDATE stic_prices SET chipset = (
+    SELECT p.chipset FROM products p WHERE p.product_id = stic_prices.product_id
+) WHERE product_id IN (SELECT product_id FROM products WHERE chipset IS NOT NULL AND chipset != '');
+```
+to backfill historic `stic_prices` rows.
