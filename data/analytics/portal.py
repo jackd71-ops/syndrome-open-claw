@@ -2417,7 +2417,9 @@ function doRetSearch() {
 // ── Retailer SKU drill-down ───────────────────────────────────────────────────
 function loadRetSku(productId, backSection) {
   showRetSection('sku');
-  document.getElementById('ret-sku-back').onclick = () => showRetSection(backSection || 'overview');
+  const backBtn = document.getElementById('ret-sku-back');
+  backBtn.dataset.back = backSection || 'overview';
+  backBtn.onclick = () => showRetSection(backSection || 'overview');
   document.getElementById('ret-sku-content').innerHTML = '<div class="spinner">Loading…</div>';
   fetch('/api/retailer/sku/' + productId).then(r=>r.json()).then(data => {
     renderRetSku(data);
@@ -2431,10 +2433,24 @@ function renderRetSku(data) {
   let html = `<h3 style="margin-bottom:8px">${info.manufacturer} ${info.model_no}</h3>
     <p style="color:#605E5C;margin-bottom:16px">Product: ${info.product_id} | MSRP: ${info.msrp ? '£'+info.msrp.toFixed(2) : '—'}</p>`;
 
-  html += '<div class="section-title">Current Snapshot</div><div class="tbl-wrap"><table><thead><tr><th>Retailer</th><th>Price</th><th>vs MSRP</th></tr></thead><tbody>';
+  html += `<div class="section-title">Current Snapshot</div>
+    <p style="font-size:12px;color:#A19F9D;margin:-8px 0 10px">Use 🗑 Purge to wipe all historical price data for a retailer — do this when the scraper matched the wrong listing.</p>
+    <div class="tbl-wrap"><table><thead><tr><th>Retailer</th><th>Price</th><th>vs MSRP</th><th>In Stock</th><th></th></tr></thead><tbody>`;
   snapshot.forEach(r => {
-    const belowBadge = r.below_msrp === 1 ? '<span class="badge badge-red">Below MSRP</span>' : (r.price ? '<span class="badge badge-green">Above MSRP</span>' : '');
-    html += `<tr><td>${r.retailer}</td><td>${r.price ? '£'+r.price.toFixed(2) : '<span style="color:#A19F9D">No data</span>'}</td><td>${belowBadge}</td></tr>`;
+    const belowBadge  = r.below_msrp === 1
+      ? '<span class="badge badge-red">Below MSRP</span>'
+      : (r.price ? '<span class="badge badge-green">Above MSRP</span>' : '');
+    const stockCell   = r.in_stock === 1 ? '<span style="color:#107C10">✓ In Stock</span>'
+                      : r.in_stock === 0 ? '<span style="color:#A4262C">✗ OOS</span>' : '—';
+    const purgeBtn    = `<button onclick="purgeRetailerData(${info.product_id},'${r.retailer.replace(/'/g,"\\'")}')"
+        style="background:none;border:1px solid #C8C6C4;border-radius:2px;padding:2px 8px;cursor:pointer;font-size:11px;color:#605E5C"
+        title="Purge all historical price data for ${r.retailer} on this SKU">🗑 Purge</button>`;
+    html += `<tr>
+      <td>${r.retailer}</td>
+      <td>${r.price ? '£'+r.price.toFixed(2) : '<span style="color:#A19F9D">No data</span>'}</td>
+      <td>${belowBadge}</td>
+      <td>${stockCell}</td>
+      <td>${purgeBtn}</td></tr>`;
   });
   html += '</tbody></table></div>';
 
@@ -2460,6 +2476,22 @@ function renderRetSku(data) {
                plugins:{legend:{labels:{font:{size:10}}}},
                scales:{x:{ticks:{font:{size:10}}}, y:{ticks:{font:{size:10}}}} }
   });
+}
+
+// ── Retailer purge ────────────────────────────────────────────────────────────
+function purgeRetailerData(productId, retailer) {
+  const msg = `Purge ALL historical price data for "${retailer}" on product ${productId}?\n\nThis deletes every row in the price history for this retailer/SKU combination. The retailer ID is kept so you can re-map it when ready.\n\nThis cannot be undone.`;
+  if (!confirm(msg)) return;
+  fetch('/api/retailer/purge', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ product_id: productId, retailer })
+  }).then(r => r.json()).then(d => {
+    if (d.error) { alert('Purge failed: ' + d.error); return; }
+    alert(`Done — ${d.deleted_rows} row${d.deleted_rows !== 1 ? 's' : ''} deleted for ${retailer}.`);
+    const backSection = document.getElementById('ret-sku-back').dataset.back || 'overview';
+    loadRetSku(productId, backSection);
+  }).catch(() => alert('Purge failed — check connection.'));
 }
 
 // ── Retailer section management ───────────────────────────────────────────────
@@ -3335,6 +3367,27 @@ def retailer_sku(product_id):
     )
 
     return jsonify({"info": info, "snapshot": snapshot, "price_history": price_history})
+
+
+@app.route("/api/retailer/purge", methods=["POST"])
+def retailer_purge():
+    """Delete all retailer_prices rows for a given product/retailer pair.
+    Retailer IDs are left untouched — caller can remap when ready."""
+    data = request.get_json(silent=True) or {}
+    product_id = data.get("product_id")
+    retailer   = data.get("retailer", "").strip()
+    if not product_id or not retailer:
+        return jsonify({"error": "product_id and retailer are required"}), 400
+
+    db = get_db()
+    cur = db.execute(
+        "DELETE FROM retailer_prices WHERE product_id = ? AND retailer = ?",
+        (product_id, retailer)
+    )
+    deleted = cur.rowcount
+    db.commit()
+    db.close()
+    return jsonify({"deleted_rows": deleted, "product_id": product_id, "retailer": retailer})
 
 
 @app.route("/api/retailer/report/<name>")
