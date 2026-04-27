@@ -569,13 +569,15 @@ def _needs_query(extra_where="", extra_cols=""):
 
 
 def load_products_needing_awdit():
-    """Return list of {product_id, model_no, manufacturer} rows with no AWD-IT URL."""
+    """Return list of {product_id, model_no, manufacturer, product_group, chipset} rows with no AWD-IT URL."""
     con  = sqlite3.connect(DB_PATH)
     rows = con.execute(
-        _needs_query("(r.awdit_url IS NULL OR r.awdit_url = '')")
+        _needs_query("(r.awdit_url IS NULL OR r.awdit_url = '')",
+                     extra_cols="p.product_group, p.chipset")
     ).fetchall()
     con.close()
-    return [{"product_id": str(r[0]), "model_no": r[1] or "", "manufacturer": r[2] or ""}
+    return [{"product_id": str(r[0]), "model_no": r[1] or "", "manufacturer": r[2] or "",
+             "product_group": r[3] or "", "chipset": r[4] or ""}
             for r in rows]
 
 
@@ -691,9 +693,73 @@ def _write_discovered_urls(col_name, id_to_url):
 
 
 # ── AWD-IT: token matching ────────────────────────────────────────────────────
-def _awdit_match_score(catalog_name, model_no, manufacturer):
+# Maps product chipset → socket strings that must appear in AWD-IT catalog entry name.
+# Values are tuples of alternative spellings (AWD-IT uses both "lga1851" and "lga 1851").
+_CHIPSET_SOCKET = {
+    # Intel LGA1700 (12th–14th gen)
+    "H610":  ("lga1700", "lga 1700"),
+    "B760":  ("lga1700", "lga 1700"),
+    "Z790":  ("lga1700", "lga 1700"),
+    "W680":  ("lga1700", "lga 1700"),
+    # Intel LGA1851 (Core Ultra 200)
+    "B840":  ("lga1851", "lga 1851"),
+    "H810":  ("lga1851", "lga 1851"),
+    "B850":  ("lga1851", "lga 1851"),
+    "B860":  ("lga1851", "lga 1851"),
+    "Z890":  ("lga1851", "lga 1851"),
+    "W880":  ("lga1851", "lga 1851"),
+    "W890":  ("lga1851", "lga 1851"),
+    # AMD AM4
+    "A520":  ("am4",),
+    "B550":  ("am4",),
+    # AMD AM5
+    "A620":  ("am5",),
+    "B650":  ("am5",),
+    "X870E": ("am5",),
+    # AMD Threadripper 7000 (sTR5 / TRX50)
+    "TRX50": ("trx50", "str5"),
+    "TR50":  ("trx50", "str5"),
+    # AMD Threadripper PRO (sWRX9)
+    "WRX90": ("wrx90",),
+    # Intel Xeon LGA4677
+    "W790":  ("lga4677", "lga 4677"),
+}
+
+
+def _awdit_match_score(catalog_name, model_no, manufacturer, product_group="", chipset=""):
     """Return token match count if above threshold, else 0. Higher = better match."""
     name_l  = catalog_name.lower()
+
+    # ── Graphics card filters ─────────────────────────────────────────────────
+    # Positive: must look like a standalone card listing.
+    # Negative: must not be a prebuilt PC, bundle, or complete system.
+    if product_group == "video":
+        _GPU_POSITIVE = (
+            "graphics card", "geforce", "radeon rx", "intel arc",
+            " rx ", " rtx ", " gtx ",
+        )
+        if not any(kw in name_l for kw in _GPU_POSITIVE):
+            return 0
+        _PREBUILT_KEYWORDS = (
+            "gaming pc", "gaming desktop", "prebuilt", "pre-built",
+            "complete system", "custom pc", "desktop pc", "tower pc",
+            "gaming system", "bundle",
+        )
+        if any(kw in name_l for kw in _PREBUILT_KEYWORDS):
+            return 0
+
+    # ── Motherboard filters ───────────────────────────────────────────────────
+    # Positive: must say "motherboard" (standalone board, not CPU bundle or bare CPU).
+    # Socket check: if chipset is known, catalog entry must mention the correct socket.
+    if product_group in ("PROD_MBRD", "PROD_MBRDS"):
+        if "motherboard" not in name_l:
+            return 0
+        if "bundle" in name_l:
+            return 0
+        socket_strs = _CHIPSET_SOCKET.get(chipset.upper() if chipset else "", ())
+        if socket_strs and not any(s in name_l for s in socket_strs):
+            return 0
+
     model_l = model_no.lower()
     mfr_l   = manufacturer.lower().split()[0] if manufacturer else ""
     tokens  = [t for t in re.split(r'[\s\-/]+', model_l) if len(t) >= 2]
@@ -706,9 +772,9 @@ def _awdit_match_score(catalog_name, model_no, manufacturer):
     return match_count
 
 
-def _is_awdit_match(catalog_name, model_no, manufacturer):
+def _is_awdit_match(catalog_name, model_no, manufacturer, product_group="", chipset=""):
     """Boolean wrapper kept for compatibility."""
-    return _awdit_match_score(catalog_name, model_no, manufacturer) > 0
+    return _awdit_match_score(catalog_name, model_no, manufacturer, product_group, chipset) > 0
 
 
 # ── AWD-IT: scrape one category page (all paginated pages) ───────────────────
@@ -786,10 +852,14 @@ def discover_awdit_urls(page):
     def try_match(products):
         matched, unmatched = {}, []
         for p in products:
-            # Score every catalog entry — take the best match, not the first pass
+            # Score every catalog entry — take the best match, not the first pass.
+            # Pass product_group + chipset so irrelevant entries are pre-filtered.
+            pg      = p.get("product_group", "")
+            chipset = p.get("chipset", "")
             best_score, best_url, best_name = 0, None, None
             for cat_name, cat_url in catalog.items():
-                score = _awdit_match_score(cat_name, p["model_no"], p["manufacturer"])
+                score = _awdit_match_score(cat_name, p["model_no"], p["manufacturer"],
+                                           pg, chipset)
                 if score > best_score:
                     best_score, best_url, best_name = score, cat_url, cat_name
             if best_url:

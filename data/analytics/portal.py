@@ -158,6 +158,7 @@ HTML = r"""<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Competition Analysis</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 13px;
@@ -343,7 +344,8 @@ HTML = r"""<!DOCTYPE html>
   .modal-body p:last-child { margin-bottom: 0; }
   .modal-body strong { color: #0078D4; }
   /* Product edit modal */
-  .edit-modal { width: 560px; }
+  .edit-modal { width: 680px; }
+  .edit-modal .modal-body { max-height: 72vh; overflow-y: auto; }
   .edit-field { margin-bottom: 14px; }
   .edit-field label { display: block; font-size: 12px; font-weight: 600; color: #605E5C; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.03em; }
   .edit-field input, .edit-field select { width: 100%; padding: 6px 10px; border: 1px solid #C8C6C4; border-radius: 2px; font-size: 13px; box-sizing: border-box; }
@@ -595,6 +597,7 @@ HTML = r"""<!DOCTYPE html>
         <button class="sidebar-btn" onclick="loadCatImportExport(this,'eol-status')">🔄 Update EOL Status</button>
         <button class="sidebar-btn" onclick="loadCatEOL(this)">⛔ View EOL SKUs</button>
         <button class="sidebar-btn" onclick="loadCatImportExport(this,'export-skus')">📤 Export Active SKUs</button>
+        <button class="sidebar-btn" onclick="loadMissingEan(this)">⚠️ Missing EAN Report</button>
       </div>
     </div>
     <div class="sidebar-section">
@@ -616,7 +619,6 @@ HTML = r"""<!DOCTYPE html>
         <button class="sidebar-btn" onclick="loadCatImportExport(this,'msrp-by-ean')">💷 Import by EAN</button>
         <button class="sidebar-btn" onclick="loadCatImportExport(this,'msrp-by-model')">💷 Import by Model</button>
         <button class="sidebar-btn" onclick="loadMissingMsrp(this)">⚠️ Missing MSRP Report</button>
-        <button class="sidebar-btn" onclick="loadMissingEan(this)">⚠️ Missing EAN Report</button>
       </div>
     </div>
   </div>
@@ -724,6 +726,57 @@ HTML = r"""<!DOCTYPE html>
           <input type="number" id="ep-msrp" step="0.01" min="0" placeholder="0.00">
         </div>
       </div>
+
+      <div style="margin:16px 0 12px;border-top:1px solid #EDEBE9;padding-top:14px">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#605E5C;margin-bottom:12px">Retailer IDs &amp; URLs</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
+          <div class="edit-field">
+            <label>Amazon ASIN</label>
+            <input type="text" id="ep-amazon-asin" placeholder="e.g. B0XXXXXXXX">
+          </div>
+          <div class="edit-field">
+            <label>Currys SKU</label>
+            <input type="text" id="ep-currys-sku" placeholder="e.g. 10XXXXXX">
+          </div>
+          <div class="edit-field">
+            <label>Argos SKU</label>
+            <input type="text" id="ep-argos-sku" placeholder="e.g. 7629329">
+          </div>
+          <div class="edit-field">
+            <label>Overclockers Code</label>
+            <input type="text" id="ep-ocuk-code" placeholder="e.g. MSI-XXX-XXX">
+          </div>
+          <div class="edit-field">
+            <label>Very SKU</label>
+            <input type="text" id="ep-very-sku" placeholder="SKU code">
+          </div>
+          <div class="edit-field">
+            <label>Scan LN Code</label>
+            <input type="text" id="ep-scan-ln" placeholder="e.g. LN12345">
+          </div>
+          <div class="edit-field" style="grid-column:1/-1">
+            <label>Very URL</label>
+            <input type="text" id="ep-very-url" placeholder="https://www.very.co.uk/...">
+          </div>
+          <div class="edit-field" style="grid-column:1/-1">
+            <label>Scan URL</label>
+            <input type="text" id="ep-scan-url" placeholder="https://www.scan.co.uk/products/...">
+          </div>
+          <div class="edit-field" style="grid-column:1/-1">
+            <label>AWD-IT URL</label>
+            <input type="text" id="ep-awdit-url" placeholder="https://www.awd-it.co.uk/...">
+          </div>
+          <div class="edit-field" style="grid-column:1/-1">
+            <label>CCL Online URL</label>
+            <input type="text" id="ep-ccl-url" placeholder="https://www.cclonline.com/...">
+          </div>
+          <div class="edit-field" style="grid-column:1/-1">
+            <label>Box URL</label>
+            <input type="text" id="ep-box-url" placeholder="https://www.box.co.uk/...">
+          </div>
+        </div>
+      </div>
+
       <div id="ep-msg" class="edit-msg"></div>
     </div>
     <div class="edit-footer">
@@ -741,6 +794,106 @@ function fmtDate(d) {
   const parts = d.split('-');
   if (parts.length !== 3) return d;
   return `${parts[2]}/${parts[1]}/${parts[0].slice(2)}`;
+}
+
+// ── Sortable table utility ────────────────────────────────────────────────────
+// makeSortable(tableOrId)  — call after any innerHTML that contains a <table>
+// makeSortableAll(container) — applies to every <table> inside the element
+//
+// Cells with complex HTML (badges, icons, links) can set data-val on the <td>
+// for an explicit sort key. Otherwise textContent is used with smart extraction:
+//   £1,234.56  →  1234.56 (numeric)
+//   +12.5%     →  12.5    (numeric)
+//   ✓ / ✗      →  1 / 0  (in-stock)
+//   ↗          →  1       (has link)
+//   — / ''     →  null    (always sorts last)
+
+function _cellSortVal(cell) {
+  if (!cell) return null;
+  const raw = (cell.dataset.val !== undefined
+    ? cell.dataset.val
+    : cell.textContent).trim();
+  if (!raw || raw === '—' || raw === '?' || raw === '…') return null;
+  if (raw === '✓' || raw === '↗') return 1;
+  if (raw === '✗') return 0;
+  // Strip currency / percent / sign / commas and try numeric
+  const stripped = raw.replace(/[£%+,\s]/g, '');
+  const n = parseFloat(stripped);
+  if (!isNaN(n) && stripped !== '') return n;
+  return raw.toLowerCase();
+}
+
+function _thSetArrow(th) {
+  th.textContent = (th.dataset.label || '') +
+    (th._sortDir === 1 ? ' ▲' : th._sortDir === -1 ? ' ▼' : '');
+  th.style.color = th._sortDir ? '#0078D4' : '';
+}
+
+function makeSortable(tableOrId) {
+  const tbl = typeof tableOrId === 'string'
+    ? document.getElementById(tableOrId) : tableOrId;
+  if (!tbl || tbl._sortable) return;
+  tbl._sortable = true;
+  const ths = Array.from(tbl.querySelectorAll('thead tr:first-child th'));
+  ths.forEach((th, colIdx) => {
+    th.dataset.label   = th.textContent.trim();
+    th.style.cursor    = 'pointer';
+    th.style.userSelect = 'none';
+    th.style.whiteSpace = 'nowrap';
+    th._sortDir = 0;
+    th.addEventListener('click', () => {
+      const prev = th._sortDir;
+      ths.forEach(h => { h._sortDir = 0; _thSetArrow(h); });
+      th._sortDir = (prev === 1) ? -1 : 1;
+      _thSetArrow(th);
+      const tbody = tbl.querySelector('tbody');
+      if (!tbody) return;
+      const rows = Array.from(tbody.querySelectorAll('tr'));
+      const dir  = th._sortDir;
+      rows.sort((a, b) => {
+        const av = _cellSortVal(a.cells[colIdx]);
+        const bv = _cellSortVal(b.cells[colIdx]);
+        if (av === null && bv === null) return 0;
+        if (av === null) return 1;
+        if (bv === null) return -1;
+        if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir;
+        if (typeof av === 'number') return -dir;
+        if (typeof bv === 'number') return  dir;
+        return (av < bv ? -1 : av > bv ? 1 : 0) * dir;
+      });
+      rows.forEach(r => tbody.appendChild(r));
+    });
+  });
+}
+
+function makeSortableAll(container) {
+  (container || document).querySelectorAll('table').forEach(t => makeSortable(t));
+}
+
+// ── CSV export utility ────────────────────────────────────────────────────────
+// Reads visible rows from any rendered <table> and triggers a CSV download.
+// Hidden rows (display:none from a filter) are skipped.
+function _exportTableCsv(tableId, filename) {
+  const tbl = document.getElementById(tableId);
+  if (!tbl) return;
+  const rows = [];
+  // Headers — strip sort arrows
+  const ths = tbl.querySelectorAll('thead th');
+  rows.push([...ths].map(th => (th.dataset.label || th.textContent).replace(/ [▲▼]$/, '').trim()));
+  // Body — visible rows only
+  tbl.querySelectorAll('tbody tr').forEach(tr => {
+    if (tr.style.display === 'none') return;
+    rows.push([...tr.cells].map(td => {
+      // Use data-val if present, otherwise text; skip icon-only cells cleanly
+      const v = (td.dataset.val !== undefined ? td.dataset.val : td.textContent).trim();
+      return v === '↗' ? '' : v;
+    }));
+  });
+  const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\r\n');
+  const a   = document.createElement('a');
+  a.href    = 'data:text/csv;charset=utf-8,' + encodeURIComponent('﻿' + csv);
+  a.download = filename;
+  a.click();
 }
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
@@ -939,6 +1092,7 @@ function renderWatchlistReport(data) {
 
   html += '</tbody></table></div>';
   el.innerHTML = html;
+  makeSortableAll(el);
   _refreshAllStars();
 }
 
@@ -978,7 +1132,9 @@ function loadChipsetOverview(group) {
       </tr>`;
     });
     html += '</tbody></table>';
-    document.getElementById('stic-chipset-tbl').innerHTML = html;
+    const _chipsetTblEl = document.getElementById('stic-chipset-tbl');
+    _chipsetTblEl.innerHTML = html;
+    makeSortableAll(_chipsetTblEl);
     document.querySelectorAll('#stic-chipset-tbl tr[data-ci]').forEach(tr => {
       tr.addEventListener('click', () => {
         const cs = _cgRows[+tr.dataset.ci].chipset;
@@ -1029,7 +1185,9 @@ function loadChipsetDrill(chipset) {
         </tr>`;
       });
       html += '</tbody></table>';
-      document.getElementById('stic-chipset-drill-tbl').innerHTML = html;
+      const _drillEl = document.getElementById('stic-chipset-drill-tbl');
+      _drillEl.innerHTML = html;
+      makeSortableAll(_drillEl);
     });
 }
 
@@ -1053,7 +1211,9 @@ function doSticSearch() {
       </tr>`;
     });
     html += '</tbody></table></div>';
-    document.getElementById('stic-search-results').innerHTML = html;
+    const _sticSearchEl = document.getElementById('stic-search-results');
+    _sticSearchEl.innerHTML = html;
+    makeSortableAll(_sticSearchEl);
   });
 }
 
@@ -1133,6 +1293,7 @@ function renderSticSku(data) {
   html += '</tbody></table></div>';
 
   el.innerHTML = html;
+  makeSortableAll(el);
 
   // Charts
   const dists = [...new Set(price_history.map(r => r.distributor))];
@@ -1305,15 +1466,27 @@ function _openProductEditFocus(productId, focusFieldId) {
 function _openProductEdit(productId, focusMsrp, focusFieldId) {
   fetch(`/api/catalogue/product/${productId}`)
     .then(r => r.json()).then(p => {
-      document.getElementById('ep-product-id').value   = p.product_id;
-      document.getElementById('ep-model-no').value     = p.model_no        || '';
-      document.getElementById('ep-manufacturer').value = p.manufacturer     || '';
-      document.getElementById('ep-product-group').value = p.product_group  || 'PROD_VIDEO';
-      document.getElementById('ep-description').value  = p.description     || '';
-      document.getElementById('ep-chipset').value      = p.chipset         || '';
-      document.getElementById('ep-ean').value          = p.ean             || '';
-      document.getElementById('ep-msrp').value         = p.msrp != null ? p.msrp : '';
-      document.getElementById('ep-msg').textContent    = '';
+      document.getElementById('ep-product-id').value    = p.product_id;
+      document.getElementById('ep-model-no').value      = p.model_no        || '';
+      document.getElementById('ep-manufacturer').value  = p.manufacturer    || '';
+      document.getElementById('ep-product-group').value = p.product_group   || 'PROD_VIDEO';
+      document.getElementById('ep-description').value   = p.description     || '';
+      document.getElementById('ep-chipset').value       = p.chipset         || '';
+      document.getElementById('ep-ean').value           = p.ean             || '';
+      document.getElementById('ep-msrp').value          = p.msrp != null ? p.msrp : '';
+      // Retailer IDs & URLs
+      document.getElementById('ep-amazon-asin').value   = p.amazon_asin  || '';
+      document.getElementById('ep-currys-sku').value    = p.currys_sku   || '';
+      document.getElementById('ep-argos-sku').value     = p.argos_sku    || '';
+      document.getElementById('ep-ocuk-code').value     = p.ocuk_code    || '';
+      document.getElementById('ep-very-sku').value      = p.very_sku     || '';
+      document.getElementById('ep-scan-ln').value       = p.scan_ln      || '';
+      document.getElementById('ep-very-url').value      = p.very_url     || '';
+      document.getElementById('ep-scan-url').value      = p.scan_url     || '';
+      document.getElementById('ep-awdit-url').value     = p.awdit_url    || '';
+      document.getElementById('ep-ccl-url').value       = p.ccl_url      || '';
+      document.getElementById('ep-box-url').value       = p.box_url      || '';
+      document.getElementById('ep-msg').textContent     = '';
       document.getElementById('edit-modal-title').textContent = `Edit Product — ${p.product_id}`;
 
       // Highlight the appropriate field
@@ -1345,6 +1518,18 @@ function _saveProduct() {
     chipset:       document.getElementById('ep-chipset').value.trim(),
     ean:           document.getElementById('ep-ean').value.trim(),
     msrp:          msrpRaw === '' ? null : parseFloat(msrpRaw),
+    // Retailer IDs & URLs
+    amazon_asin:   document.getElementById('ep-amazon-asin').value.trim() || null,
+    currys_sku:    document.getElementById('ep-currys-sku').value.trim()  || null,
+    argos_sku:     document.getElementById('ep-argos-sku').value.trim()   || null,
+    ocuk_code:     document.getElementById('ep-ocuk-code').value.trim()   || null,
+    very_sku:      document.getElementById('ep-very-sku').value.trim()    || null,
+    scan_ln:       document.getElementById('ep-scan-ln').value.trim()     || null,
+    very_url:      document.getElementById('ep-very-url').value.trim()    || null,
+    scan_url:      document.getElementById('ep-scan-url').value.trim()    || null,
+    awdit_url:     document.getElementById('ep-awdit-url').value.trim()   || null,
+    ccl_url:       document.getElementById('ep-ccl-url').value.trim()     || null,
+    box_url:       document.getElementById('ep-box-url').value.trim()     || null,
   };
   const msg = document.getElementById('ep-msg');
   msg.style.color = '#605E5C';
@@ -1463,7 +1648,9 @@ function renderReportTable(name, rows) {
     ${filterBar}<div class="tbl-wrap"><table><thead><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr></thead><tbody>`;
   rows.forEach(r => { html += rowFn(r); });
   html += '</tbody></table></div>';
-  document.getElementById('stic-report-content').innerHTML = html;
+  const _sticReportEl = document.getElementById('stic-report-content');
+  _sticReportEl.innerHTML = html;
+  makeSortableAll(_sticReportEl);
 
   // Restore filter selections after re-render
   if (savedMfr  && document.getElementById('filter-mfr'))   document.getElementById('filter-mfr').value   = savedMfr;
@@ -1535,6 +1722,7 @@ function loadInvestigateReport(btn) {
     html += '</div>';
 
     el.innerHTML = html;
+    makeSortableAll(el);
     _refreshAllEolBtns();
   });
 }
@@ -1563,6 +1751,7 @@ function loadCatEOL(btn) {
       html += '</tbody></table></div>';
     }
     el.innerHTML = html;
+    makeSortableAll(el);
     _refreshAllEolBtns();
   });
 }
@@ -1597,6 +1786,7 @@ function loadScrapeGroups(btn) {
     });
     html += '</tbody></table></div>';
     el.innerHTML = html;
+    makeSortableAll(el);
   });
 }
 
@@ -1656,6 +1846,7 @@ function loadCatProducts(btn) {
     });
     html += '</tbody></table></div>';
     el.innerHTML = html;
+    makeSortable('cat-prod-tbl');
     // Set callback: update the row in-place after save
     _editCallback = (pid, p) => {
       const rows = document.querySelectorAll('#cat-prod-tbl tbody tr');
@@ -1684,43 +1875,89 @@ function _catProdFilter() {
 }
 
 // ── Catalogue: Retailer IDs view ──────────────────────────────────────────────
+let _catRetRows = [];
+let _catRetSort = { col: 'model_no', dir: 1 };  // default: model name ascending
+
+const _CAT_RET_COLS = [
+  { key: 'product_id', label: 'Product' },
+  { key: 'model_no',   label: 'Model' },
+  { key: 'amazon_asin', label: 'Amazon ASIN' },
+  { key: 'currys_sku',  label: 'Currys SKU' },
+  { key: 'very_sku',    label: 'Very SKU' },
+  { key: 'argos_sku',   label: 'Argos SKU' },
+  { key: 'ocuk_code',   label: 'OCUK Code' },
+  { key: 'scan_ln',     label: 'Scan LN' },
+  { key: 'scan_url',    label: 'Scan URL',   link: true },
+  { key: 'awdit_url',   label: 'AWD-IT URL', link: true },
+  { key: 'ccl_url',     label: 'CCL URL',    link: true },
+  { key: 'box_url',     label: 'Box URL',    link: true },
+  { key: 'very_url',    label: 'Very URL',   link: true },
+];
+
 function loadCatRetailerIds(btn) {
   showCatSection('retailer-ids', btn);
   const el = document.getElementById('cat-retailer-ids-content');
   el.innerHTML = '<div class="spinner">Loading…</div>';
   fetch('/api/catalogue/retailer-ids').then(r=>r.json()).then(data => {
+    _catRetRows = data.rows;
     let html = '<h2 style="margin:0 0 4px">Retailer IDs</h2>';
     html += `<p style="color:#605E5C;margin:0 0 12px;font-size:13px">${data.rows.length} products · IDs used by the retailer scraper to locate products on each site.</p>`;
     html += `<div style="display:flex;gap:8px;margin-bottom:12px">
       <input id="cat-ret-search" type="text" placeholder="Search product, model, ASIN, URL…"
         style="flex:1;padding:6px 10px;border:1px solid #EDEBE9;border-radius:2px;font-size:13px"
-        oninput="_catRetFilter()">
+        oninput="_catRetRender()">
     </div>`;
-    html += '<div class="tbl-wrap"><table id="cat-ret-tbl"><thead><tr><th>Product</th><th>Model</th><th>Amazon ASIN</th><th>Currys SKU</th><th>Very SKU</th><th>Argos SKU</th><th>OCUK Code</th><th>Scan LN</th><th>Scan URL</th><th>AWD-IT URL</th><th>CCL URL</th><th>Box URL</th><th>Very URL</th></tr></thead><tbody>';
-    data.rows.forEach(r => {
-      html += `<tr>
-        <td>${r.product_id}</td><td>${r.model_no||'—'}</td>
-        <td>${r.amazon_asin||'—'}</td><td>${r.currys_sku||'—'}</td>
-        <td>${r.very_sku||'—'}</td><td>${r.argos_sku||'—'}</td>
-        <td>${r.ocuk_code||'—'}</td><td>${r.scan_ln||'—'}</td>
-        <td>${r.scan_url ? `<a href="${r.scan_url}" target="_blank">↗</a>` : '—'}</td>
-        <td>${r.awdit_url ? `<a href="${r.awdit_url}" target="_blank">↗</a>` : '—'}</td>
-        <td>${r.ccl_url ? `<a href="${r.ccl_url}" target="_blank">↗</a>` : '—'}</td>
-        <td>${r.box_url ? `<a href="${r.box_url}" target="_blank">↗</a>` : '—'}</td>
-        <td>${r.very_url ? `<a href="${r.very_url}" target="_blank">↗</a>` : '—'}</td>
-      </tr>`;
+    html += '<div class="tbl-wrap"><table id="cat-ret-tbl"><thead><tr>';
+    _CAT_RET_COLS.forEach(c => {
+      const active = _catRetSort.col === c.key;
+      const arrow  = active ? (_catRetSort.dir === 1 ? ' ▲' : ' ▼') : '';
+      html += `<th style="cursor:pointer;user-select:none;white-space:nowrap${active ? ';color:#0078D4' : ''}" onclick="_catRetSortBy('${c.key}')">${c.label}${arrow}</th>`;
     });
-    html += '</tbody></table></div>';
+    html += '</tr></thead><tbody id="cat-ret-tbody"></tbody></table></div>';
     el.innerHTML = html;
+    _catRetRender();
   });
 }
 
-function _catRetFilter() {
-  const q = document.getElementById('cat-ret-search').value.toLowerCase();
-  document.querySelectorAll('#cat-ret-tbl tbody tr').forEach(row => {
-    row.style.display = (!q || row.textContent.toLowerCase().includes(q)) ? '' : 'none';
+function _catRetSortBy(col) {
+  if (_catRetSort.col === col) {
+    _catRetSort.dir *= -1;
+  } else {
+    _catRetSort.col = col;
+    _catRetSort.dir = 1;
+  }
+  // Refresh header arrows
+  const ths = document.querySelectorAll('#cat-ret-tbl thead th');
+  _CAT_RET_COLS.forEach((c, i) => {
+    const active = _catRetSort.col === c.key;
+    const arrow  = active ? (_catRetSort.dir === 1 ? ' ▲' : ' ▼') : '';
+    ths[i].textContent = c.label + arrow;
+    ths[i].style.color = active ? '#0078D4' : '';
   });
+  _catRetRender();
 }
+
+function _catRetRender() {
+  const q = (document.getElementById('cat-ret-search')?.value || '').toLowerCase();
+  const { col, dir } = _catRetSort;
+  const rows = _catRetRows
+    .filter(r => !q || Object.values(r).some(v => v && String(v).toLowerCase().includes(q)))
+    .slice()
+    .sort((a, b) => {
+      const av = (a[col] || ''), bv = (b[col] || '');
+      return (av < bv ? -1 : av > bv ? 1 : 0) * dir;
+    });
+  const tbody = document.getElementById('cat-ret-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = rows.map(r => `<tr>
+    ${_CAT_RET_COLS.map(c => c.link
+      ? `<td>${r[c.key] ? `<a href="${r[c.key]}" target="_blank">↗</a>` : '—'}</td>`
+      : `<td>${r[c.key] || '—'}</td>`).join('')}
+  </tr>`).join('');
+}
+
+// kept for compatibility if called elsewhere
+function _catRetFilter() { _catRetRender(); }
 
 // ── Catalogue: Import / Export ────────────────────────────────────────────────
 
@@ -1847,6 +2084,10 @@ function _missingMsrpRender() {
           ${grps.map(g => `<option value="${g}"${g===grp?' selected':''}>${grpLabel[g]||g}</option>`).join('')}
         </select>
         <span style="font-size:12px;color:#605E5C">${data.products.length} product${data.products.length!==1?'s':''} missing MSRP</span>
+        <button onclick="_exportTableCsv('mm-tbl','missing-msrp.csv')"
+          style="margin-left:auto;padding:5px 12px;border:1px solid #C8C6C4;background:#fff;border-radius:2px;font-size:12px;cursor:pointer">
+          📥 Export CSV
+        </button>
       </div>`;
 
       // Product rows
@@ -1871,6 +2112,7 @@ function _missingMsrpRender() {
         html += '</tbody></table></div>';
       }
       el.innerHTML = html;
+      makeSortable('mm-tbl');
       // After save: remove the row from the missing list and refresh summary
       _editCallback = (pid, p) => {
         if (p.msrp != null && p.msrp > 0) {
@@ -1938,6 +2180,10 @@ function _missingEanRender() {
           ${grps.map(g => `<option value="${g}"${g===grp?' selected':''}>${grpLabel[g]||g}</option>`).join('')}
         </select>
         <span style="font-size:12px;color:#605E5C">${data.products.length} product${data.products.length!==1?'s':''} missing EAN</span>
+        <button onclick="_exportTableCsv('me-tbl','missing-ean.csv')"
+          style="margin-left:auto;padding:5px 12px;border:1px solid #C8C6C4;background:#fff;border-radius:2px;font-size:12px;cursor:pointer">
+          📥 Export CSV
+        </button>
       </div>`;
 
       // Product rows
@@ -1961,6 +2207,7 @@ function _missingEanRender() {
         html += '</tbody></table></div>';
       }
       el.innerHTML = html;
+      makeSortable('me-tbl');
 
       // After save: remove the row if EAN now set
       _editCallback = (pid, p) => {
@@ -2047,11 +2294,11 @@ function _ieOpenTool(toolId) {
          ondragover="event.preventDefault();this.classList.add('drag-over')"
          ondragleave="this.classList.remove('drag-over')"
          ondrop="_ieDrop(event,'${toolId}')">
-      <input type="file" id="ie-file-${toolId}" accept=".csv,text/csv"
+      <input type="file" id="ie-file-${toolId}" accept=".csv,.xlsx,.xls,text/csv"
              onchange="_ieFileSelected(this,'${toolId}')">
       <div class="dz-icon">📂</div>
-      <div class="dz-text">Click to browse or drag &amp; drop a CSV file here</div>
-      <div class="dz-hint">CSV format · UTF-8 or UTF-8 BOM · Max 5 000 rows</div>
+      <div class="dz-text">Click to browse or drag &amp; drop a file here</div>
+      <div class="dz-hint">CSV or Excel (.xlsx / .xls) · Max 5 000 rows</div>
     </div>
     <div id="ie-preview-${toolId}" style="margin-top:16px"></div>
   `;
@@ -2093,10 +2340,29 @@ function _ieFileSelected(input, toolId) {
 function _ieReadFile(file, toolId) {
   const dz = document.getElementById('ie-dz-' + toolId);
   dz.querySelector('.dz-text').textContent = `Reading: ${file.name}…`;
+  const ext = file.name.split('.').pop().toLowerCase();
   const reader = new FileReader();
-  reader.onload = e => _ieUploadForPreview(toolId, e.target.result, file.name);
   reader.onerror = () => { dz.querySelector('.dz-text').textContent = 'Error reading file.'; };
-  reader.readAsText(file);   // UTF-8; server strips BOM
+
+  if (ext === 'xlsx' || ext === 'xls') {
+    // Excel: read as ArrayBuffer, convert first sheet → CSV via SheetJS
+    reader.onload = e => {
+      try {
+        const wb  = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+        const ws  = wb.Sheets[wb.SheetNames[0]];
+        const csv = XLSX.utils.sheet_to_csv(ws, { blankrows: false });
+        _ieUploadForPreview(toolId, csv, file.name);
+      } catch(err) {
+        dz.querySelector('.dz-text').textContent = 'Failed to parse Excel file.';
+        console.error('SheetJS error:', err);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  } else {
+    // CSV: read as plain text; server strips BOM
+    reader.onload = e => _ieUploadForPreview(toolId, e.target.result, file.name);
+    reader.readAsText(file);
+  }
 }
 
 function _ieUploadForPreview(toolId, csvText, filename) {
@@ -2432,7 +2698,9 @@ function doRetSearch() {
       </tr>`;
     });
     html += '</tbody></table></div>';
-    document.getElementById('ret-search-results').innerHTML = html;
+    const _retSearchEl = document.getElementById('ret-search-results');
+    _retSearchEl.innerHTML = html;
+    makeSortableAll(_retSearchEl);
   });
 }
 
@@ -2516,6 +2784,7 @@ function renderRetSku(data) {
   </div>`;
 
   el.innerHTML = html;
+  makeSortableAll(el);
   buildRetSkuChart(0);   // default: All history
 }
 
@@ -2568,6 +2837,8 @@ function purgeRetailerData(productId, retailer) {
   }).then(r => r.json()).then(d => {
     if (d.error) { alert('Purge failed: ' + d.error); return; }
     alert(`Done — ${d.deleted_rows} row${d.deleted_rows !== 1 ? 's' : ''} deleted for ${retailer}.`);
+    _retReportCache = { name: null, rows: [] };   // invalidate — report must re-fetch
+    retailerKpiLoaded = false; loadRetailerKpi(); // refresh KPI tile counts
     const back = document.getElementById('ret-sku-back').dataset.back || 'overview';
     loadRetSku(productId, back);
   }).catch(() => alert('Purge failed — check connection.'));
@@ -2621,6 +2892,8 @@ function confirmPurgeDates() {
     if (d.error) { alert('Failed: ' + d.error); return; }
     closePurgeDatesModal();
     alert(`Done — ${d.deleted_rows} row${d.deleted_rows!==1?'s':''} deleted.`);
+    _retReportCache = { name: null, rows: [] };   // invalidate — report must re-fetch
+    retailerKpiLoaded = false; loadRetailerKpi(); // refresh KPI tile counts
     const back = document.getElementById('ret-sku-back').dataset.back || 'overview';
     loadRetSku(_pdm.product_id, back);
   }).catch(() => alert('Purge failed — check connection.'));
@@ -2831,7 +3104,9 @@ function renderRetReportTable(name, rows) {
         <td>${p.product_id}</td><td>${p.model_no}</td><td>${p.manufacturer||'—'}</td>${retCells.join('')}</tr>`;
     });
     html += '</tbody></table></div>';
-    document.getElementById('ret-report-content').innerHTML = html;
+    const _retRptEl1 = document.getElementById('ret-report-content');
+    _retRptEl1.innerHTML = html;
+    makeSortableAll(_retRptEl1);
     if (savedRet && document.getElementById('ret-filter-retailer')) document.getElementById('ret-filter-retailer').value = savedRet;
     if (savedMfr && document.getElementById('ret-filter-mfr'))      document.getElementById('ret-filter-mfr').value     = savedMfr;
     if (savedGrp && document.getElementById('ret-filter-group'))    document.getElementById('ret-filter-group').value   = savedGrp;
@@ -2974,7 +3249,9 @@ function renderRetReportTable(name, rows) {
     ${filterBar}<div class="tbl-wrap"><table><thead><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr></thead><tbody>`;
   rows.forEach(r => { html += rowFn(r); });
   html += '</tbody></table></div>';
-  document.getElementById('ret-report-content').innerHTML = html;
+  const _retRptEl2 = document.getElementById('ret-report-content');
+  _retRptEl2.innerHTML = html;
+  makeSortableAll(_retRptEl2);
 
   if (savedRet && document.getElementById('ret-filter-retailer')) document.getElementById('ret-filter-retailer').value = savedRet;
   if (savedMfr && document.getElementById('ret-filter-mfr'))      document.getElementById('ret-filter-mfr').value     = savedMfr;
@@ -4572,22 +4849,28 @@ def catalogue_product(product_id):
     db = get_db()
     if request.method == "GET":
         row = db.execute(
-            "SELECT product_id, model_no, manufacturer, product_group, description, chipset, ean, msrp "
-            "FROM products WHERE product_id = ?", (product_id,)
+            "SELECT p.product_id, p.model_no, p.manufacturer, p.product_group, "
+            "p.description, p.chipset, p.ean, p.msrp, "
+            "r.amazon_asin, r.currys_sku, r.very_sku, r.very_url, r.argos_sku, "
+            "r.ccl_url, r.awdit_url, r.scan_ln, r.scan_url, r.ocuk_code, r.box_url "
+            "FROM products p "
+            "LEFT JOIN retailer_ids r ON r.product_id = p.product_id "
+            "WHERE p.product_id = ?", (product_id,)
         ).fetchone()
         db.close()
         if not row:
             return jsonify({"error": "Product not found"}), 404
         return jsonify(dict(row))
 
-    # POST — update product
+    # POST — update product fields and/or retailer IDs
     data = request.get_json(silent=True) or {}
-    allowed = ["model_no", "manufacturer", "product_group", "description", "chipset", "ean", "msrp"]
+
+    # ── Update products table ──────────────────────────────────────────────────
+    product_fields = ["model_no", "manufacturer", "product_group", "description", "chipset", "ean", "msrp"]
     sets, params = [], []
-    for field in allowed:
+    for field in product_fields:
         if field in data:
             val = data[field]
-            # Validate MSRP
             if field == "msrp":
                 if val is None or val == "":
                     val = None
@@ -4600,19 +4883,47 @@ def catalogue_product(product_id):
                     except (ValueError, TypeError):
                         db.close()
                         return jsonify({"error": f"Invalid MSRP value: {val}"})
-            # Validate product_group
             if field == "product_group" and val not in ("PROD_VIDEO", "PROD_MBRD", "PROD_MBRDS", None, ""):
                 db.close()
                 return jsonify({"error": f"Invalid product_group: {val}"})
             sets.append(f"{field} = ?")
             params.append(val)
 
-    if not sets:
+    if sets:
+        params.append(product_id)
+        db.execute(f"UPDATE products SET {', '.join(sets)} WHERE product_id = ?", params)
+
+    # ── Upsert retailer_ids table ──────────────────────────────────────────────
+    retailer_fields = ["amazon_asin", "currys_sku", "very_sku", "very_url", "argos_sku",
+                       "ccl_url", "awdit_url", "scan_ln", "scan_url", "ocuk_code", "box_url"]
+    ret_data = {f: data[f] for f in retailer_fields if f in data}
+    if ret_data:
+        # Fetch current row (may not exist yet)
+        existing = db.execute(
+            "SELECT * FROM retailer_ids WHERE product_id = ?", (product_id,)
+        ).fetchone()
+        if existing:
+            # Merge: only overwrite columns present in the payload
+            ret_sets = [f"{f} = ?" for f in ret_data]
+            ret_params = list(ret_data.values()) + [product_id]
+            db.execute(
+                f"UPDATE retailer_ids SET {', '.join(ret_sets)} WHERE product_id = ?",
+                ret_params
+            )
+        else:
+            # No row yet — insert with whatever we have
+            cols = ["product_id"] + list(ret_data.keys())
+            vals = [product_id] + list(ret_data.values())
+            placeholders = ", ".join("?" * len(vals))
+            db.execute(
+                f"INSERT INTO retailer_ids ({', '.join(cols)}) VALUES ({placeholders})",
+                vals
+            )
+
+    if not sets and not ret_data:
         db.close()
         return jsonify({"error": "No fields to update"})
 
-    params.append(product_id)
-    db.execute(f"UPDATE products SET {', '.join(sets)} WHERE product_id = ?", params)
     db.commit()
     db.close()
     return jsonify({"ok": True})
