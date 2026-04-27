@@ -447,6 +447,7 @@ HTML = r"""<!DOCTYPE html>
       </div>
       <div class="sidebar-items">
         <button class="sidebar-btn" onclick="loadInvestigateReport(this)">🔍 Investigate</button>
+        <button class="sidebar-btn" onclick="loadProbeSkus(this)">🔬 Probe SKUs</button>
       </div>
     </div>
     <div class="sidebar-section">
@@ -504,6 +505,10 @@ HTML = r"""<!DOCTYPE html>
     <!-- Investigate -->
     <div class="content-section" id="stic-investigate">
       <div id="stic-investigate-content"><div class="spinner">Loading…</div></div>
+    </div>
+    <!-- Probe SKUs -->
+    <div class="content-section" id="stic-probe">
+      <div id="stic-probe-content"><div class="spinner">Loading…</div></div>
     </div>
     <!-- Scrape Groups -->
     <div class="content-section" id="stic-scrape">
@@ -669,7 +674,7 @@ HTML = r"""<!DOCTYPE html>
       <button class="modal-close" onclick="closePurgeDatesModal()">✕</button>
     </div>
     <div class="modal-body" style="padding:16px 20px">
-      <p style="font-size:12px;color:#605E5C;margin:0 0 12px">Select individual dates to delete. Retailer ID is left untouched.</p>
+      <p id="pdm-desc" style="font-size:12px;color:#605E5C;margin:0 0 12px">Select individual dates to delete. Retailer ID is left untouched.</p>
       <div style="display:flex;gap:8px;margin-bottom:10px">
         <button onclick="pdmSelectAll(true)"  style="font-size:11px;padding:3px 8px;border:1px solid #C8C6C4;border-radius:2px;cursor:pointer">All</button>
         <button onclick="pdmSelectAll(false)" style="font-size:11px;padding:3px 8px;border:1px solid #C8C6C4;border-radius:2px;cursor:pointer">None</button>
@@ -677,7 +682,7 @@ HTML = r"""<!DOCTYPE html>
       <div id="pdm-dates" style="max-height:280px;overflow-y:auto;border:1px solid #E1E1E1;border-radius:3px;padding:8px"></div>
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
         <button onclick="closePurgeDatesModal()" style="padding:6px 14px;border:1px solid #C8C6C4;border-radius:2px;cursor:pointer;background:none">Cancel</button>
-        <button onclick="confirmPurgeDates()" style="padding:6px 14px;border:none;border-radius:2px;cursor:pointer;background:#A4262C;color:#fff;font-weight:600">Purge Selected</button>
+        <button id="pdm-confirm-btn" onclick="confirmPurgeDates()" style="padding:6px 14px;border:none;border-radius:2px;cursor:pointer;background:#A4262C;color:#fff;font-weight:600">Purge Selected</button>
       </div>
     </div>
   </div>
@@ -1034,17 +1039,56 @@ function saveSticUrl(pid) {
   const input = document.getElementById('stic-url-input-' + pid);
   const url = input ? input.value.trim() : '';
   if (!url) { alert('Please paste a STIC URL first'); return; }
+  const btn = input ? input.nextElementSibling : null;
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
   fetch('/api/stic-url/' + pid, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url })
   }).then(r => r.json()).then(data => {
     if (data.saved) {
-      alert('URL saved — scraper will use it as sanity check from next run');
-      loadSticSku(pid, currentSection);  // refresh the product page
+      loadSticSku(pid, sticSkuBackSection || 'overview');  // refresh — new URL shown immediately
     } else {
-      alert('Save failed');
+      if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
+      alert('Save failed: ' + (data.error || 'unknown error'));
     }
+  }).catch(() => {
+    if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
+    alert('Network error — URL not saved.');
+  });
+}
+
+function triggerRescrape(pid) {
+  const btn = document.getElementById('rescrape-btn-' + pid);
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Scraping…'; }
+  fetch('/api/scrape/sku', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ product_id: pid })
+  }).then(r => r.json()).then(data => {
+    if (!data.started) {
+      if (btn) { btn.disabled = false; btn.textContent = '▶ Scrape Now'; }
+      alert('Could not start scrape: ' + (data.error || 'unknown error'));
+      return;
+    }
+    // Poll until done, then reload the SKU page
+    const interval = setInterval(() => {
+      fetch('/api/scrape/sku/status?product_id=' + pid).then(r => r.json()).then(s => {
+        if (s.done) {
+          clearInterval(interval);
+          if (btn) { btn.disabled = false; btn.textContent = '▶ Scrape Now'; }
+          loadSticSku(pid, currentSection);  // refresh product data
+        }
+      }).catch(() => clearInterval(interval));
+    }, 3000);
+    // Safety timeout — stop polling after 2 minutes regardless
+    setTimeout(() => {
+      clearInterval(interval);
+      if (btn) { btn.disabled = false; btn.textContent = '▶ Scrape Now'; }
+    }, 120000);
+  }).catch(() => {
+    if (btn) { btn.disabled = false; btn.textContent = '▶ Scrape Now'; }
+    alert('Network error — could not start scrape.');
   });
 }
 
@@ -1275,6 +1319,9 @@ function renderSticSku(data) {
         style="width:340px;padding:3px 7px;font-size:12px;border:1px solid #8A8886;border-radius:2px;font-family:inherit"/>
       <button onclick="saveSticUrl(${info.product_id})"
         style="margin-left:4px;padding:3px 10px;background:#0078D4;color:#fff;border:none;border-radius:2px;cursor:pointer;font-size:12px">Save</button>
+      <button id="rescrape-btn-${info.product_id}" onclick="triggerRescrape(${info.product_id})"
+        style="margin-left:8px;padding:3px 10px;background:#107C10;color:#fff;border:none;border-radius:2px;cursor:pointer;font-size:12px"
+        title="Re-scrape STIC now for this SKU and refresh the page">▶ Scrape Now</button>
     </span>
   </div>`;
 
@@ -1286,7 +1333,13 @@ function renderSticSku(data) {
   html += '</tbody></table></div>';
 
   // Cheapest history table
-  html += '<div class="section-title">Cheapest Price History</div><div class="tbl-wrap"><table><thead><tr><th>Date</th><th>Distributor</th><th>Price</th></tr></thead><tbody>';
+  html += `<div style="display:flex;align-items:center;justify-content:space-between;margin:12px 0 4px">
+    <div class="section-title" style="margin:0">Cheapest Price History</div>
+    <button onclick="openSticPurgeDatesModal(${info.product_id})"
+      style="padding:3px 10px;font-size:11px;background:#A4262C;color:#fff;border:none;border-radius:2px;cursor:pointer"
+      title="Delete bad data for one or more days">🗑 Purge Days</button>
+  </div>
+  <div class="tbl-wrap"><table><thead><tr><th>Date</th><th>Distributor</th><th>Price</th></tr></thead><tbody>`;
   cheapest_history.forEach(r => {
     html += `<tr><td>${fmtDate(r.date)}</td><td>${r.distributor}</td><td>${r.price ? '£'+r.price.toFixed(2) : '—'}</td></tr>`;
   });
@@ -1328,16 +1381,127 @@ function renderSticSku(data) {
     tension: 0.2, spanGaps: true, pointRadius: 2,
   }];
 
+  // Helper: return ISO week key + Monday date for a YYYY-MM-DD string
+  function _isoWeekInfo(dateStr) {
+    const d = new Date(dateStr + 'T00:00:00Z');
+    const dow = d.getUTCDay() || 7;            // Mon=1 … Sun=7
+    const thu = new Date(d);
+    thu.setUTCDate(d.getUTCDate() + (4 - dow)); // Thursday of same ISO week
+    const y = thu.getUTCFullYear();
+    const jan1 = new Date(Date.UTC(y, 0, 1));
+    const wn = Math.ceil(((thu - jan1) / 86400000 + 1) / 7);
+    const mon = new Date(d);
+    mon.setUTCDate(d.getUTCDate() - (dow - 1)); // Monday of same ISO week
+    return { key: `${y}-W${String(wn).padStart(2,'0')}`, monday: mon };
+  }
+
+  // Compute daily stock drops per distributor (stock increases = deliveries, ignored)
+  const _dailyDrops = {}; // { dist: { dateStr: units } }
+  dists.forEach(d => {
+    _dailyDrops[d] = {};
+    dates.forEach((dt, idx) => {
+      if (idx === 0) return;
+      const prevDt = dates[idx - 1];
+      const curr = stock_history.find(r => r.distributor === d && r.date === dt);
+      const prev = stock_history.find(r => r.distributor === d && r.date === prevDt);
+      if (!curr || !prev || curr.qty === null || prev.qty === null) return;
+      const drop = prev.qty - curr.qty;
+      if (drop > 0) _dailyDrops[d][dt] = drop;
+    });
+  });
+
+  // Build a fixed 12-week x-axis ending at the latest week in the data.
+  // Weeks with no data show zero bars — the scale never shrinks.
+  const _MON_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  // Find the Monday of a given ISO week key ("YYYY-Www")
+  function _mondayOfWeekKey(weekKey) {
+    const [y, w] = weekKey.split('-W').map(Number);
+    const jan4  = new Date(Date.UTC(y, 0, 4));          // Jan 4 is always in week 1
+    const dow4  = jan4.getUTCDay() || 7;                // Mon=1
+    const mon1  = new Date(jan4);
+    mon1.setUTCDate(jan4.getUTCDate() - (dow4 - 1));    // Monday of week 1
+    const target = new Date(mon1);
+    target.setUTCDate(mon1.getUTCDate() + (w - 1) * 7);
+    return target;
+  }
+
+  // Latest week present in the data (or current week if no data)
+  const _dataWeeks = [...new Set(dates.map(dt => _isoWeekInfo(dt).key))].sort();
+  const _latestWk  = _dataWeeks.length ? _dataWeeks[_dataWeeks.length - 1]
+                                       : _isoWeekInfo(new Date().toISOString().slice(0,10)).key;
+  const _latestMon = _mondayOfWeekKey(_latestWk);
+
+  // Generate exactly 12 consecutive week keys/labels ending at _latestWk
+  const _weekKeys   = [];
+  const _weekLabels = [];
+  for (let i = 11; i >= 0; i--) {
+    const mon = new Date(_latestMon);
+    mon.setUTCDate(_latestMon.getUTCDate() - i * 7);
+    const ds = mon.toISOString().slice(0, 10);
+    _weekKeys.push(_isoWeekInfo(ds).key);
+    _weekLabels.push(`${mon.getUTCDate()} ${_MON_ABBR[mon.getUTCMonth()]}`);
+  }
+
+  // Weekly totals per distributor (last 12 weeks)
+  const _weeklyByDist = dists.map(d =>
+    _weekKeys.map(wk =>
+      Object.entries(_dailyDrops[d])
+        .filter(([dt]) => _isoWeekInfo(dt).key === wk)
+        .reduce((sum, [, v]) => sum + v, 0)
+    )
+  );
+
+  // Total units sold per week across all distributors
+  const _weekTotals = _weekKeys.map((_, wi) =>
+    dists.reduce((sum, _, di) => sum + _weeklyByDist[di][wi], 0)
+  );
+
+  // Rolling 4-week average — average of non-zero weeks in each 4-week window.
+  // Returns null for windows with no data at all (padding weeks) so the line
+  // doesn't appear until real data begins.
+  const _rolling4 = _weekKeys.map((_, i) => {
+    const window = _weekTotals.slice(Math.max(0, i - 3), i + 1);
+    const nonZero = window.filter(v => v > 0);
+    if (nonZero.length === 0) return null;
+    return parseFloat((nonZero.reduce((a, b) => a + b, 0) / nonZero.length).toFixed(2));
+  });
+
+  // Bar datasets — one per distributor
+  const salesDs = dists.map((d, i) => ({
+    type: 'bar',
+    label: d,
+    data: _weeklyByDist[i],
+    backgroundColor: distColour(d, i),
+    stack: 'sales',
+    order: 2,
+  }));
+
+  // Rolling 4-week average line — solid, distinct colour, spans full axis
+  salesDs.push({
+    type: 'line',
+    label: '4-wk rolling avg',
+    data: _rolling4,
+    borderColor: '#000000',
+    borderWidth: 2,
+    backgroundColor: 'transparent',
+    pointRadius: 2,
+    tension: 0.4,
+    spanGaps: false,
+    order: 1,
+  });
+
   const chartHtml = `<div class="chart-grid">
     <div class="chart-box"><h4>Price per Distributor</h4><canvas id="chart-price"></canvas></div>
-    <div class="chart-box"><h4>Cheapest Price Trend</h4><canvas id="chart-cheapest"></canvas></div>
+    <div class="chart-box"><h4>Cheapest Price Trend (In-Stock Only)</h4><canvas id="chart-cheapest"></canvas></div>
     <div class="chart-box"><h4>Stock per Distributor</h4><canvas id="chart-stock"></canvas></div>
+    <div class="chart-box"><h4>Estimated Sales per Distributor (Weekly)</h4><canvas id="chart-sales"></canvas></div>
   </div>`;
   el.innerHTML += chartHtml;
 
   const fmtDates = dates.map(fmtDate);
-  const opts = (type, datasets, stacked) => ({
-    type, data: { labels: fmtDates, datasets },
+  const opts = (type, datasets, stacked, labels) => ({
+    type, data: { labels: labels || fmtDates, datasets },
     options: { responsive:true, maintainAspectRatio:true, plugins:{legend:{labels:{font:{size:10}}}},
                 scales: { x:{ticks:{font:{size:10}}}, y:{stacked: stacked||false, ticks:{font:{size:10}}} } }
   });
@@ -1345,6 +1509,18 @@ function renderSticSku(data) {
   new Chart(document.getElementById('chart-price'), opts('line', priceDs));
   new Chart(document.getElementById('chart-cheapest'), opts('line', cheapestDs));
   new Chart(document.getElementById('chart-stock'), opts('bar', stockDs, true));
+  new Chart(document.getElementById('chart-sales'), {
+    type: 'bar',
+    data: { labels: _weekLabels, datasets: salesDs },
+    options: {
+      responsive: true, maintainAspectRatio: true,
+      plugins: { legend: { labels: { font: { size: 10 } } } },
+      scales: {
+        x: { ticks: { font: { size: 10 } } },
+        y: { stacked: true, ticks: { font: { size: 10 } } },
+      },
+    },
+  });
 }
 
 // ── STIC pre-built reports ────────────────────────────────────────────────────
@@ -1721,10 +1897,109 @@ function loadInvestigateReport(btn) {
     }
     html += '</div>';
 
-    el.innerHTML = html;
+    el.innerHTML = html + '</div>';
     makeSortableAll(el);
     _refreshAllEolBtns();
   });
+}
+
+function loadProbeSkus(btn) {
+  if (btn) {
+    document.querySelectorAll('#sidebar-stic .sidebar-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+  document.querySelectorAll('#main-stic .content-section').forEach(s=>s.classList.remove('active'));
+  document.getElementById('stic-probe').classList.add('active');
+  const el = document.getElementById('stic-probe-content');
+  el.innerHTML = `
+    <h2 style="margin:0 0 6px">Probe SKUs</h2>
+    <p style="font-size:12px;color:#605E5C;margin:0 0 14px">Track competitor or evaluation products not in the main catalogue.
+    Auto-assigned IDs from 990000+. Scraper navigates directly to the STIC URL you provide.
+    EOL when done; promote to a real SKU via Catalogue if you decide to list.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px;padding:12px;background:#F3F2F1;border-radius:3px">
+      <div style="display:flex;flex-direction:column;gap:3px">
+        <label style="font-size:11px;color:#605E5C;font-weight:600">Model / Name *</label>
+        <input id="probe-model" type="text" placeholder="e.g. RX 9070 XT CHALLENGER OC 16G"
+          style="width:260px;padding:5px 8px;font-size:12px;border:1px solid #C8C6C4;border-radius:2px;font-family:inherit"/>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:3px">
+        <label style="font-size:11px;color:#605E5C;font-weight:600">Manufacturer</label>
+        <input id="probe-mfr" type="text" placeholder="e.g. ASRock"
+          style="width:130px;padding:5px 8px;font-size:12px;border:1px solid #C8C6C4;border-radius:2px;font-family:inherit"/>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:3px">
+        <label style="font-size:11px;color:#605E5C;font-weight:600">STIC URL *</label>
+        <input id="probe-url" type="text" placeholder="https://www.stockinthechannel.co.uk/Product/…"
+          style="width:400px;padding:5px 8px;font-size:12px;border:1px solid #C8C6C4;border-radius:2px;font-family:inherit"/>
+      </div>
+      <button onclick="_addProbe()" style="padding:5px 14px;background:#0078D4;color:#fff;border:none;border-radius:2px;cursor:pointer;font-size:12px;font-weight:600;align-self:flex-end">+ Add</button>
+    </div>
+    <div id="probe-list-container"><div class="spinner">Loading…</div></div>`;
+  _loadProbeList();
+}
+
+function _loadProbeList() {
+  const target = document.getElementById('probe-list-container');
+  if (target) target.innerHTML = '<div class="spinner">Loading…</div>';
+
+  fetch('/api/probe/list').then(r=>r.json()).then(probes => {
+    if (!target) return;
+    if (!probes.length) {
+      target.innerHTML = '<div class="inv-empty">No probe SKUs yet — add one above.</div>';
+      return;
+    }
+    let tbl = `<div class="tbl-wrap"><table><thead><tr>
+      <th>Product</th><th>Model</th><th>Manufacturer</th>
+      <th>Channel Stock</th><th>Sold 7d</th><th>Stock</th><th>Floor</th><th></th>
+    </tr></thead><tbody>`;
+    probes.forEach(p => {
+      const eolStyle = p.eol ? 'opacity:0.5' : '';
+      const channelStock = p.channel_stock ?? 0;
+      const sold7d = p.sold_7d ?? 0;
+      const floor = p.floor_price != null ? '£' + p.floor_price.toFixed(2) : '—';
+      // Per-distributor stock breakdown — only show distributors with actual data (qty not null)
+      const activeDists = (p.snapshot || []).filter(s => s.qty !== null && s.qty !== undefined);
+      const stockLines = activeDists.length
+        ? activeDists.map(s =>
+            `<span style="font-size:11px;display:block">${s.distributor}: ${s.qty}</span>`
+          ).join('')
+        : '<span style="color:#A19F9D;font-size:11px">No data</span>';
+      tbl += `<tr style="${eolStyle}">
+        <td><a href="#" onclick="loadSticSku(${p.product_id},'probe');return false">${p.product_id}</a></td>
+        <td style="font-weight:500">${p.model_no}</td>
+        <td>${p.manufacturer||'—'}</td>
+        <td style="text-align:right">${channelStock}</td>
+        <td style="text-align:right">${sold7d || '—'}</td>
+        <td>${stockLines}</td>
+        <td>${floor}</td>
+        <td style="white-space:nowrap">${eolBtnHtml(p.product_id)}</td>
+      </tr>`;
+    });
+    tbl += '</tbody></table></div>';
+    target.innerHTML = tbl;
+    makeSortableAll(target);
+    _refreshAllEolBtns();
+  });
+}
+
+function _addProbe() {
+  const model = document.getElementById('probe-model')?.value.trim();
+  const mfr   = document.getElementById('probe-mfr')?.value.trim();
+  const url   = document.getElementById('probe-url')?.value.trim();
+  if (!model) { alert('Model / Name is required.'); return; }
+  if (!url || !url.includes('/Product/')) { alert('A valid STIC /Product/ URL is required.'); return; }
+  fetch('/api/probe/add', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ model_no: model, manufacturer: mfr || null, stic_url: url })
+  }).then(r=>r.json()).then(d => {
+    if (d.error) { alert('Failed: ' + d.error); return; }
+    // Clear form and reload probe list
+    document.getElementById('probe-model').value = '';
+    document.getElementById('probe-mfr').value   = '';
+    document.getElementById('probe-url').value   = '';
+    _loadProbeList();
+  }).catch(() => alert('Network error.'));
 }
 
 function loadCatEOL(btn) {
@@ -1800,14 +2075,31 @@ function triggerScrapeGroup(label, btn) {
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({label})
   }).then(r => r.json()).then(data => {
-    if (data.started) {
-      btn.textContent = '⏳ Running…';
-    } else {
+    if (!data.started) {
       btn.disabled = false;
       btn.textContent = '▶ Run';
       _scrapeGroupsRunning[label] = false;
       alert('Failed to start: ' + (data.error || 'unknown error'));
+      return;
     }
+    btn.textContent = '⏳ Running…';
+    // Poll every 10s until the process exits, then reload the page
+    const enc = encodeURIComponent(label);
+    const interval = setInterval(() => {
+      fetch('/api/scrape/group/status?label=' + enc).then(r => r.json()).then(s => {
+        if (s.done) {
+          clearInterval(interval);
+          _scrapeGroupsRunning[label] = false;
+          loadScrapeGroups();   // refresh the scrape page — button resets naturally
+        }
+      }).catch(() => clearInterval(interval));
+    }, 10000);
+    // Safety cap — stop polling after 90 minutes
+    setTimeout(() => {
+      clearInterval(interval);
+      _scrapeGroupsRunning[label] = false;
+      loadScrapeGroups();
+    }, 5400000);
   }).catch(() => {
     btn.disabled = false;
     btn.textContent = '▶ Run';
@@ -2848,8 +3140,10 @@ function purgeRetailerData(productId, retailer) {
 let _pdm = { product_id: null, retailer: null };
 
 function openPurgeDatesModal(productId, retailer) {
+  _pdmMode = 'retail';
   _pdm = { product_id: productId, retailer };
   document.getElementById('pdm-title').textContent = `Purge dates — ${retailer}`;
+  document.getElementById('pdm-desc').textContent  = 'Select individual dates to delete. Retailer ID is left untouched.';
   document.getElementById('pdm-dates').innerHTML   = '<div class="spinner">Loading…</div>';
   document.getElementById('purge-dates-modal').classList.add('open');
   // Use already-loaded history if available, otherwise fetch
@@ -2880,7 +3174,11 @@ function closePurgeDatesModal() {
   document.getElementById('purge-dates-modal').classList.remove('open');
 }
 
+let _pdmMode = 'retail';   // 'retail' | 'stic'
+let _sticPdm = {};         // { product_id, dates[] }
+
 function confirmPurgeDates() {
+  if (_pdmMode === 'stic') { confirmSticPurgeDates(); return; }
   const dates = [...document.querySelectorAll('.pdm-cb:checked')].map(cb => cb.value);
   if (!dates.length) { alert('No dates selected.'); return; }
   if (!confirm(`Delete ${dates.length} date(s) of ${_pdm.retailer} data? This cannot be undone.`)) return;
@@ -2896,6 +3194,50 @@ function confirmPurgeDates() {
     retailerKpiLoaded = false; loadRetailerKpi(); // refresh KPI tile counts
     const back = document.getElementById('ret-sku-back').dataset.back || 'overview';
     loadRetSku(_pdm.product_id, back);
+  }).catch(() => alert('Purge failed — check connection.'));
+}
+
+// ── STIC purge (selected days) ────────────────────────────────────────────────
+function openSticPurgeDatesModal(productId) {
+  _pdmMode = 'stic';
+  _sticPdm = { product_id: productId };
+  document.getElementById('pdm-title').textContent = `Purge STIC days — Product ${productId}`;
+  document.getElementById('pdm-desc').textContent  = 'Select days to delete. All distributor rows for that day are removed — re-scrape afterwards to replace with clean data.';
+  document.getElementById('pdm-dates').innerHTML   = '<div class="spinner">Loading…</div>';
+  document.getElementById('purge-dates-modal').classList.add('open');
+  fetch('/api/stic/sku/' + productId).then(r => r.json()).then(data => {
+    const ph = data.price_history || [];
+    const dateSet = [...new Set(ph.map(r => r.date))].sort((a,b) => b.localeCompare(a));
+    // Build price summary per date (cheapest in-stock for label)
+    const cheapByDate = {};
+    (data.cheapest_history || []).forEach(r => { cheapByDate[r.date] = r.price; });
+    if (!dateSet.length) {
+      document.getElementById('pdm-dates').innerHTML = '<p style="color:#A19F9D;font-size:13px">No data found.</p>';
+      return;
+    }
+    document.getElementById('pdm-dates').innerHTML = dateSet.map(dt => {
+      const price = cheapByDate[dt] ? `£${cheapByDate[dt].toFixed(2)}` : '—';
+      return `<label style="display:flex;align-items:center;gap:10px;padding:5px 2px;border-bottom:1px solid #F3F2F1;cursor:pointer">
+        <input type="checkbox" class="pdm-cb" value="${dt}" style="cursor:pointer">
+        <span style="min-width:70px;font-size:13px">${fmtDate(dt)}</span>
+        <span style="color:#605E5C;font-size:13px">cheapest: ${price}</span>
+      </label>`;
+    }).join('');
+  });
+}
+
+function confirmSticPurgeDates() {
+  const dates = [...document.querySelectorAll('.pdm-cb:checked')].map(cb => cb.value);
+  if (!dates.length) { alert('No dates selected.'); return; }
+  if (!confirm(`Delete all STIC distributor data for ${dates.length} day(s) on product ${_sticPdm.product_id}?\n\nThis cannot be undone.`)) return;
+  fetch('/api/stic/purge-dates', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ product_id: _sticPdm.product_id, dates })
+  }).then(r => r.json()).then(d => {
+    if (d.error) { alert('Failed: ' + d.error); return; }
+    closePurgeDatesModal();
+    loadSticSku(_sticPdm.product_id, sticSkuBackSection || 'overview');
   }).catch(() => alert('Purge failed — check connection.'));
 }
 
@@ -3463,8 +3805,6 @@ def stic_search():
 @app.route("/api/stic/sku/<int:product_id>")
 def stic_sku(product_id):
     latest = latest_date("stic_prices")
-    if not latest:
-        return jsonify({})
 
     info = qry_one(
         """SELECT s.product_id, s.model_no, s.manufacturer, s.product_group,
@@ -3473,7 +3813,19 @@ def stic_sku(product_id):
            LEFT JOIN products p ON p.product_id = s.product_id
            WHERE s.product_id=? LIMIT 1""",
         (product_id,)
-    ) or {}
+    )
+
+    # Fallback: product exists in catalogue but has no stic_prices data yet (e.g. new probe SKU)
+    if not info:
+        info = qry_one(
+            """SELECT product_id, model_no, manufacturer, product_group,
+                      stic_url, ean, description
+               FROM products WHERE product_id=? LIMIT 1""",
+            (product_id,)
+        )
+
+    if not info:
+        return jsonify({})
 
     snapshot = qry(
         "SELECT distributor, price, qty FROM stic_prices WHERE date=? AND product_id=? ORDER BY distributor",
@@ -3492,7 +3844,7 @@ def stic_sku(product_id):
 
     cheapest_history = qry(
         """SELECT date, distributor, MIN(price) AS price
-           FROM stic_prices WHERE product_id=? AND price IS NOT NULL
+           FROM stic_prices WHERE product_id=? AND price IS NOT NULL AND qty > 0
            GROUP BY date ORDER BY date""",
         (product_id,)
     )
@@ -3823,6 +4175,28 @@ def retailer_links(product_id):
     if row.get("box_url"):
         links["Box"]         = row["box_url"]
     return jsonify(links)
+
+
+@app.route("/api/stic/purge-dates", methods=["POST"])
+def stic_purge_dates():
+    """Delete all stic_prices rows for a product on the given dates (all distributors)."""
+    data = request.get_json(silent=True) or {}
+    product_id = data.get("product_id")
+    dates      = data.get("dates", [])
+    if not product_id or not dates:
+        return jsonify({"error": "product_id and dates are required"}), 400
+    if not isinstance(dates, list) or len(dates) > 366:
+        return jsonify({"error": "dates must be a list of up to 366 date strings"}), 400
+    placeholders = ",".join("?" * len(dates))
+    db = get_db()
+    cur = db.execute(
+        f"DELETE FROM stic_prices WHERE product_id = ? AND date IN ({placeholders})",
+        [product_id] + list(dates)
+    )
+    deleted = cur.rowcount
+    db.commit()
+    db.close()
+    return jsonify({"deleted_rows": deleted, "product_id": product_id})
 
 
 @app.route("/api/retailer/purge-dates", methods=["POST"])
@@ -4183,6 +4557,101 @@ def watchlist_report():
 # INVESTIGATE + EOL
 # ═══════════════════════════════════════════════════════════════════════════════
 
+@app.route("/api/probe/list")
+def probe_list():
+    """Return all active probe SKUs (product_id >= 990000) with latest STIC snapshot + summary metrics."""
+    import datetime as _dt
+    db = get_db()
+    products = db.execute(
+        "SELECT product_id, model_no, manufacturer, description, stic_url, eol "
+        "FROM products WHERE product_id >= 990000 ORDER BY product_id"
+    ).fetchall()
+    latest = db.execute(
+        "SELECT MAX(date) AS d FROM stic_prices"
+    ).fetchone()["d"]
+    cutoff_7d = ((_dt.date.today() - _dt.timedelta(days=7)).isoformat())
+    result = []
+    for p in products:
+        pid = p["product_id"]
+        snapshot = []
+        if latest:
+            snapshot = db.execute(
+                "SELECT distributor, price, qty FROM stic_prices "
+                "WHERE product_id=? AND date=? ORDER BY distributor",
+                (pid, latest)
+            ).fetchall()
+
+        # Channel stock = sum of all distributor qty from latest snapshot
+        channel_stock = sum(r["qty"] or 0 for r in snapshot)
+
+        # Floor price = cheapest in-stock price from latest snapshot
+        in_stock = [r for r in snapshot if (r["qty"] or 0) > 0 and r["price"]]
+        floor_price = min(r["price"] for r in in_stock) if in_stock else None
+
+        # Sold 7d = sum of stock drops per distributor over last 7 days
+        hist = db.execute(
+            "SELECT date, distributor, qty FROM stic_prices "
+            "WHERE product_id=? ORDER BY distributor, date",
+            (pid,)
+        ).fetchall()
+        from collections import defaultdict
+        dist_rows = defaultdict(list)
+        for r in hist:
+            dist_rows[r["distributor"]].append((r["date"], r["qty"] or 0))
+        sold_7d = 0
+        for rows in dist_rows.values():
+            rows.sort()
+            for i in range(1, len(rows)):
+                date_str, qty = rows[i]
+                prev_qty = rows[i - 1][1]
+                if date_str >= cutoff_7d and qty < prev_qty:
+                    sold_7d += prev_qty - qty
+
+        result.append({
+            "product_id":    pid,
+            "model_no":      p["model_no"],
+            "manufacturer":  p["manufacturer"],
+            "description":   p["description"],
+            "stic_url":      p["stic_url"],
+            "eol":           p["eol"],
+            "snapshot":      [dict(r) for r in snapshot],
+            "latest_date":   latest,
+            "channel_stock": channel_stock,
+            "floor_price":   floor_price,
+            "sold_7d":       sold_7d,
+        })
+    db.close()
+    return jsonify(result)
+
+
+@app.route("/api/probe/add", methods=["POST"])
+def probe_add():
+    """Add a new probe SKU. Auto-allocates product_id >= 990000."""
+    data = request.get_json(silent=True) or {}
+    model_no    = (data.get("model_no") or "").strip()
+    stic_url    = (data.get("stic_url") or "").strip()
+    manufacturer = (data.get("manufacturer") or "").strip() or None
+    description  = (data.get("description") or "").strip() or None
+    if not model_no:
+        return jsonify({"error": "model_no is required"}), 400
+    if not stic_url or "/Product/" not in stic_url:
+        return jsonify({"error": "A valid STIC /Product/ URL is required"}), 400
+    db = get_db()
+    row = db.execute(
+        "SELECT COALESCE(MAX(product_id), 989999) + 1 AS next_id "
+        "FROM products WHERE product_id >= 990000"
+    ).fetchone()
+    next_id = row["next_id"]
+    db.execute(
+        "INSERT INTO products (product_id, model_no, manufacturer, product_group, "
+        "description, eol, stic_url) VALUES (?,?,?,?,?,0,?)",
+        (next_id, model_no, manufacturer, "PROBE", description, stic_url)
+    )
+    db.commit()
+    db.close()
+    return jsonify({"added": True, "product_id": next_id, "model_no": model_no})
+
+
 @app.route("/api/investigate")
 def investigate():
     # Last 3 dates with stic data
@@ -4320,6 +4789,7 @@ def scrape_group_trigger():
     VALID_LABELS = {
         "Palit GPU", "PowerColor GPU", "MSI GPU", "ASUS GPU", "Gigabyte GPU",
         "MSI Motherboards", "Gigabyte Motherboards", "ASUS Motherboards", "Server / Pro",
+        "Probe SKUs",
     }
     if label not in VALID_LABELS:
         return jsonify({"started": False, "error": f"Unknown group: {label}"})
@@ -4329,17 +4799,84 @@ def scrape_group_trigger():
             "/usr/bin/python3",
             "/opt/openclaw/data/stic/stic_scraper.py",
             "--group", label,
+            "--force",   # manual portal trigger always re-scrapes regardless of prior runs today
         ]
         # Launch detached — portal doesn't wait for it
-        subprocess.Popen(
+        proc = subprocess.Popen(
             cmd,
             stdout=open("/opt/openclaw/logs/stic.log", "a"),
             stderr=subprocess.STDOUT,
             start_new_session=True,
         )
+        _scrape_group_jobs[label] = {"proc": proc, "done": False}
         return jsonify({"started": True, "label": label})
     except Exception as e:
         return jsonify({"started": False, "error": str(e)})
+
+
+# In-memory registry for group scrape jobs: {label: {"proc": proc, "done": bool}}
+_scrape_group_jobs = {}
+
+@app.route("/api/scrape/group/status")
+def scrape_group_status():
+    """Poll whether a group scrape has finished."""
+    label = request.args.get("label", "").strip()
+    job = _scrape_group_jobs.get(label)
+    if not job:
+        return jsonify({"done": True})   # no record → unblock poller
+    if not job["done"] and job["proc"].poll() is not None:
+        job["done"] = True
+    return jsonify({"done": job["done"]})
+
+
+# In-memory registry for single-SKU rescrape jobs: {product_id: {"pid": proc, "done": bool}}
+_rescrape_jobs = {}
+
+@app.route("/api/scrape/sku", methods=["POST"])
+def scrape_sku_trigger():
+    """Launch stic_scraper.py --rescrape <product_id> as a background subprocess."""
+    import subprocess
+    data = request.get_json(silent=True) or {}
+    try:
+        product_id = int(data.get("product_id"))
+    except (TypeError, ValueError):
+        return jsonify({"started": False, "error": "Invalid product_id"})
+
+    try:
+        cmd = [
+            "/usr/bin/python3",
+            "/opt/openclaw/data/stic/stic_scraper.py",
+            "--rescrape", str(product_id),
+        ]
+        proc = subprocess.Popen(
+            cmd,
+            stdout=open("/opt/openclaw/logs/stic.log", "a"),
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        _rescrape_jobs[product_id] = {"proc": proc, "done": False}
+        return jsonify({"started": True, "product_id": product_id})
+    except Exception as e:
+        return jsonify({"started": False, "error": str(e)})
+
+
+@app.route("/api/scrape/sku/status")
+def scrape_sku_status():
+    """Poll whether a single-SKU rescrape has finished."""
+    try:
+        product_id = int(request.args.get("product_id"))
+    except (TypeError, ValueError):
+        return jsonify({"done": True})  # fail-safe: unblock the poller
+
+    job = _rescrape_jobs.get(product_id)
+    if not job:
+        return jsonify({"done": True})  # no record → treat as done
+
+    if not job["done"]:
+        if job["proc"].poll() is not None:   # process has exited
+            job["done"] = True
+
+    return jsonify({"done": job["done"]})
 
 
 @app.route("/api/import/template/new-skus")

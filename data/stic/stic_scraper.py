@@ -203,6 +203,7 @@ SCRAPE_GROUPS = [
     ("GIGABYTE",   "PROD_MBRD",  "Gigabyte Motherboards"),
     ("ASUS",       "PROD_MBRD",  "ASUS Motherboards"),
     (None,         "PROD_MBRDS", "Server / Pro"),
+    (None,         "PROBE",      "Probe SKUs"),
 ]
 
 GPU_GROUPS = [g for g in SCRAPE_GROUPS if g[1] == "PROD_VIDEO"]
@@ -255,8 +256,10 @@ _DIST_DB_NAME = {
     "M2M Direct":   "M2M Direct",
 }
 
-def write_to_db(date_str: str, product: dict, distributor_data: dict):
-    """Write scraped distributor prices to SQLite. Never raises — logs on failure."""
+def write_to_db(date_str: str, product: dict, distributor_data: dict, force: bool = False):
+    """Write scraped distributor prices to SQLite. Never raises — logs on failure.
+    If force=True, existing rows for this product+date are deleted first so the
+    afternoon re-scrape overwrites morning data with fresh prices/stock."""
     import sqlite3
     try:
         # Convert DD-MM-YYYY to YYYY-MM-DD for DB consistency
@@ -271,6 +274,14 @@ def write_to_db(date_str: str, product: dict, distributor_data: dict):
 
         db = sqlite3.connect(_DB_PATH)
         db.execute("PRAGMA journal_mode=WAL")
+
+        if force:
+            # Delete today's rows so fresh data replaces them
+            db.execute(
+                "DELETE FROM stic_prices WHERE date=? AND product_id=?",
+                (iso_date, product_id)
+            )
+
         for dist_name in _DIST_DB_NAME:
             db_dist = _DIST_DB_NAME[dist_name]
             price, qty = distributor_data.get(dist_name, (None, None))
@@ -457,24 +468,104 @@ def search_and_scrape(page, model_no: str, cache: dict, product_id: str = None, 
                 found_url = card_url   # first time seen — save on success
                 return False
 
-        # ── Step 1: search by VIP SKU, validate by model name ────────────────
-        if not product_id:
-            log(f"  WARNING: no product_id — cannot search by VIP SKU, skipping.")
-            return {}
+        # ── Step 0: If a trusted URL is saved, navigate directly to it ───────
+        # This runs BEFORE any search so a manually-corrected URL is always
+        # honoured and can never be overwritten by a bad search result.
+        result = []
+        if cached_url:
+            log(f"  Cached URL found — navigating directly: {cached_url}")
+            try:
+                page.goto(cached_url, wait_until="domcontentloaded")
+                time.sleep(random.uniform(2, 3))
+                direct_result = page.evaluate("""
+                    () => {
+                        const data = [];
+                        const tables = document.querySelectorAll('table');
+                        let targetTable = null;
+                        for (const t of tables) {
+                            const headerRow = t.querySelector('tr');
+                            if (headerRow) {
+                                const text = headerRow.innerText.toLowerCase();
+                                if (text.includes('distributor') || text.includes('stock') || text.includes('price')) {
+                                    targetTable = t;
+                                    break;
+                                }
+                            }
+                        }
+                        if (!targetTable) return data;
+                        const rows = targetTable.querySelectorAll('tr');
+                        rows.forEach((row, idx) => {
+                            if (idx === 0) return;
+                            const cells = row.querySelectorAll('td');
+                            if (cells.length < 4) return;
+                            let distName = cells[0].innerText.trim();
+                            if (!distName) {
+                                const img = cells[0].querySelector('img');
+                                distName = img ? (img.alt || img.title || '') : '';
+                            }
+                            // 6+ col layout: Distributor|Product|SKU|Stock|...|Price
+                            // 4-col layout:  Distributor|Product|Stock|Price
+                            // Price is always the LAST cell regardless of column count.
+                            // Stock is cells[3] for 6+ col, cells[cells.length-2] for 4-col.
+                            let stockText, priceText;
+                            priceText = cells[cells.length - 1].innerText.trim();
+                            if (cells.length >= 6) {
+                                stockText = cells[3].innerText.trim();
+                            } else {
+                                stockText = cells[cells.length - 2].innerText.trim();
+                            }
+                            if (distName) data.push({
+                                distributor: distName,
+                                stock: stockText,
+                                price: priceText,
+                                allCells: Array.from(cells).map(c => c.innerText.trim())
+                            });
+                        });
+                        return data;
+                    }
+                """)
+                if direct_result:
+                    page_text = page.inner_text("body").lower()
+                    brand_ok = (not manufacturer) or (manufacturer.lower() in page_text)
+                    model_ok = (not model_no)     or (model_no.lower() in page_text)
+                    if brand_ok and model_ok:
+                        log(f"  Direct URL scrape succeeded (brand + model validated).")
+                        result = direct_result
+                        found_url = cached_url
+                    else:
+                        failed = []
+                        if not brand_ok: failed.append(f"brand '{manufacturer}'")
+                        if not model_ok: failed.append(f"model '{model_no}'")
+                        log(f"  VALIDATION FAILED on cached URL ({', '.join(failed)} not on page) — falling through to search.")
+                else:
+                    log(f"  Cached URL returned no table — falling through to search.")
+            except Exception as e:
+                log(f"  Error navigating to cached URL: {e} — falling through to search.")
 
-        match_type, raw_rows, card_url = _scrape_table_from_card(page, product_id, "VIP SKU")
+        # ── Steps 1–3: search-based fallback (only if Step 0 didn't succeed) ──
+        match_type = "none"
+        raw_rows   = []
+        card_url   = None
 
-        if match_type == "model":
-            url_confirmed = _check_url(card_url, "VIP SKU")
-            if url_confirmed:
-                log(f"  VIP SKU search: URL sanity check passed — skipping model validation.")
-            else:
-                log(f"  VIP SKU search matched on model name '{model_no}'.")
+        if not result:
+            # ── Step 1: search by VIP SKU, validate by model name ────────────
+            if not product_id:
+                log(f"  WARNING: no product_id — cannot search by VIP SKU, skipping.")
+                return {}
 
-        # ── Step 2: EAN fallback — search by EAN, same model-name validation ─
-        if match_type == "none" and ean:
-            log(f"  VIP SKU search failed — trying EAN fallback: {ean}")
-            match_type, raw_rows, card_url = _scrape_table_from_card(page, ean, "EAN")
+            match_type, raw_rows, card_url = _scrape_table_from_card(page, product_id, "VIP SKU")
+
+            if match_type == "model":
+                url_confirmed = _check_url(card_url, "VIP SKU")
+                if url_confirmed:
+                    log(f"  VIP SKU search: URL sanity check passed — skipping model validation.")
+                else:
+                    log(f"  VIP SKU search matched on model name '{model_no}'.")
+
+            # ── Step 2: EAN fallback — search by EAN, same model-name validation
+            if match_type == "none" and ean:
+                log(f"  VIP SKU search failed — trying EAN fallback: {ean}")
+                match_type, raw_rows, card_url = _scrape_table_from_card(page, ean, "EAN")
             if match_type == "model":
                 url_confirmed = _check_url(card_url, "EAN")
                 if url_confirmed:
@@ -484,7 +575,7 @@ def search_and_scrape(page, model_no: str, cache: dict, product_id: str = None, 
             else:
                 log(f"  EAN fallback: model '{model_no}' not found in results.")
 
-        result = raw_rows
+            result = raw_rows  # only assign from search if Step 0 didn't already succeed
 
         # Step 3 (last resort): search by manufacturer + model name, click through to the
         # product detail page, and scrape the 6-column Trade Prices table there.
@@ -541,15 +632,16 @@ def search_and_scrape(page, model_no: str, cache: dict, product_id: str = None, 
                                 if (img) distName = img.alt || img.title || '';
                             }
 
-                            // 6-col layout: Distributor|Product|SKU|Stock|Updated|Price
-                            // 4-col layout: Distributor|Product|Stock|Price
+                            // 6+ col layout: Distributor|Product|SKU|Stock|...|Price
+                            // 4-col layout:  Distributor|Product|Stock|Price
+                            // Price is always the LAST cell regardless of column count.
+                            // Stock is cells[3] for 6+ col, cells[cells.length-2] for 4-col.
                             let stockText, priceText;
+                            priceText = cells[cells.length - 1].innerText.trim();
                             if (cells.length >= 6) {
                                 stockText = cells[3].innerText.trim();
-                                priceText = cells[5].innerText.trim();
                             } else {
                                 stockText = cells[cells.length - 2].innerText.trim();
-                                priceText = cells[cells.length - 1].innerText.trim();
                             }
 
                             if (distName) data.push({
@@ -960,11 +1052,12 @@ def run(start: int, end: int, date_str: str, is_final: bool = False):
         send_telegram(msg)
 
 # ── Group-based run ───────────────────────────────────────────────────────────
-def run_groups(groups: list, date_str: str, random_start_delay: bool = True):
+def run_groups(groups: list, date_str: str, random_start_delay: bool = True, force: bool = False):
     """
     Open one browser session and scrape each group in sequence.
     Sends a Telegram notification after each group.
     Random 2–5 min gap between groups.
+    If force=True, ignore the completed-today progress file and overwrite existing DB rows.
     Optional random 0–10 min start delay to vary the daily start time.
     """
     if random_start_delay:
@@ -982,7 +1075,7 @@ def run_groups(groups: list, date_str: str, random_start_delay: bool = True):
     iso_date = f"{y}-{m}-{d}"
 
     cache     = load_cache()
-    completed = load_progress(date_str)   # set of str(product_id)s done today
+    completed = set() if force else load_progress(date_str)   # force ignores prior progress
 
     log(f"run_groups: {len(groups)} groups to scrape, date={date_str}")
 
@@ -1060,7 +1153,7 @@ def run_groups(groups: list, date_str: str, random_start_delay: bool = True):
                     log(f"  FAILED — no result found for: {model_no}")
                     group_failed += 1
                 else:
-                    write_to_db(date_str, product, dist_data)
+                    write_to_db(date_str, product, dist_data, force=force)
                     group_done += 1
 
                 completed.add(prod_id)
@@ -1122,6 +1215,7 @@ if __name__ == "__main__":
     parser.add_argument("--start",    type=int,            help="Custom start row")
     parser.add_argument("--end",      type=int,            help="Custom end row")
     parser.add_argument("--rescrape", type=str,            help="Comma-separated product IDs to re-scrape")
+    parser.add_argument("--force",    action="store_true", help="Ignore today's progress file and overwrite existing DB rows — use for re-runs and afternoon passes")
     args = parser.parse_args()
 
     date_str = datetime.now().strftime("%d-%m-%Y")
@@ -1137,14 +1231,14 @@ if __name__ == "__main__":
             available = ", ".join(f'"{g[2]}"' for g in SCRAPE_GROUPS)
             log(f"ERROR: group '{label}' not found. Available: {available}")
             sys.exit(1)
-        log(f"Single-group run: {matched[0][2]}")
-        run_groups(matched, date_str, random_start_delay=False)
+        log(f"Single-group run: {matched[0][2]}" + (" (force)" if args.force else ""))
+        run_groups(matched, date_str, random_start_delay=False, force=args.force)
     elif args.runall:
-        log(f"Morning run: {len(SCRAPE_GROUPS)} groups — all products")
-        run_groups(SCRAPE_GROUPS, date_str, random_start_delay=True)
+        log(f"Morning run: {len(SCRAPE_GROUPS)} groups — all products" + (" (force)" if args.force else ""))
+        run_groups(SCRAPE_GROUPS, date_str, random_start_delay=True, force=args.force)
     elif args.gpus:
-        log(f"Afternoon run: {len(GPU_GROUPS)} GPU groups only")
-        run_groups(GPU_GROUPS, date_str, random_start_delay=True)
+        log(f"Afternoon run: {len(GPU_GROUPS)} GPU groups only (force=True)")
+        run_groups(GPU_GROUPS, date_str, random_start_delay=True, force=True)
     elif args.test:
         run(1, 20, date_str, is_final=False)
     elif args.batch in (1, 2, 3):
