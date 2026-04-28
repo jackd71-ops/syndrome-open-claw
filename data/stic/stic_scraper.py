@@ -548,13 +548,11 @@ def search_and_scrape(page, model_no: str, cache: dict, product_id: str = None, 
                         if not brand_ok: failed.append(f"brand '{manufacturer}'")
                         if not model_ok: failed.append(f"model '{model_no}'")
                         log(f"  VALIDATION FAILED on cached URL ({', '.join(failed)} not on page) — falling through to search.")
-                        # If the manufacturer isn't on the page at all the URL is
-                        # definitively wrong (wrong brand entirely).  Clear it now so
-                        # this product surfaces in Missing Results rather than silently
-                        # re-using a bad URL on every future run.
-                        if not brand_ok and product_id:
-                            clear_stic_url(product_id)
-                            log(f"  Bad URL cleared from DB (wrong brand on page).")
+                        # NOTE: we intentionally do NOT clear the URL here.
+                        # If the SKU was scraping fine before, the URL is evidence of
+                        # what was being used — preserving it lets the user see the old
+                        # URL in Missing Results and investigate what changed on STIC.
+                        # Only the user should clear/correct a URL manually.
                 else:
                     log(f"  Cached URL returned no table — falling through to search.")
             except Exception as e:
