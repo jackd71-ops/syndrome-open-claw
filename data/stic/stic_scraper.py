@@ -581,136 +581,18 @@ def search_and_scrape(page, model_no: str, cache: dict, product_id: str = None, 
 
             result = raw_rows  # only assign from search if Step 0 didn't already succeed
 
-        # Step 3 (last resort): search by manufacturer + model name, click through to the
-        # product detail page, and scrape the 6-column Trade Prices table there.
-        # Uses a different query and a different page layout from Steps 1 & 2.
-        if not result and product_id:
-            fallback_query = f"{manufacturer} {model_no}".strip() if manufacturer else model_no
-            log(f"  Steps 1+2 failed — trying product detail page (query: {fallback_query})")
-            id_url = STIC_SEARCH.format(query=fallback_query.replace(" ", "+"))
-            page.goto(id_url, wait_until="domcontentloaded")
-            time.sleep(random.uniform(2, 3))
-
-            # Find and click the first product link
-            product_links = page.query_selector_all('a[href*="/Product/"]')
-            if product_links:
-                product_href = product_links[0].get_attribute("href")
-                if product_href and not product_href.startswith("http"):
-                    product_href = STIC_BASE + product_href
-                log(f"  Following product link: {product_href}")
-                # NOTE: Step 3 is a last-resort data grab only — do NOT set found_url here.
-                # The full-page brand check below is unreliable because STIC pages show
-                # related products (which may include our manufacturer) in the sidebar,
-                # causing false-positive validation on completely wrong product pages.
-                # Only Steps 0/1/2 may establish a canonical cached URL.
-                page.goto(product_href, wait_until="domcontentloaded")
-                time.sleep(random.uniform(2, 4))
-                page.mouse.wheel(0, random.randint(200, 400))
-                time.sleep(random.uniform(1, 2))
-
-                # Scrape 6-col Trade Prices table: Distributor|Product|SKU|Stock|Updated|Price
-                result = page.evaluate("""
-                    () => {
-                        const data = [];
-                        const tables = document.querySelectorAll('table');
-                        // Find the trade prices table — has 6 columns
-                        let targetTable = null;
-                        for (const t of tables) {
-                            const headerRow = t.querySelector('tr');
-                            if (headerRow) {
-                                const text = headerRow.innerText.toLowerCase();
-                                if (text.includes('distributor') || text.includes('stock') || text.includes('price')) {
-                                    targetTable = t;
-                                    break;
-                                }
-                            }
-                        }
-                        if (!targetTable) return data;
-
-                        const rows = targetTable.querySelectorAll('tr');
-                        rows.forEach((row, idx) => {
-                            if (idx === 0) return; // skip header
-                            const cells = row.querySelectorAll('td');
-                            if (cells.length < 4) return;
-
-                            // Distributor: innerText or img alt
-                            let distName = cells[0].innerText.trim();
-                            if (!distName) {
-                                const img = cells[0].querySelector('img');
-                                if (img) distName = img.alt || img.title || '';
-                            }
-
-                            // 6+ col layout: Distributor|Product|SKU|Stock|...|Price
-                            // 4-col layout:  Distributor|Product|Stock|Price
-                            // Price is always the LAST cell regardless of column count.
-                            // Stock is cells[3] for 6+ col, cells[cells.length-2] for 4-col.
-                            let stockText, priceText;
-                            priceText = cells[cells.length - 1].innerText.trim();
-                            if (cells.length >= 6) {
-                                stockText = cells[3].innerText.trim();
-                            } else {
-                                stockText = cells[cells.length - 2].innerText.trim();
-                            }
-
-                            if (distName) data.push({
-                                distributor: distName,
-                                stock: stockText,
-                                price: priceText,
-                                allCells: Array.from(cells).map(c => c.innerText.trim())
-                            });
-                        });
-                        return data;
-                    }
-                """)
-                if result:
-                    # Validate both brand AND model name on the detail page.
-                    # Brand alone is too loose — "ASUS TUF B550M-PLUS" would pass for
-                    # the "ASUS TUF B550M-PLUS WIFI II" detail page.
-                    page_text = page.inner_text("body").lower()
-                    if manufacturer and manufacturer.lower() not in page_text:
-                        log(f"  VALIDATION FAILED: brand '{manufacturer}' not found on detail page — discarding data.")
-                        result = []
-                    elif model_no and model_no.lower() not in page_text:
-                        log(f"  VALIDATION FAILED: model '{model_no}' not found on detail page — discarding data.")
-                        result = []
-                    else:
-                        log(f"  Product detail page fallback succeeded (brand + model validated).")
-                        # Filter rows by variant markers: reject any row whose product
-                        # description cell contains WIFI/WI-FI if our model doesn't.
-                        # Prevents base-model SKUs picking up WIFI-variant rows when
-                        # STIC lists both variants in the same trade-prices table.
-                        # If ALL rows are filtered, write nulls — safer than wrong data.
-                        model_words = set(model_no.lower().split())
-                        VARIANT_MARKERS = {'wifi', 'wi-fi'}
-                        extra_markers = VARIANT_MARKERS - model_words
-                        if extra_markers:
-                            filtered = []
-                            for r in result:
-                                cells_r = r.get("allCells", [])
-                                desc = (cells_r[1] if len(cells_r) > 1 else "").lower().replace("-", " ")
-                                desc_words = set(desc.split())
-                                if desc_words & extra_markers:
-                                    log(f"  Skipping variant row ({desc_words & extra_markers}): {desc[:55]}")
-                                else:
-                                    filtered.append(r)
-                            if not filtered:
-                                log(f"  All rows are for a different variant — discarding data.")
-                                result = []
-                            else:
-                                if len(filtered) < len(result):
-                                    log(f"  Kept {len(filtered)}/{len(result)} rows after variant filter.")
-                                result = filtered
-                else:
-                    log(f"  Product detail page also found no table.")
-            else:
-                log(f"  No product links found for ID {product_id}.")
+        # Step 3 removed: a broad manufacturer+model-name search that followed the first
+        # result link was too inaccurate — STIC sidebars can show the correct manufacturer
+        # on entirely wrong product pages, causing false-positive validation and bad URL
+        # caching.  If Steps 1 and 2 both fail the SKU is logged as not found so it
+        # appears in the Missing Results page for manual URL correction.
 
         if not result:
             return {}
 
         # Save the confirmed STIC URL so future runs use it directly (Step 0).
-        # IMPORTANT: only save if no URL was already cached — search-based fallbacks
-        # (Steps 1-3) must never overwrite a previously confirmed or manually-set URL.
+        # IMPORTANT: only save if no URL was already cached — Steps 1/2 search results
+        # must never overwrite a previously confirmed or manually-set URL.
         # If the cached URL is wrong, the user corrects it manually via the portal.
         if found_url and product_id and not cached_url:
             save_stic_url(product_id, found_url)
