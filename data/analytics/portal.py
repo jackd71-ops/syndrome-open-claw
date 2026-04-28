@@ -2245,8 +2245,16 @@ function loadMissingResults(btn) {
       el.innerHTML = '<h2 style="margin:0 0 12px">Missing Results</h2><div class="inv-empty">✅ No missing SKUs — all groups fully scraped on their last run.</div>';
       return;
     }
+    // Separate regressions (had data before) from never-found
+    const regressions = data.filter(r => r.last_good_date).length;
+    const neverFound  = data.filter(r => !r.last_good_date).length;
     let html = `<h2 style="margin:0 0 4px">Missing Results</h2>
-      <p style="font-size:12px;color:#605E5C;margin:0 0 16px">SKUs that returned no data on their group's last scrape. Save a corrected STIC URL then use Scrape Now on the SKU page to fix.</p>`;
+      <p style="font-size:12px;color:#605E5C;margin:0 0 16px">
+        SKUs that returned no data on their group's last scrape.
+        <span style="color:#D13438;font-weight:600">⚠ ${regressions} regression${regressions!==1?'s':''}</span>
+        (previously scraped OK, now failing) ·
+        <span style="color:#605E5C">${neverFound} never found</span>
+      </p>`;
 
     // Group by scrape label
     const byGroup = {};
@@ -2255,26 +2263,41 @@ function loadMissingResults(btn) {
       byGroup[r.label].rows.push(r);
     });
     Object.entries(byGroup).forEach(([label, grp]) => {
+      const groupRegressions = grp.rows.filter(r => r.last_good_date).length;
       const btnId = 'miss-scrape-btn-' + label.replace(/[^a-zA-Z0-9]/g,'-');
       const safeLabel = label.replace(/'/g,"\\'");
+      const regBadge = groupRegressions > 0
+        ? ` <span style="color:#D13438;font-size:11px;font-weight:600">(${groupRegressions} regression${groupRegressions!==1?'s':''})</span>`
+        : '';
       html += `<div class="inv-subsection">
         <div class="inv-subsection-title" style="display:flex;align-items:center;justify-content:space-between">
-          <span>${label} — last scraped ${fmtDate(grp.last_scraped)} — ${grp.rows.length} missing</span>
+          <span>${label} — last scraped ${fmtDate(grp.last_scraped)} — ${grp.rows.length} missing${regBadge}</span>
           <button id="${btnId}" onclick="scrapeMissingGroup('${safeLabel}',this)"
             style="padding:3px 12px;font-size:11px;font-weight:600;background:#107C10;color:#fff;border:none;border-radius:2px;cursor:pointer;text-transform:none;letter-spacing:0">▶ Scrape Missing</button>
         </div>
         <div class="tbl-wrap"><table><thead><tr>
-          <th>SKU</th><th>Model</th><th>Manufacturer</th><th>STIC URL</th><th></th>
+          <th>SKU</th><th>Model</th><th>Manufacturer</th><th>Last Good Data</th><th>STIC URL</th><th></th>
         </tr></thead><tbody>`;
-      grp.rows.forEach(r => {
+      // Show regressions first, then never-found
+      const sorted = [...grp.rows].sort((a,b) => {
+        if (a.last_good_date && !b.last_good_date) return -1;
+        if (!a.last_good_date && b.last_good_date) return 1;
+        return a.model_no.localeCompare(b.model_no);
+      });
+      sorted.forEach(r => {
         const urlVal = r.stic_url ? r.stic_url : '';
-        html += `<tr>
+        const lastGood = r.last_good_date
+          ? `<span style="color:#D13438;font-weight:600" title="Was scraping OK until ${r.last_good_date}">${fmtDate(r.last_good_date)}</span>`
+          : `<span style="color:#A19F9D">Never</span>`;
+        const rowStyle = r.last_good_date ? 'background:#FFF4CE' : '';
+        html += `<tr style="${rowStyle}">
           <td><a href="#" onclick="loadSticSku(${r.product_id},'missing');return false">${r.product_id}</a></td>
           <td>${r.model_no}</td>
           <td>${r.manufacturer||'—'}</td>
+          <td>${lastGood}</td>
           <td><input id="miss-url-${r.product_id}" type="text" value="${urlVal}"
             placeholder="Paste STIC /Product/ URL…"
-            style="width:340px;padding:2px 6px;font-size:11px;border:1px solid #C8C6C4;border-radius:2px;font-family:inherit"/></td>
+            style="width:300px;padding:2px 6px;font-size:11px;border:1px solid #C8C6C4;border-radius:2px;font-family:inherit"/></td>
           <td><button onclick="saveSticUrl(${r.product_id})"
             style="padding:2px 10px;font-size:11px;background:#0078D4;color:#fff;border:none;border-radius:2px;cursor:pointer">Save</button></td>
         </tr>`;
@@ -5039,10 +5062,14 @@ def scrape_missing():
         if not last_scraped:
             continue
 
-        # Find active SKUs in this group that have NO data on last_scraped date
+        # Find active SKUs in this group that have NO data on last_scraped date.
+        # Also pull the last date they DID have data (last_good_date) so the UI
+        # can distinguish "never found" from "was working, now broken".
         if manufacturer:
             missing = db.execute(
-                """SELECT p.product_id, p.model_no, p.manufacturer, p.stic_url
+                """SELECT p.product_id, p.model_no, p.manufacturer, p.stic_url,
+                          (SELECT MAX(date) FROM stic_prices s
+                           WHERE s.product_id=p.product_id) AS last_good_date
                    FROM products p
                    WHERE p.eol=0 AND p.manufacturer=? AND p.product_group=?
                      AND p.product_id NOT IN (
@@ -5054,7 +5081,9 @@ def scrape_missing():
             ).fetchall()
         else:
             missing = db.execute(
-                """SELECT p.product_id, p.model_no, p.manufacturer, p.stic_url
+                """SELECT p.product_id, p.model_no, p.manufacturer, p.stic_url,
+                          (SELECT MAX(date) FROM stic_prices s
+                           WHERE s.product_id=p.product_id) AS last_good_date
                    FROM products p
                    WHERE p.eol=0 AND p.product_group=?
                      AND p.product_id NOT IN (
@@ -5067,12 +5096,13 @@ def scrape_missing():
 
         for row in missing:
             result.append({
-                "label":        label,
-                "last_scraped": last_scraped,
-                "product_id":   row["product_id"],
-                "model_no":     row["model_no"],
-                "manufacturer": row["manufacturer"],
-                "stic_url":     row["stic_url"],
+                "label":          label,
+                "last_scraped":   last_scraped,
+                "product_id":     row["product_id"],
+                "model_no":       row["model_no"],
+                "manufacturer":   row["manufacturer"],
+                "stic_url":       row["stic_url"],
+                "last_good_date": row["last_good_date"],  # None = never scraped
             })
     db.close()
     return jsonify(result)
