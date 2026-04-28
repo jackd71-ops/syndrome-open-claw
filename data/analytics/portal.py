@@ -2249,12 +2249,19 @@ function loadMissingResults(btn) {
     const regressions = data.filter(r => r.last_good_date).length;
     const neverFound  = data.filter(r => !r.last_good_date).length;
     let html = `<h2 style="margin:0 0 4px">Missing Results</h2>
-      <p style="font-size:12px;color:#605E5C;margin:0 0 16px">
+      <p style="font-size:12px;color:#605E5C;margin:0 0 8px">
         SKUs that returned no data on their group's last scrape.
         <span style="color:#D13438;font-weight:600">⚠ ${regressions} regression${regressions!==1?'s':''}</span>
         (previously scraped OK, now failing) ·
         <span style="color:#605E5C">${neverFound} never found</span>
-      </p>`;
+      </p>
+      <div style="margin-bottom:16px">
+        <button id="miss-run-all-btn" onclick="scrapeAllMissingSequential(this)"
+          style="padding:5px 16px;font-size:12px;font-weight:600;background:#107C10;color:#fff;border:none;border-radius:2px;cursor:pointer">
+          ▶ Run All (sequential)
+        </button>
+        <span style="font-size:11px;color:#A19F9D;margin-left:8px">Runs smallest group first — one at a time</span>
+      </div>`;
 
     // Group by scrape label
     const byGroup = {};
@@ -2264,7 +2271,6 @@ function loadMissingResults(btn) {
     });
     Object.entries(byGroup).forEach(([label, grp]) => {
       const groupRegressions = grp.rows.filter(r => r.last_good_date).length;
-      const btnId = 'miss-scrape-btn-' + label.replace(/[^a-zA-Z0-9]/g,'-');
       const safeLabel = label.replace(/'/g,"\\'");
       const regBadge = groupRegressions > 0
         ? ` <span style="color:#D13438;font-size:11px;font-weight:600">(${groupRegressions} regression${groupRegressions!==1?'s':''})</span>`
@@ -2272,7 +2278,7 @@ function loadMissingResults(btn) {
       html += `<div class="inv-subsection">
         <div class="inv-subsection-title" style="display:flex;align-items:center;justify-content:space-between">
           <span>${label} — last scraped ${fmtDate(grp.last_scraped)} — ${grp.rows.length} missing${regBadge}</span>
-          <button id="${btnId}" onclick="scrapeMissingGroup('${safeLabel}',this)"
+          <button class="miss-scrape-btn" data-label="${label}" onclick="scrapeMissingGroup('${safeLabel}',this)"
             style="padding:3px 12px;font-size:11px;font-weight:600;background:#107C10;color:#fff;border:none;border-radius:2px;cursor:pointer;text-transform:none;letter-spacing:0">▶ Scrape Missing</button>
         </div>
         <div class="tbl-wrap"><table><thead><tr>
@@ -2309,7 +2315,40 @@ function loadMissingResults(btn) {
   });
 }
 
-function scrapeMissingGroup(label, btn) {
+// Global lock — only one group scrape may run at a time.
+// Set to the label string while running, null when idle.
+let _missingScrapeActive = null;
+
+function _missingLockAll(lockedLabel) {
+  // Disable every Scrape Missing button except the one that's running
+  document.querySelectorAll('.miss-scrape-btn').forEach(b => {
+    if (b.dataset.label !== lockedLabel) {
+      b.disabled = true;
+      b.textContent = '⏸ Busy';
+    }
+  });
+  const runAll = document.getElementById('miss-run-all-btn');
+  if (runAll) runAll.disabled = true;
+}
+
+function _missingUnlockAll() {
+  document.querySelectorAll('.miss-scrape-btn').forEach(b => {
+    b.disabled = false;
+    b.textContent = '▶ Scrape Missing';
+  });
+  const runAll = document.getElementById('miss-run-all-btn');
+  if (runAll) { runAll.disabled = false; runAll.textContent = '▶ Run All (sequential)'; }
+  _missingScrapeActive = null;
+}
+
+function scrapeMissingGroup(label, btn, _resolveCallback) {
+  // Refuse if another group is already running
+  if (_missingScrapeActive && _missingScrapeActive !== label) {
+    alert(`"${_missingScrapeActive}" is still running — please wait for it to finish.`);
+    return;
+  }
+  _missingScrapeActive = label;
+  _missingLockAll(label);
   btn.disabled = true;
   btn.textContent = '⏳ Launching…';
   fetch('/api/scrape/missing-group', {
@@ -2318,8 +2357,10 @@ function scrapeMissingGroup(label, btn) {
     body: JSON.stringify({label})
   }).then(r=>r.json()).then(data => {
     if (!data.started) {
+      _missingUnlockAll();
       btn.disabled = false; btn.textContent = '▶ Scrape Missing';
       alert('Failed to start: ' + (data.error || 'unknown'));
+      if (_resolveCallback) _resolveCallback(false);
       return;
     }
     btn.textContent = `⏳ Running… (${data.count} SKUs)`;
@@ -2328,14 +2369,54 @@ function scrapeMissingGroup(label, btn) {
       fetch('/api/scrape/missing-group/status?label=' + enc).then(r=>r.json()).then(s => {
         if (s.done) {
           clearInterval(interval);
+          _missingUnlockAll();
           btn.disabled = false; btn.textContent = '▶ Scrape Missing';
-          loadMissingResults(null);   // refresh the page — shows updated missing list
+          loadMissingResults(null);
           _refreshScrapeStatusCards();
+          if (_resolveCallback) _resolveCallback(true);
         }
       }).catch(() => clearInterval(interval));
     }, 5000);
-    setTimeout(() => { clearInterval(interval); btn.disabled=false; btn.textContent='▶ Scrape Missing'; loadMissingResults(null); }, 3600000);
-  }).catch(() => { btn.disabled=false; btn.textContent='▶ Scrape Missing'; alert('Network error.'); });
+    // Safety timeout: 90 min max per group
+    setTimeout(() => {
+      clearInterval(interval);
+      _missingUnlockAll();
+      btn.disabled = false; btn.textContent = '▶ Scrape Missing';
+      loadMissingResults(null);
+      if (_resolveCallback) _resolveCallback(false);
+    }, 5400000);
+  }).catch(() => {
+    _missingUnlockAll();
+    btn.disabled = false; btn.textContent = '▶ Scrape Missing';
+    alert('Network error.');
+    if (_resolveCallback) _resolveCallback(false);
+  });
+}
+
+async function scrapeAllMissingSequential(btn) {
+  // Collect groups sorted smallest-first from the rendered buttons
+  const btns = Array.from(document.querySelectorAll('.miss-scrape-btn'));
+  if (!btns.length) return;
+  // Sort by the SKU count shown in the heading (cheapest first)
+  const groups = btns.map(b => ({
+    label: b.dataset.label,
+    btn: b,
+    count: parseInt(b.closest('.inv-subsection')
+             ?.querySelector('.inv-subsection-title span')
+             ?.textContent?.match(/(\d+) missing/)?.[1] || '999')
+  })).sort((a, b) => a.count - b.count);
+
+  btn.disabled = true;
+  const total = groups.length;
+  for (let i = 0; i < groups.length; i++) {
+    const g = groups[i];
+    btn.textContent = `⏳ ${i+1}/${total}: ${g.label} (${g.count} SKUs)…`;
+    await new Promise(resolve => scrapeMissingGroup(g.label, g.btn, resolve));
+    // Brief pause between groups so STIC sees a natural gap
+    if (i < groups.length - 1) await new Promise(r => setTimeout(r, 8000));
+  }
+  btn.textContent = '✓ All done';
+  setTimeout(() => { btn.textContent = '▶ Run All (sequential)'; }, 4000);
 }
 
 // ── Catalogue: Products view ──────────────────────────────────────────────────
