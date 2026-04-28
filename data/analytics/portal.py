@@ -5189,7 +5189,8 @@ def scrape_missing():
     return jsonify(result)
 
 
-_missing_scrape_jobs = {}   # label → {"proc": proc, "done": bool}
+_missing_scrape_jobs = {}        # label → {"proc": proc, "done": bool}
+_missing_scrape_active = None    # label of currently-running group, or None
 
 @app.route("/api/scrape/missing-group", methods=["POST"])
 def scrape_missing_group_trigger():
@@ -5254,6 +5255,17 @@ def scrape_missing_group_trigger():
     if not missing:
         return jsonify({"started": False, "error": "No missing SKUs found"})
 
+    # Server-side single-job lock — check and set atomically before spawning.
+    # This prevents concurrent HTTP requests (multiple tabs, rapid double-clicks,
+    # or the sequential JS helper racing with itself) from launching parallel runs.
+    global _missing_scrape_active
+    existing = _missing_scrape_jobs.get(_missing_scrape_active)
+    if _missing_scrape_active and existing and not existing.get("done") \
+            and existing["proc"].poll() is None:
+        return jsonify({"started": False,
+                        "error": f"'{_missing_scrape_active}' is still running — wait for it to finish"})
+    _missing_scrape_active = label
+
     pid_list = ",".join(str(r["product_id"]) for r in missing)
     try:
         proc = subprocess.Popen(
@@ -5266,17 +5278,21 @@ def scrape_missing_group_trigger():
         _missing_scrape_jobs[label] = {"proc": proc, "done": False}
         return jsonify({"started": True, "label": label, "count": len(missing)})
     except Exception as e:
+        _missing_scrape_active = None
         return jsonify({"started": False, "error": str(e)})
 
 
 @app.route("/api/scrape/missing-group/status")
 def scrape_missing_group_status():
+    global _missing_scrape_active
     label = request.args.get("label", "").strip()
     job = _missing_scrape_jobs.get(label)
     if not job:
         return jsonify({"done": True})
     if not job["done"] and job["proc"].poll() is not None:
         job["done"] = True
+        if _missing_scrape_active == label:
+            _missing_scrape_active = None   # release the lock when job exits
     return jsonify({"done": job["done"]})
 
 
