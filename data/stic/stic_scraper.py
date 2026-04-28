@@ -379,8 +379,9 @@ def search_and_scrape(page, model_no: str, cache: dict, product_id: str = None, 
             return "none", [], None
 
         res = page_obj.evaluate("""
-            (modelNo) => {
+            ([modelNo, mfr]) => {
                 const modelLower = modelNo.toLowerCase();
+                const mfrLower   = mfr ? mfr.toLowerCase() : null;
                 const tables = document.querySelectorAll('table');
                 if (!tables.length) return { match_type: 'none', rows: [] };
 
@@ -401,7 +402,10 @@ def search_and_scrape(page, model_no: str, cache: dict, product_id: str = None, 
                     return true;
                 }
                 function cardMatchesModel(el) {
-                    const lines = (el.innerText || '').split('\\n').map(l => l.trim().toLowerCase());
+                    const cardText = (el.innerText || '').toLowerCase();
+                    // Manufacturer must appear somewhere in the card (if we know it)
+                    if (mfrLower && !cardText.includes(mfrLower)) return false;
+                    const lines = cardText.split('\\n').map(l => l.trim());
                     return lines.some(l => lineMatchesModel(l));
                 }
 
@@ -438,7 +442,7 @@ def search_and_scrape(page, model_no: str, cache: dict, product_id: str = None, 
                 }
                 return { match_type: 'none', rows: [], productUrl: null };
             }
-        """, model_no)
+        """, [model_no, manufacturer])
 
         mt = res.get("match_type", "none") if isinstance(res, dict) else "none"
         rr = res.get("rows", []) if isinstance(res, dict) else []
@@ -700,8 +704,11 @@ def search_and_scrape(page, model_no: str, cache: dict, product_id: str = None, 
         if not result:
             return {}
 
-        # Save the confirmed STIC URL so future runs use it as sanity check
-        if found_url and product_id:
+        # Save the confirmed STIC URL so future runs use it directly (Step 0).
+        # IMPORTANT: only save if no URL was already cached — search-based fallbacks
+        # (Steps 1-3) must never overwrite a previously confirmed or manually-set URL.
+        # If the cached URL is wrong, the user corrects it manually via the portal.
+        if found_url and product_id and not cached_url:
             save_stic_url(product_id, found_url)
 
         cache[model_no] = str(product_id)   # mark as "ever found" for run() failure logging

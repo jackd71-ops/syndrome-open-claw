@@ -199,13 +199,20 @@ HTML = r"""<!DOCTYPE html>
                         font-weight: 600; }
 
   /* KPI cards */
-  .kpi-row { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+  .overview-cards { display:grid; grid-template-columns:repeat(6,1fr); gap:12px; margin-bottom:20px; }
+  .kpi-row { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .scrape-status-row { display:none; }
   .kpi-card { background: #fff; border: 1px solid #EDEBE9; border-radius: 2px;
-               padding: 14px 18px; flex: 1; min-width: 140px; }
+               padding: 14px 18px; position:relative; }
   .kpi-card .label { font-size: 11px; color: #A19F9D; text-transform: uppercase;
                      letter-spacing: .4px; margin-bottom: 6px; }
   .kpi-card .value { font-size: 24px; font-weight: 600; color: #323130; }
   .kpi-card .sub { font-size: 11px; color: #605E5C; margin-top: 4px; }
+  .kpi-card .tl-dot { position:absolute; top:10px; right:10px; width:10px; height:10px;
+    border-radius:50%; display:inline-block; }
+  .tl-green  { background:#107C10; }
+  .tl-amber  { background:#F7941D; }
+  .tl-red    { background:#D13438; }
 
   /* Search */
   .search-bar { display: flex; gap: 8px; margin-bottom: 20px; }
@@ -456,6 +463,7 @@ HTML = r"""<!DOCTYPE html>
       </div>
       <div class="sidebar-items">
         <button class="sidebar-btn" onclick="loadScrapeGroups(this)">⟳ Refresh SKUs</button>
+        <button class="sidebar-btn" onclick="loadMissingResults(this)">❌ Missing Results</button>
       </div>
     </div>
   </div>
@@ -463,7 +471,7 @@ HTML = r"""<!DOCTYPE html>
   <div class="main" id="main-stic">
     <!-- Overview -->
     <div class="content-section active" id="stic-overview">
-      <div id="stic-kpi" class="kpi-row"><div class="spinner">Loading…</div></div>
+      <div id="stic-overview-cards" class="overview-cards"><div class="spinner">Loading…</div></div>
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
         <span class="section-title" style="margin-bottom:0">Chipset Daily Overview</span>
         <div style="display:flex;gap:4px;margin-left:12px">
@@ -513,6 +521,10 @@ HTML = r"""<!DOCTYPE html>
     <!-- Scrape Groups -->
     <div class="content-section" id="stic-scrape">
       <div id="stic-scrape-content"><div class="spinner">Loading…</div></div>
+    </div>
+    <!-- Missing Results -->
+    <div class="content-section" id="stic-missing">
+      <div id="stic-missing-content"><div class="spinner">Loading…</div></div>
     </div>
   </div>
 </div>
@@ -939,16 +951,37 @@ function showSticSection(name, btn) {
 
 // ── STIC KPI & Overview ───────────────────────────────────────────────────────
 function loadSticOverview() {
-  fetch('/api/stic/kpi').then(r=>r.json()).then(data => {
-    const el = document.getElementById('stic-kpi');
-    el.innerHTML = `
-      <div class="kpi-card"><div class="label">SKUs Tracked</div><div class="value">${data.total_skus}</div><div class="sub">products</div></div>
-      <div class="kpi-card"><div class="label">Channel Stock Today</div><div class="value">${data.channel_stock_today.toLocaleString()}</div><div class="sub">units across all distributors</div></div>
-      <div class="kpi-card"><div class="label">SKUs In Stock</div><div class="value">${data.skus_in_stock}</div><div class="sub">of ${data.total_skus} tracked</div></div>
-      <div class="kpi-card"><div class="label">SKUs No Stock</div><div class="value">${data.skus_no_stock}</div><div class="sub">zero channel inventory</div></div>
-      <div class="kpi-card"><div class="label">Last Scraped</div><div class="value" style="font-size:16px">${fmtDate(data.latest_date)}</div><div class="sub">${data.dates_tracked} dates tracked</div></div>
-    `;
-  });
+  const container = document.getElementById('stic-overview-cards');
+  let kpiData = null, groupData = null;
+
+  function _renderOverviewCards() {
+    if (!kpiData || !groupData) return;
+    const today = new Date().toISOString().slice(0,10);
+    const yesterday = new Date(Date.now()-864e5).toISOString().slice(0,10);
+    let html = `
+      <div class="kpi-card"><div class="label">SKUs Tracked</div><div class="value">${kpiData.total_skus}</div><div class="sub">products</div></div>
+      <div class="kpi-card"><div class="label">SKUs In Stock</div><div class="value">${kpiData.skus_in_stock}</div><div class="sub">of ${kpiData.total_skus} tracked</div></div>
+      <div class="kpi-card"><div class="label">SKUs No Stock</div><div class="value">${kpiData.skus_no_stock}</div><div class="sub">zero channel inventory</div></div>`;
+    groupData.forEach(g => {
+      const pct = g.sku_count > 0 ? g.scraped_count / g.sku_count : 0;
+      const isToday = g.last_scraped === today;
+      const dotCls = !isToday ? 'tl-red' : pct >= 0.90 ? 'tl-green' : pct >= 0.75 ? 'tl-amber' : 'tl-red';
+      const dateLabel = !g.last_scraped ? 'Never' : isToday ? 'Today'
+        : g.last_scraped === yesterday ? 'Yesterday' : fmtDate(g.last_scraped);
+      const failed = g.sku_count - g.scraped_count;
+      const failTxt = failed > 0 ? `<span style="color:#D13438">(${failed} failed)</span>` : '';
+      html += `<div class="kpi-card">
+        <span class="tl-dot ${dotCls}"></span>
+        <div class="label">${g.label}</div>
+        <div class="value" style="font-size:16px">${dateLabel}</div>
+        <div class="sub">${g.scraped_count} / ${g.sku_count} SKUs ${failTxt}</div>
+      </div>`;
+    });
+    container.innerHTML = html;
+  }
+
+  fetch('/api/stic/kpi').then(r=>r.json()).then(d => { kpiData = d; _renderOverviewCards(); });
+  fetch('/api/scrape/groups').then(r=>r.json()).then(d => { groupData = d; _renderOverviewCards(); });
 
   loadChipsetOverview('mbrd');
 }
@@ -1036,7 +1069,9 @@ function eolBtnHtml(pid) {
 }
 
 function saveSticUrl(pid) {
-  const input = document.getElementById('stic-url-input-' + pid);
+  // Support both the SKU page input (stic-url-input-<pid>) and the missing-results inline input (miss-url-<pid>)
+  const input = document.getElementById('stic-url-input-' + pid)
+             || document.getElementById('miss-url-' + pid);
   const url = input ? input.value.trim() : '';
   if (!url) { alert('Please paste a STIC URL first'); return; }
   const btn = input ? input.nextElementSibling : null;
@@ -1047,7 +1082,13 @@ function saveSticUrl(pid) {
     body: JSON.stringify({ url })
   }).then(r => r.json()).then(data => {
     if (data.saved) {
-      loadSticSku(pid, sticSkuBackSection || 'overview');  // refresh — new URL shown immediately
+      // If we're on the SKU detail page, reload it; if on missing results, just confirm in-place
+      const missingActive = document.getElementById('stic-missing')?.classList.contains('active');
+      if (missingActive) {
+        if (btn) { btn.disabled = false; btn.textContent = '✓ Saved'; btn.style.background='#107C10'; }
+      } else {
+        loadSticSku(pid, sticSkuBackSection || 'overview');
+      }
     } else {
       if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
       alert('Save failed: ' + (data.error || 'unknown error'));
@@ -1056,6 +1097,33 @@ function saveSticUrl(pid) {
     if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
     alert('Network error — URL not saved.');
   });
+}
+
+function saveNotes(pid) {
+  const ta = document.getElementById('sku-notes-' + pid);
+  if (!ta) return;
+  const notes = ta.value.trim();
+  fetch('/api/notes/' + pid, {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ notes })
+  }).then(r=>r.json()).then(() => {
+    const btn = ta.nextElementSibling;
+    if (btn) { const orig = btn.textContent; btn.textContent = '✓ Saved'; btn.style.background='#107C10';
+      setTimeout(()=>{ btn.textContent=orig; btn.style.background='#0078D4'; }, 1500); }
+  }).catch(() => alert('Network error — notes not saved.'));
+}
+
+function clearNotes(pid) {
+  const ta = document.getElementById('sku-notes-' + pid);
+  if (!ta || !ta.value.trim()) return;
+  if (!confirm('Clear notes for this SKU?')) return;
+  ta.value = '';
+  fetch('/api/notes/' + pid, {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ notes: '' })
+  }).catch(() => alert('Network error — notes not cleared.'));
 }
 
 function triggerRescrape(pid) {
@@ -1323,6 +1391,19 @@ function renderSticSku(data) {
         style="margin-left:8px;padding:3px 10px;background:#107C10;color:#fff;border:none;border-radius:2px;cursor:pointer;font-size:12px"
         title="Re-scrape STIC now for this SKU and refresh the page">▶ Scrape Now</button>
     </span>
+  </div>
+  <div style="margin-bottom:14px">
+    <div style="font-size:11px;font-weight:600;color:#605E5C;margin-bottom:4px">Notes</div>
+    <div style="display:flex;gap:6px;align-items:flex-start">
+      <textarea id="sku-notes-${info.product_id}" rows="2"
+        placeholder="Add notes — why EOL'd, why not listed, anything useful for later…"
+        style="flex:1;max-width:600px;padding:5px 8px;font-size:12px;border:1px solid #C8C6C4;border-radius:2px;font-family:inherit;resize:vertical"
+      >${info.notes ? info.notes.replace(/</g,'&lt;') : ''}</textarea>
+      <button onclick="saveNotes(${info.product_id})"
+        style="padding:5px 12px;background:#0078D4;color:#fff;border:none;border-radius:2px;cursor:pointer;font-size:12px;white-space:nowrap">Save</button>
+      <button onclick="clearNotes(${info.product_id})"
+        style="padding:5px 12px;background:#fff;color:#D13438;border:1px solid #D13438;border-radius:2px;cursor:pointer;font-size:12px;white-space:nowrap">Clear</button>
+    </div>
   </div>`;
 
   // Snapshot table
@@ -2083,14 +2164,14 @@ function triggerScrapeGroup(label, btn) {
       return;
     }
     btn.textContent = '⏳ Running…';
-    // Poll every 10s until the process exits, then reload the page
+    // Poll every 10s until the process exits
     const enc = encodeURIComponent(label);
     const interval = setInterval(() => {
       fetch('/api/scrape/group/status?label=' + enc).then(r => r.json()).then(s => {
         if (s.done) {
           clearInterval(interval);
           _scrapeGroupsRunning[label] = false;
-          loadScrapeGroups();   // refresh the scrape page — button resets naturally
+          _onScrapeGroupDone(label, btn);
         }
       }).catch(() => clearInterval(interval));
     }, 10000);
@@ -2098,7 +2179,7 @@ function triggerScrapeGroup(label, btn) {
     setTimeout(() => {
       clearInterval(interval);
       _scrapeGroupsRunning[label] = false;
-      loadScrapeGroups();
+      _onScrapeGroupDone(label, btn);
     }, 5400000);
   }).catch(() => {
     btn.disabled = false;
@@ -2106,6 +2187,132 @@ function triggerScrapeGroup(label, btn) {
     _scrapeGroupsRunning[label] = false;
     alert('Network error — could not start scrape.');
   });
+}
+
+function _onScrapeGroupDone(label, btn) {
+  // Refresh whichever view is currently visible
+  const scrapeSection = document.getElementById('stic-scrape');
+  if (scrapeSection && scrapeSection.classList.contains('active')) {
+    loadScrapeGroups();   // reloads scrape page table — button resets naturally
+  } else {
+    // On overview (or anywhere else) — just refresh the status cards in place
+    if (btn) { btn.disabled = false; btn.textContent = '▶ Run'; }
+    _refreshScrapeStatusCards();
+  }
+}
+
+function _refreshScrapeStatusCards() {
+  // Re-render the unified overview grid (scrape group cards portion)
+  // Fetch fresh group data and re-trigger the full overview card render
+  fetch('/api/scrape/groups').then(r=>r.json()).then(groups => {
+    const container = document.getElementById('stic-overview-cards');
+    if (!container) return;
+    const today = new Date().toISOString().slice(0,10);
+    const yesterday = new Date(Date.now()-864e5).toISOString().slice(0,10);
+    // Replace only the group cards (keep first 3 KPI cards)
+    const existingKpi = Array.from(container.querySelectorAll('.kpi-card')).slice(0,3);
+    let html = existingKpi.map(el => el.outerHTML).join('');
+    groups.forEach(g => {
+      const pct = g.sku_count > 0 ? g.scraped_count / g.sku_count : 0;
+      const isToday = g.last_scraped === today;
+      const dotCls = !isToday ? 'tl-red' : pct >= 0.90 ? 'tl-green' : pct >= 0.75 ? 'tl-amber' : 'tl-red';
+      const dateLabel = !g.last_scraped ? 'Never' : isToday ? 'Today'
+        : g.last_scraped === yesterday ? 'Yesterday' : fmtDate(g.last_scraped);
+      const failed = g.sku_count - g.scraped_count;
+      const failTxt = failed > 0 ? `<span style="color:#D13438">(${failed} failed)</span>` : '';
+      html += `<div class="kpi-card">
+        <span class="tl-dot ${dotCls}"></span>
+        <div class="label">${g.label}</div>
+        <div class="value" style="font-size:16px">${dateLabel}</div>
+        <div class="sub">${g.scraped_count} / ${g.sku_count} SKUs ${failTxt}</div>
+      </div>`;
+    });
+    container.innerHTML = html;
+  });
+}
+
+function loadMissingResults(btn) {
+  if (btn) {
+    document.querySelectorAll('#sidebar-stic .sidebar-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+  document.querySelectorAll('#main-stic .content-section').forEach(s=>s.classList.remove('active'));
+  document.getElementById('stic-missing').classList.add('active');
+  const el = document.getElementById('stic-missing-content');
+  el.innerHTML = '<div class="spinner">Loading…</div>';
+  fetch('/api/scrape/missing').then(r=>r.json()).then(data => {
+    if (!data.length) {
+      el.innerHTML = '<h2 style="margin:0 0 12px">Missing Results</h2><div class="inv-empty">✅ No missing SKUs — all groups fully scraped on their last run.</div>';
+      return;
+    }
+    let html = `<h2 style="margin:0 0 4px">Missing Results</h2>
+      <p style="font-size:12px;color:#605E5C;margin:0 0 16px">SKUs that returned no data on their group's last scrape. Save a corrected STIC URL then use Scrape Now on the SKU page to fix.</p>`;
+
+    // Group by scrape label
+    const byGroup = {};
+    data.forEach(r => {
+      if (!byGroup[r.label]) byGroup[r.label] = { last_scraped: r.last_scraped, rows: [] };
+      byGroup[r.label].rows.push(r);
+    });
+    Object.entries(byGroup).forEach(([label, grp]) => {
+      const btnId = 'miss-scrape-btn-' + label.replace(/[^a-zA-Z0-9]/g,'-');
+      const safeLabel = label.replace(/'/g,"\\'");
+      html += `<div class="inv-subsection">
+        <div class="inv-subsection-title" style="display:flex;align-items:center;justify-content:space-between">
+          <span>${label} — last scraped ${fmtDate(grp.last_scraped)} — ${grp.rows.length} missing</span>
+          <button id="${btnId}" onclick="scrapeMissingGroup('${safeLabel}',this)"
+            style="padding:3px 12px;font-size:11px;font-weight:600;background:#107C10;color:#fff;border:none;border-radius:2px;cursor:pointer;text-transform:none;letter-spacing:0">▶ Scrape Missing</button>
+        </div>
+        <div class="tbl-wrap"><table><thead><tr>
+          <th>SKU</th><th>Model</th><th>Manufacturer</th><th>STIC URL</th><th></th>
+        </tr></thead><tbody>`;
+      grp.rows.forEach(r => {
+        const urlVal = r.stic_url ? r.stic_url : '';
+        html += `<tr>
+          <td><a href="#" onclick="loadSticSku(${r.product_id},'missing');return false">${r.product_id}</a></td>
+          <td>${r.model_no}</td>
+          <td>${r.manufacturer||'—'}</td>
+          <td><input id="miss-url-${r.product_id}" type="text" value="${urlVal}"
+            placeholder="Paste STIC /Product/ URL…"
+            style="width:340px;padding:2px 6px;font-size:11px;border:1px solid #C8C6C4;border-radius:2px;font-family:inherit"/></td>
+          <td><button onclick="saveSticUrl(${r.product_id})"
+            style="padding:2px 10px;font-size:11px;background:#0078D4;color:#fff;border:none;border-radius:2px;cursor:pointer">Save</button></td>
+        </tr>`;
+      });
+      html += '</tbody></table></div></div>';
+    });
+    el.innerHTML = html;
+    makeSortableAll(el);
+  });
+}
+
+function scrapeMissingGroup(label, btn) {
+  btn.disabled = true;
+  btn.textContent = '⏳ Launching…';
+  fetch('/api/scrape/missing-group', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({label})
+  }).then(r=>r.json()).then(data => {
+    if (!data.started) {
+      btn.disabled = false; btn.textContent = '▶ Scrape Missing';
+      alert('Failed to start: ' + (data.error || 'unknown'));
+      return;
+    }
+    btn.textContent = `⏳ Running… (${data.count} SKUs)`;
+    const enc = encodeURIComponent(label);
+    const interval = setInterval(() => {
+      fetch('/api/scrape/missing-group/status?label=' + enc).then(r=>r.json()).then(s => {
+        if (s.done) {
+          clearInterval(interval);
+          btn.disabled = false; btn.textContent = '▶ Scrape Missing';
+          loadMissingResults(null);   // refresh the page — shows updated missing list
+          _refreshScrapeStatusCards();
+        }
+      }).catch(() => clearInterval(interval));
+    }, 5000);
+    setTimeout(() => { clearInterval(interval); btn.disabled=false; btn.textContent='▶ Scrape Missing'; loadMissingResults(null); }, 3600000);
+  }).catch(() => { btn.disabled=false; btn.textContent='▶ Scrape Missing'; alert('Network error.'); });
 }
 
 // ── Catalogue: Products view ──────────────────────────────────────────────────
@@ -3780,11 +3987,12 @@ def stic_search():
     q = request.args.get("q", "").strip()
     if not q:
         return jsonify([])
-    latest = latest_date("stic_prices")
-    if not latest:
-        return jsonify([])
 
     like = f"%{q}%"
+    # Use each product's most recent date within the last 7 days — handles days where the
+    # morning scrape failed (only partial data) or a SKU was manually rescraped mid-day.
+    import datetime as _dt
+    cutoff = (_dt.date.today() - _dt.timedelta(days=7)).isoformat()
     rows = qry(
         """SELECT s.product_id, s.model_no, s.manufacturer,
                SUM(s.qty) AS total_stock,
@@ -3792,12 +4000,17 @@ def stic_search():
                MIN(CASE WHEN s.price > 0 THEN s.price END) AS min_price,
                MAX(CASE WHEN s.distributor='VIP' THEN s.price END) AS vip_price
            FROM stic_prices s
-           WHERE s.date=?
-             AND (CAST(s.product_id AS TEXT) LIKE ? OR s.model_no LIKE ? OR s.manufacturer LIKE ?)
+           INNER JOIN (
+               SELECT product_id, MAX(date) AS latest_for_product
+               FROM stic_prices
+               WHERE date >= ?
+               GROUP BY product_id
+           ) lp ON lp.product_id = s.product_id AND s.date = lp.latest_for_product
+           WHERE (CAST(s.product_id AS TEXT) LIKE ? OR s.model_no LIKE ? OR s.manufacturer LIKE ?)
            GROUP BY s.product_id, s.model_no, s.manufacturer
            ORDER BY s.model_no
            LIMIT 100""",
-        (latest, like, like, like)
+        (cutoff, like, like, like)
     )
     return jsonify(rows)
 
@@ -3808,7 +4021,7 @@ def stic_sku(product_id):
 
     info = qry_one(
         """SELECT s.product_id, s.model_no, s.manufacturer, s.product_group,
-               p.stic_url, p.ean, p.description
+               p.stic_url, p.ean, p.description, p.notes
            FROM stic_prices s
            LEFT JOIN products p ON p.product_id = s.product_id
            WHERE s.product_id=? LIMIT 1""",
@@ -3819,7 +4032,7 @@ def stic_sku(product_id):
     if not info:
         info = qry_one(
             """SELECT product_id, model_no, manufacturer, product_group,
-                      stic_url, ean, description
+                      stic_url, ean, description, notes
                FROM products WHERE product_id=? LIMIT 1""",
             (product_id,)
         )
@@ -4765,15 +4978,195 @@ def scrape_groups():
             ).fetchone()
         last_scraped = last["d"] if last else None
 
+        # Count how many distinct SKUs actually got data on the last_scraped date
+        scraped_count = 0
+        if last_scraped:
+            if manufacturer:
+                sc = db.execute(
+                    "SELECT COUNT(DISTINCT product_id) AS c FROM stic_prices "
+                    "WHERE date=? AND manufacturer=? AND product_group=?",
+                    (last_scraped, manufacturer, product_group)
+                ).fetchone()
+            else:
+                sc = db.execute(
+                    "SELECT COUNT(DISTINCT product_id) AS c FROM stic_prices "
+                    "WHERE date=? AND product_group=?",
+                    (last_scraped, product_group)
+                ).fetchone()
+            scraped_count = sc["c"] if sc else 0
+
         result.append({
-            "label":        label,
-            "manufacturer": manufacturer,
+            "label":         label,
+            "manufacturer":  manufacturer,
             "product_group": product_group,
-            "sku_count":    sku_count,
-            "last_scraped": last_scraped,
+            "sku_count":     sku_count,
+            "last_scraped":  last_scraped,
+            "scraped_count": scraped_count,
         })
     db.close()
     return jsonify(result)
+
+
+@app.route("/api/scrape/missing")
+def scrape_missing():
+    """Return all active SKUs that have no data on their group's last-scraped date."""
+    SCRAPE_GROUPS = [
+        ("PALIT",      "PROD_VIDEO", "Palit GPU"),
+        ("POWERCOLOR", "PROD_VIDEO", "PowerColor GPU"),
+        ("MSI",        "PROD_VIDEO", "MSI GPU"),
+        ("ASUS",       "PROD_VIDEO", "ASUS GPU"),
+        ("GIGABYTE",   "PROD_VIDEO", "Gigabyte GPU"),
+        ("MSI",        "PROD_MBRD",  "MSI Motherboards"),
+        ("GIGABYTE",   "PROD_MBRD",  "Gigabyte Motherboards"),
+        ("ASUS",       "PROD_MBRD",  "ASUS Motherboards"),
+        (None,         "PROD_MBRDS", "Server / Pro"),
+    ]
+    db = get_db()
+    result = []
+    for manufacturer, product_group, label in SCRAPE_GROUPS:
+        # Find last scrape date for this group
+        if manufacturer:
+            last = db.execute(
+                "SELECT MAX(date) AS d FROM stic_prices WHERE manufacturer=? AND product_group=?",
+                (manufacturer, product_group)
+            ).fetchone()
+        else:
+            last = db.execute(
+                "SELECT MAX(date) AS d FROM stic_prices WHERE product_group=?",
+                (product_group,)
+            ).fetchone()
+        last_scraped = last["d"] if last else None
+        if not last_scraped:
+            continue
+
+        # Find active SKUs in this group that have NO data on last_scraped date
+        if manufacturer:
+            missing = db.execute(
+                """SELECT p.product_id, p.model_no, p.manufacturer, p.stic_url
+                   FROM products p
+                   WHERE p.eol=0 AND p.manufacturer=? AND p.product_group=?
+                     AND p.product_id NOT IN (
+                         SELECT DISTINCT product_id FROM stic_prices
+                         WHERE date=? AND manufacturer=? AND product_group=?
+                     )
+                   ORDER BY p.model_no""",
+                (manufacturer, product_group, last_scraped, manufacturer, product_group)
+            ).fetchall()
+        else:
+            missing = db.execute(
+                """SELECT p.product_id, p.model_no, p.manufacturer, p.stic_url
+                   FROM products p
+                   WHERE p.eol=0 AND p.product_group=?
+                     AND p.product_id NOT IN (
+                         SELECT DISTINCT product_id FROM stic_prices
+                         WHERE date=? AND product_group=?
+                     )
+                   ORDER BY p.model_no""",
+                (product_group, last_scraped, product_group)
+            ).fetchall()
+
+        for row in missing:
+            result.append({
+                "label":        label,
+                "last_scraped": last_scraped,
+                "product_id":   row["product_id"],
+                "model_no":     row["model_no"],
+                "manufacturer": row["manufacturer"],
+                "stic_url":     row["stic_url"],
+            })
+    db.close()
+    return jsonify(result)
+
+
+_missing_scrape_jobs = {}   # label → {"proc": proc, "done": bool}
+
+@app.route("/api/scrape/missing-group", methods=["POST"])
+def scrape_missing_group_trigger():
+    """Scrape only the missing SKUs for a given group label."""
+    import subprocess
+    SCRAPE_GROUPS = [
+        ("PALIT",      "PROD_VIDEO", "Palit GPU"),
+        ("POWERCOLOR", "PROD_VIDEO", "PowerColor GPU"),
+        ("MSI",        "PROD_VIDEO", "MSI GPU"),
+        ("ASUS",       "PROD_VIDEO", "ASUS GPU"),
+        ("GIGABYTE",   "PROD_VIDEO", "Gigabyte GPU"),
+        ("MSI",        "PROD_MBRD",  "MSI Motherboards"),
+        ("GIGABYTE",   "PROD_MBRD",  "Gigabyte Motherboards"),
+        ("ASUS",       "PROD_MBRD",  "ASUS Motherboards"),
+        (None,         "PROD_MBRDS", "Server / Pro"),
+    ]
+    data = request.get_json(silent=True) or {}
+    label = (data.get("label") or "").strip()
+    group = next((g for g in SCRAPE_GROUPS if g[2] == label), None)
+    if not group:
+        return jsonify({"started": False, "error": f"Unknown group: {label}"})
+
+    manufacturer, product_group, _ = group
+    db = get_db()
+
+    # Find last scrape date for this group
+    if manufacturer:
+        last = db.execute(
+            "SELECT MAX(date) AS d FROM stic_prices WHERE manufacturer=? AND product_group=?",
+            (manufacturer, product_group)
+        ).fetchone()
+    else:
+        last = db.execute(
+            "SELECT MAX(date) AS d FROM stic_prices WHERE product_group=?",
+            (product_group,)
+        ).fetchone()
+    last_scraped = last["d"] if last else None
+
+    # Find missing product IDs
+    if manufacturer:
+        missing = db.execute(
+            """SELECT product_id FROM products
+               WHERE eol=0 AND manufacturer=? AND product_group=?
+                 AND product_id NOT IN (
+                     SELECT DISTINCT product_id FROM stic_prices
+                     WHERE date=? AND manufacturer=? AND product_group=?
+                 )""",
+            (manufacturer, product_group, last_scraped, manufacturer, product_group)
+        ).fetchall() if last_scraped else []
+    else:
+        missing = db.execute(
+            """SELECT product_id FROM products
+               WHERE eol=0 AND product_group=?
+                 AND product_id NOT IN (
+                     SELECT DISTINCT product_id FROM stic_prices
+                     WHERE date=? AND product_group=?
+                 )""",
+            (product_group, last_scraped, product_group)
+        ).fetchall() if last_scraped else []
+    db.close()
+
+    if not missing:
+        return jsonify({"started": False, "error": "No missing SKUs found"})
+
+    pid_list = ",".join(str(r["product_id"]) for r in missing)
+    try:
+        proc = subprocess.Popen(
+            ["/usr/bin/python3", "/opt/openclaw/data/stic/stic_scraper.py",
+             "--rescrape", pid_list],
+            stdout=open("/opt/openclaw/logs/stic.log", "a"),
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        _missing_scrape_jobs[label] = {"proc": proc, "done": False}
+        return jsonify({"started": True, "label": label, "count": len(missing)})
+    except Exception as e:
+        return jsonify({"started": False, "error": str(e)})
+
+
+@app.route("/api/scrape/missing-group/status")
+def scrape_missing_group_status():
+    label = request.args.get("label", "").strip()
+    job = _missing_scrape_jobs.get(label)
+    if not job:
+        return jsonify({"done": True})
+    if not job["done"] and job["proc"].poll() is not None:
+        job["done"] = True
+    return jsonify({"done": job["done"]})
 
 
 @app.route("/api/scrape/group", methods=["POST"])
@@ -5269,6 +5662,18 @@ def stic_url_set(product_id):
     db.commit()
     db.close()
     return jsonify({"saved": bool(changed), "product_id": product_id, "url": url})
+
+
+@app.route("/api/notes/<int:product_id>", methods=["POST"])
+def notes_set(product_id):
+    """Save or clear notes for a product."""
+    data = request.get_json(silent=True) or {}
+    notes = data.get("notes", "").strip() or None   # empty string → NULL
+    db = get_db()
+    db.execute("UPDATE products SET notes=? WHERE product_id=?", (notes, product_id))
+    db.commit()
+    db.close()
+    return jsonify({"saved": True, "product_id": product_id})
 
 
 # ── Catalogue API ─────────────────────────────────────────────────────────────
