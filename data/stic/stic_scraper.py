@@ -598,7 +598,11 @@ def search_and_scrape(page, model_no: str, cache: dict, product_id: str = None, 
                 if product_href and not product_href.startswith("http"):
                     product_href = STIC_BASE + product_href
                 log(f"  Following product link: {product_href}")
-                found_url = product_href   # capture for URL cache
+                # NOTE: Step 3 is a last-resort data grab only — do NOT set found_url here.
+                # The full-page brand check below is unreliable because STIC pages show
+                # related products (which may include our manufacturer) in the sidebar,
+                # causing false-positive validation on completely wrong product pages.
+                # Only Steps 0/1/2 may establish a canonical cached URL.
                 page.goto(product_href, wait_until="domcontentloaded")
                 time.sleep(random.uniform(2, 4))
                 page.mouse.wheel(0, random.randint(200, 400))
