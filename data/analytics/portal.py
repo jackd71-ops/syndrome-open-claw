@@ -2412,8 +2412,12 @@ async function scrapeAllMissingSequential(btn) {
     const g = groups[i];
     btn.textContent = `⏳ ${i+1}/${total}: ${g.label} (${g.count} SKUs)…`;
     await new Promise(resolve => scrapeMissingGroup(g.label, g.btn, resolve));
-    // Brief pause between groups so STIC sees a natural gap
-    if (i < groups.length - 1) await new Promise(r => setTimeout(r, 8000));
+    // Inter-group gap — 2 to 4 minutes, matching the main run_groups() pacing
+    if (i < groups.length - 1) {
+      const gapSec = Math.floor(Math.random() * 120) + 120; // 120–240 s
+      btn.textContent = `⏸ ${i+1}/${total} done — waiting ${Math.round(gapSec/60)}m before next group…`;
+      await new Promise(r => setTimeout(r, gapSec * 1000));
+    }
   }
   btn.textContent = '✓ All done';
   setTimeout(() => { btn.textContent = '▶ Run All (sequential)'; }, 4000);

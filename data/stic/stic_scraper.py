@@ -564,12 +564,16 @@ def search_and_scrape(page, model_no: str, cache: dict, product_id: str = None, 
         card_url   = None
 
         if not result:
-            # ── Step 1: search by VIP SKU, validate by model name ────────────
+            # ── Step 1: search by manufacturer + VIP SKU, validate by model name ─
+            # Prepending the manufacturer name narrows STIC's results to the right
+            # brand so the card-matcher finds the correct product rather than an
+            # unrelated page that happens to contain the SKU number.
             if not product_id:
                 log(f"  WARNING: no product_id — cannot search by VIP SKU, skipping.")
                 return {}
 
-            match_type, raw_rows, card_url = _scrape_table_from_card(page, product_id, "VIP SKU")
+            vip_query = f"{manufacturer} {product_id}" if manufacturer else product_id
+            match_type, raw_rows, card_url = _scrape_table_from_card(page, vip_query, "VIP SKU")
 
             if match_type == "model":
                 url_confirmed = _check_url(card_url, "VIP SKU")
@@ -626,6 +630,7 @@ def search_and_scrape(page, model_no: str, cache: dict, product_id: str = None, 
                     break
 
             if not matched_dist:
+                log(f"  UNMATCHED distributor (not in our list): '{dist_raw}'")
                 continue
 
             all_cells = row.get("allCells", [])
@@ -775,6 +780,9 @@ def run_specific(product_ids: list, date_str: str):
             browser.close()
             sys.exit(1)
 
+        products_since_pause = 0
+        long_pause_every = random.randint(20, 30)   # tighter than main run — smaller groups
+
         for product in products:
             model_no     = product["model_no"]
             prod_id      = product["product_id"]
@@ -801,7 +809,17 @@ def run_specific(product_ids: list, date_str: str):
                 save_progress(date_str, completed)
                 save_cache(cache)
 
-            time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
+            products_since_pause += 1
+            if products_since_pause >= long_pause_every:
+                pause = random.uniform(LONG_PAUSE_MIN, LONG_PAUSE_MAX)
+                log(f"  Long pause: {pause:.0f}s")
+                time.sleep(pause)
+                products_since_pause = 0
+                long_pause_every = random.randint(20, 30)
+            else:
+                delay = random.uniform(DELAY_MIN, DELAY_MAX)
+                log(f"  Delay: {delay:.1f}s")
+                time.sleep(delay)
 
         browser.close()
 
