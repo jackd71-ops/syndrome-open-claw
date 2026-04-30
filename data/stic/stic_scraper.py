@@ -48,6 +48,7 @@ DISTRIBUTORS = [
     "Westcoast",
     "Target",
     "M2M Direct",
+    "Ingram Micro",
 ]
 
 # Partial match aliases — STIC may show slightly different names
@@ -57,6 +58,7 @@ DISTRIBUTOR_ALIASES = {
     "Westcoast":     ["westcoast", "west coast"],
     "Target":        ["target", "target components"],
     "M2M Direct":    ["m2m", "m2m direct"],
+    "Ingram Micro":  ["ingram micro", "ingram", "ingram micro uk"],
 }
 
 # ── Timing ────────────────────────────────────────────────────────────────────
@@ -104,12 +106,27 @@ def save_progress(date_str: str, completed: set):
     with open(path, "w") as f:
         json.dump(list(completed), f)
 
-# ── Read products from DB (populated nightly by sync_template.py) ────────────
+# ── DB helpers ───────────────────────────────────────────────────────────────
 def _db_products_conn():
     import sqlite3
-    db = sqlite3.connect(_DB_PATH)
+    db = sqlite3.connect(_DB_PATH, timeout=30)   # wait up to 30s if DB locked by another scraper
     db.row_factory = sqlite3.Row
+    db.execute("PRAGMA journal_mode=WAL")         # WAL: concurrent reads never block writers
     return db
+
+def _db_write_with_retry(fn, retries=5, base_delay=0.5):
+    """Call fn() which performs a DB write.  Retries on OperationalError (locked)
+    with exponential back-off.  Raises after retries are exhausted."""
+    import sqlite3, time, random
+    for attempt in range(retries):
+        try:
+            return fn()
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e).lower() or attempt == retries - 1:
+                raise
+            wait = base_delay * (2 ** attempt) + random.uniform(0, 0.3)
+            log(f"  DB locked (attempt {attempt+1}/{retries}) — retrying in {wait:.1f}s")
+            time.sleep(wait)
 
 def get_stic_url(product_id) -> str | None:
     """Return the cached STIC product detail URL for this product, or None."""
@@ -120,17 +137,21 @@ def get_stic_url(product_id) -> str | None:
 
 def save_stic_url(product_id, url: str):
     """Persist a confirmed STIC product detail URL to the products table."""
-    db = _db_products_conn()
-    db.execute("UPDATE products SET stic_url=? WHERE product_id=?", (url, int(product_id)))
-    db.commit()
-    db.close()
+    def _write():
+        db = _db_products_conn()
+        db.execute("UPDATE products SET stic_url=? WHERE product_id=?", (url, int(product_id)))
+        db.commit()
+        db.close()
+    _db_write_with_retry(_write)
 
 def clear_stic_url(product_id):
     """Remove a confirmed-bad STIC URL so the product appears in Missing Results."""
-    db = _db_products_conn()
-    db.execute("UPDATE products SET stic_url=NULL WHERE product_id=?", (int(product_id),))
-    db.commit()
-    db.close()
+    def _write():
+        db = _db_products_conn()
+        db.execute("UPDATE products SET stic_url=NULL WHERE product_id=?", (int(product_id),))
+        db.commit()
+        db.close()
+    _db_write_with_retry(_write)
 
 def count_products() -> int:
     """Count active (non-EOL) products in the products DB table."""
@@ -210,10 +231,16 @@ SCRAPE_GROUPS = [
     ("GIGABYTE",   "PROD_MBRD",  "Gigabyte Motherboards"),
     ("ASUS",       "PROD_MBRD",  "ASUS Motherboards"),
     (None,         "PROD_MBRDS", "Server / Pro"),
+    ("AMD Retail", "PROD_CPU",   "AMD Retail CPU"),
+    ("AMD MPK",    "PROD_CPU",   "AMD MPK CPU"),
+    ("Intel",      "PROD_CPU",   "Intel CPU"),
+    ("Intel OEM",  "PROD_CPU",   "Intel OEM CPU"),
     (None,         "PROBE",      "Probe SKUs"),
 ]
 
-GPU_GROUPS = [g for g in SCRAPE_GROUPS if g[1] == "PROD_VIDEO"]
+GPU_GROUPS       = [g for g in SCRAPE_GROUPS if g[1] == "PROD_VIDEO"]
+CPU_AMD_GROUPS   = [g for g in SCRAPE_GROUPS if g[1] == "PROD_CPU" and g[0] and "amd"   in g[0].lower()]
+CPU_INTEL_GROUPS = [g for g in SCRAPE_GROUPS if g[1] == "PROD_CPU" and g[0] and "intel" in g[0].lower()]
 
 # Gap between groups: random 2–5 minutes
 GROUP_GAP_MIN = 120
@@ -261,6 +288,7 @@ _DIST_DB_NAME = {
     "Westcoast":    "Westcoast",
     "Target":       "Target",
     "M2M Direct":   "M2M Direct",
+    "Ingram Micro": "Ingram Micro",
 }
 
 def write_to_db(date_str: str, product: dict, distributor_data: dict, force: bool = False):
@@ -268,27 +296,24 @@ def write_to_db(date_str: str, product: dict, distributor_data: dict, force: boo
     If force=True, existing rows for this product+date are deleted first so the
     afternoon re-scrape overwrites morning data with fresh prices/stock."""
     import sqlite3
-    try:
-        # Convert DD-MM-YYYY to YYYY-MM-DD for DB consistency
-        d, m, y = date_str.split("-")
-        iso_date = f"{y}-{m}-{d}"
+    # Convert DD-MM-YYYY to YYYY-MM-DD for DB consistency
+    d, m, y = date_str.split("-")
+    iso_date = f"{y}-{m}-{d}"
 
-        product_id    = product["product_id"]
-        model_no      = product["model_no"]
-        manufacturer  = product["manufacturer"]
-        product_group = product.get("product_group")
-        chipset       = product.get("chipset")
+    product_id    = product["product_id"]
+    model_no      = product["model_no"]
+    manufacturer  = product["manufacturer"]
+    product_group = product.get("product_group")
+    chipset       = product.get("chipset")
 
-        db = sqlite3.connect(_DB_PATH)
+    def _write():
+        db = sqlite3.connect(_DB_PATH, timeout=30)
         db.execute("PRAGMA journal_mode=WAL")
-
         if force:
-            # Delete today's rows so fresh data replaces them
             db.execute(
                 "DELETE FROM stic_prices WHERE date=? AND product_id=?",
                 (iso_date, product_id)
             )
-
         for dist_name in _DIST_DB_NAME:
             db_dist = _DIST_DB_NAME[dist_name]
             price, qty = distributor_data.get(dist_name, (None, None))
@@ -302,6 +327,9 @@ def write_to_db(date_str: str, product: dict, distributor_data: dict, force: boo
             )
         db.commit()
         db.close()
+
+    try:
+        _db_write_with_retry(_write)
     except Exception as e:
         log(f"  DB write error (non-fatal): {e}")
 
@@ -366,12 +394,15 @@ def search_and_scrape(page, model_no: str, cache: dict, product_id: str = None, 
     Returns None on page load failure, {} if no matching distributors found.
     """
 
-    def _scrape_table_from_card(page_obj, search_query, log_label):
+    def _scrape_table_from_card(page_obj, search_query, log_label, trust_single=False):
         """
         Navigate to STIC search for search_query, find the card whose text contains
         model_no (case-insensitive), scrape its distributor table.
         Returns (match_type_str, raw_rows_list, product_url_or_none).
         match_type is 'model' or 'none'.  product_url is the detail page href from the card.
+        trust_single=True: if exactly one product card exists and the manufacturer
+        (stripped) appears in it, accept without requiring model-name match. Used for
+        VIP-ID searches where OPN model numbers won't appear in STIC card text.
         """
         url = STIC_SEARCH.format(query=str(search_query).replace(" ", "+"))
         log(f"  Searching ({log_label}): {search_query}")
@@ -436,8 +467,10 @@ def search_and_scrape(page, model_no: str, cache: dict, product_id: str = None, 
             log(f"  No results on STIC for: {search_query}")
             return "none", [], None
 
+        # Strip variant suffixes so STIC card text "AMD" matches our "AMD MPK"
+        _mfr_for_js = (manufacturer or "").replace(" MPK","").replace(" OEM","").replace(" Retail","").strip()
         res = page_obj.evaluate("""
-            ([modelNo, mfr]) => {
+            ([modelNo, mfr, trustSingle]) => {
                 const modelLower = modelNo.toLowerCase();
                 const mfrLower   = mfr ? mfr.toLowerCase() : null;
                 const tables = document.querySelectorAll('table');
@@ -543,6 +576,53 @@ def search_and_scrape(page, model_no: str, cache: dict, product_id: str = None, 
                     }
                 }
 
+                // ── trustSingle fallback ─────────────────────────────────────────────
+                // When searching by VIP product ID, OPN model numbers (100-000000xxx)
+                // won't appear in STIC card text.  If there is exactly ONE product card
+                // on the page and the manufacturer (stripped) is present in it, accept it.
+                // This prevents false negatives on unambiguous ID-based searches.
+                if (trustSingle) {
+                    // Collect all distinct product cards (ancestor elements with a table)
+                    const candidateCards = [];
+                    for (const table of tables) {
+                        let el = table.parentElement;
+                        for (let i = 0; i < 20 && el; i++) {
+                            const hasProductLink = el.querySelector('a[href*="/Product/"]');
+                            if (hasProductLink) {
+                                candidateCards.push({ el, table });
+                                break;
+                            }
+                            el = el.parentElement;
+                        }
+                    }
+                    if (candidateCards.length === 1) {
+                        const { el, table } = candidateCards[0];
+                        const cardText = (el.innerText || '').toLowerCase();
+                        const mfrOk = !mfrLower || cardText.includes(mfrLower);
+                        if (mfrOk) {
+                            const rows = [];
+                            table.querySelectorAll('tr').forEach((row, idx) => {
+                                if (idx === 0) return;
+                                const cells = row.querySelectorAll('td');
+                                if (cells.length < 2) return;
+                                const distName = cells[0].innerText.trim();
+                                const stockText = cells.length >= 3 ? cells[cells.length - 2].innerText.trim() : '';
+                                const priceText = cells[cells.length - 1].innerText.trim();
+                                if (distName) rows.push({
+                                    distributor: distName,
+                                    stock: stockText,
+                                    price: priceText,
+                                    allCells: Array.from(cells).map(c => c.innerText.trim())
+                                });
+                            });
+                            if (rows.length) {
+                                const link = el.querySelector('a[href*="/Product/"]');
+                                return { match_type: 'single_card', rows, productUrl: link ? link.href : null };
+                            }
+                        }
+                    }
+                }
+
                 // ── no card matched — collect diagnostics ─────────────────────────────
                 const debugTexts = [];
                 const nearbyUrls = [];
@@ -569,21 +649,26 @@ def search_and_scrape(page, model_no: str, cache: dict, product_id: str = None, 
                 }
                 return { match_type: 'none', rows: [], productUrl: null, debug: debugTexts, nearbyUrls };
             }
-        """, [model_no, manufacturer])
+        """, [model_no, _mfr_for_js, trust_single])
 
         mt = res.get("match_type", "none") if isinstance(res, dict) else "none"
+        # Treat single_card as a successful model match
+        if mt == "single_card":
+            log(f"  {log_label}: single-card trust match (OPN/tray model — manufacturer validated).")
+            mt = "model"
         rr = res.get("rows", []) if isinstance(res, dict) else []
         pu = res.get("productUrl") if isinstance(res, dict) else None
+        nearby_urls = []
         if mt == "none":
             debug = res.get("debug", []) if isinstance(res, dict) else []
-            nearby = res.get("nearbyUrls", []) if isinstance(res, dict) else []
+            nearby_urls = list(dict.fromkeys(res.get("nearbyUrls", []))) if isinstance(res, dict) else []
             if debug:
                 log(f"  {log_label}: no card matched — sample card texts:")
                 for d in debug[:3]:
                     log(f"    · {d}")
-            if nearby:
-                log(f"  {log_label}: product URLs found near tables: {nearby[:3]}")
-        return mt, rr, pu
+            if nearby_urls:
+                log(f"  {log_label}: product URLs found near tables: {nearby_urls[:3]}")
+        return mt, rr, pu, nearby_urls
 
     try:
         # Load cached STIC URL for this product (if we've successfully found it before)
@@ -716,22 +801,37 @@ def search_and_scrape(page, model_no: str, cache: dict, product_id: str = None, 
                 log(f"  WARNING: no product_id — cannot search by VIP SKU, skipping.")
                 return {}
 
-            vip_query = f"{manufacturer} {product_id}" if manufacturer else product_id
-            match_type, raw_rows, card_url = _scrape_table_from_card(page, vip_query, "VIP SKU")
+            # Strip tray/variant suffixes so STIC search sees e.g. "AMD 124197"
+            # not "AMD MPK 124197" (STIC doesn't index those terms).
+            _mfr_brand = (manufacturer or "").replace(" MPK","").replace(" OEM","").replace(" Retail","").strip()
+            _is_opn_mfr = any(t in (manufacturer or "") for t in (" MPK", " OEM"))
 
-            if match_type == "model":
-                url_confirmed = _check_url(card_url, "VIP SKU")
-                if url_confirmed:
-                    log(f"  VIP SKU search: URL sanity check passed — skipping model validation.")
-                else:
-                    log(f"  VIP SKU search matched on model name '{model_no}'.")
+            # For OPN-style manufacturers (MPK/OEM), try the model_no (OPN) as the
+            # primary search — STIC indexes Threadripper PRO and enterprise tray CPUs
+            # by their part number.  Consumer Ryzen tray falls back to VIP ID.
+            if _is_opn_mfr and model_no:
+                match_type, raw_rows, card_url, _ = _scrape_table_from_card(page, model_no, "OPN", trust_single=True)
+                if match_type == "model":
+                    log(f"  OPN search matched on model name '{model_no}'.")
+
+            # VIP ID search — primary for all others, fallback for OPN manufacturers
+            if match_type == "none":
+                vip_query = f"{_mfr_brand} {product_id}" if _mfr_brand else product_id
+                match_type, raw_rows, card_url, _ = _scrape_table_from_card(page, vip_query, "VIP SKU", trust_single=True)
+                if match_type == "model":
+                    url_confirmed = _check_url(card_url, "VIP SKU")
+                    if url_confirmed:
+                        log(f"  VIP SKU search: URL sanity check passed — skipping model validation.")
+                    else:
+                        log(f"  VIP SKU search matched on model name '{model_no}'.")
 
             # ── Step 2: EAN fallback — search by EAN, same model-name validation
             ean_attempted = False
+            ean_nearby_urls = []
             if match_type == "none" and ean:
                 log(f"  VIP SKU search failed — trying EAN fallback: {ean}")
                 ean_attempted = True
-                match_type, raw_rows, card_url = _scrape_table_from_card(page, ean, "EAN")
+                match_type, raw_rows, card_url, ean_nearby_urls = _scrape_table_from_card(page, ean, "EAN")
             if ean_attempted:
                 if match_type == "model":
                     url_confirmed = _check_url(card_url, "EAN")
@@ -741,6 +841,71 @@ def search_and_scrape(page, model_no: str, cache: dict, product_id: str = None, 
                         log(f"  EAN fallback matched on model name '{model_no}'.")
                 else:
                     log(f"  EAN fallback: model '{model_no}' not found in results.")
+
+            # ── Step 2b: EAN found a product URL but model name didn't match ────
+            # EAN codes are globally unique — if the EAN search surfaced exactly
+            # one distinct product URL, navigate directly to it and trust it.
+            # This handles products whose model_no in our DB is a technical code
+            # (e.g. AMD OPN "100-000001595") that doesn't appear in STIC's
+            # marketing name ("Ryzen 9 7950X").
+            if match_type == "none" and ean_attempted and len(ean_nearby_urls) == 1:
+                ean_product_url = ean_nearby_urls[0]
+                log(f"  EAN found unique product URL — navigating directly: {ean_product_url}")
+                try:
+                    page.goto(ean_product_url, wait_until="domcontentloaded")
+                    time.sleep(random.uniform(2, 3))
+                    direct_result = page.evaluate("""
+                        () => {
+                            const data = [];
+                            const tables = document.querySelectorAll('table');
+                            let targetTable = null;
+                            for (const t of tables) {
+                                const headerRow = t.querySelector('tr');
+                                if (headerRow) {
+                                    const text = headerRow.innerText.toLowerCase();
+                                    if (text.includes('distributor') || text.includes('stock') || text.includes('price')) {
+                                        targetTable = t; break;
+                                    }
+                                }
+                            }
+                            if (!targetTable) return [];
+                            const rows = [];
+                            targetTable.querySelectorAll('tr').forEach((row, idx) => {
+                                if (idx === 0) return;
+                                const cells = row.querySelectorAll('td');
+                                if (cells.length < 4) return;
+                                let distName = cells[0].innerText.trim();
+                                if (!distName) {
+                                    const img = cells[0].querySelector('img');
+                                    distName = img ? (img.alt || img.title || '') : '';
+                                }
+                                const priceText = cells[cells.length - 1].innerText.trim();
+                                const stockText = cells.length >= 6
+                                    ? cells[3].innerText.trim()
+                                    : cells[cells.length - 2].innerText.trim();
+                                if (distName) rows.push({ distributor: distName, stock: stockText, price: priceText,
+                                    allCells: Array.from(cells).map(c => c.innerText.trim()) });
+                            });
+                            return rows;
+                        }
+                    """)
+                    if direct_result:
+                        page_text = page.inner_text("body").lower()
+                        brand_ok = (not manufacturer) or any(
+                            m.lower() in page_text
+                            for m in manufacturer.replace(" Retail","").replace(" MPK","").replace(" OEM","").split()
+                        )
+                        if brand_ok:
+                            log(f"  EAN direct URL scrape succeeded — brand validated.")
+                            raw_rows = direct_result
+                            match_type = "model"
+                            found_url = ean_product_url
+                        else:
+                            log(f"  EAN direct URL: brand '{manufacturer}' not found on page — skipping.")
+                    else:
+                        log(f"  EAN direct URL: no distributor table found.")
+                except Exception as e:
+                    log(f"  EAN direct URL error: {e}")
 
             result = raw_rows  # only assign from search if Step 0 didn't already succeed
 
@@ -757,6 +922,11 @@ def search_and_scrape(page, model_no: str, cache: dict, product_id: str = None, 
         # IMPORTANT: only save if no URL was already cached — Steps 1/2 search results
         # must never overwrite a previously confirmed or manually-set URL.
         # If the cached URL is wrong, the user corrects it manually via the portal.
+        # Safety: never cache a "-Box" STIC URL against an MPK/OEM tray manufacturer.
+        _is_tray_mfr = manufacturer and any(t in manufacturer for t in (" MPK", " OEM"))
+        if found_url and _is_tray_mfr and "/Box" in found_url:
+            log(f"  SAFETY: refusing to cache Box URL '{found_url}' for tray manufacturer '{manufacturer}'.")
+            found_url = None
         if found_url and product_id and not cached_url:
             save_stic_url(product_id, found_url)
 
@@ -873,7 +1043,7 @@ def run_specific(product_ids: list, date_str: str):
     iso_date = f"{y}-{m}-{d}"
 
     # Delete today's entries for these products so fresh data is written
-    db = _sqlite3.connect(_DB_PATH)
+    db = _sqlite3.connect(_DB_PATH, timeout=30)
     db.execute("PRAGMA journal_mode=WAL")
     placeholders = ",".join("?" for _ in product_ids)
     deleted = db.execute(
@@ -1298,7 +1468,7 @@ def run_missing_all(date_str: str):
     iso_date = f"{y}-{m}-{d}"
 
     # ── Build the work list ───────────────────────────────────────────────────
-    db = _sq.connect(_DB_PATH)
+    db = _sq.connect(_DB_PATH, timeout=30)
     db.row_factory = _sq.Row
     groups_work = []
 
@@ -1417,7 +1587,7 @@ def run_missing_all(date_str: str):
             products = [p for p in all_products if int(p["product_id"]) in pid_set]
 
             # Clear today's stale rows so fresh data is written
-            db2 = _sq.connect(_DB_PATH)
+            db2 = _sq.connect(_DB_PATH, timeout=30)
             db2.execute("PRAGMA journal_mode=WAL")
             ph = ",".join("?" for _ in product_ids)
             deleted = db2.execute(
@@ -1498,9 +1668,11 @@ def run_missing_all(date_str: str):
 # ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--runall",   action="store_true", help="Morning run: all groups in sequence with random start delay")
-    parser.add_argument("--gpus",     action="store_true", help="Afternoon run: GPU groups only with random start delay")
-    parser.add_argument("--group",    type=str,            help="Run a single named group by label, e.g. --group \"ASUS GPU\"")
+    parser.add_argument("--runall",     action="store_true", help="Morning run: all groups in sequence with random start delay")
+    parser.add_argument("--gpus",       action="store_true", help="Afternoon run: GPU groups only with random start delay")
+    parser.add_argument("--cpus-amd",   action="store_true", help="Manual run: AMD CPU groups only (AMD Retail + AMD MPK)")
+    parser.add_argument("--cpus-intel", action="store_true", help="Manual run: Intel CPU groups only (Intel + Intel OEM)")
+    parser.add_argument("--group",      type=str,            help="Run a single named group by label, e.g. --group \"ASUS GPU\"")
     parser.add_argument("--batch",    type=int, choices=[1, 2, 3], help="Legacy: 1/2/3 — split dynamically from product count")
     parser.add_argument("--test",     action="store_true", help="Test run: first 20 products only")
     parser.add_argument("--start",    type=int,            help="Custom start row")
@@ -1534,6 +1706,12 @@ if __name__ == "__main__":
     elif args.gpus:
         log(f"Afternoon run: {len(GPU_GROUPS)} GPU groups only (force=True)")
         run_groups(GPU_GROUPS, date_str, random_start_delay=True, force=True)
+    elif args.cpus_amd:
+        log(f"Manual run: {len(CPU_AMD_GROUPS)} AMD CPU groups" + (" (force)" if args.force else ""))
+        run_groups(CPU_AMD_GROUPS, date_str, random_start_delay=False, force=args.force)
+    elif args.cpus_intel:
+        log(f"Manual run: {len(CPU_INTEL_GROUPS)} Intel CPU groups" + (" (force)" if args.force else ""))
+        run_groups(CPU_INTEL_GROUPS, date_str, random_start_delay=False, force=args.force)
     elif args.test:
         run(1, 20, date_str, is_final=False)
     elif args.batch in (1, 2, 3):

@@ -265,6 +265,7 @@ HTML = r"""<!DOCTYPE html>
   .badge-green { background: #DFF6DD; color: #107C10; }
   .badge-orange { background: #FFF4CE; color: #8A4B00; }
   .badge-blue { background: #DEECF9; color: #0078D4; }
+  .badge-grey { background: #F3F2F1; color: #605E5C; }
 
   /* Scrape trigger button */
   .scrape-trigger-btn { padding: 5px 14px; font-size: 12px; font-weight: 600; border: none;
@@ -415,7 +416,7 @@ HTML = r"""<!DOCTYPE html>
         <button class="sidebar-btn" onclick="loadWatchlistReport(this)">★ Watched SKUs</button>
         <button class="sidebar-btn" onclick="loadReport('no_channel_stock',this)">No channel stock 5+ days</button>
         <button class="sidebar-btn" onclick="loadReport('back_in_stock',this)">Back in stock</button>
-        <button class="sidebar-btn" onclick="loadReport('single_distributor',this)">Single distributor</button>
+        <button class="sidebar-btn" onclick="loadReport('single_distributor',this)">Single distributor products</button>
         <button class="sidebar-btn" onclick="loadReport('new_stock_arrival',this)">New stock arrival</button>
         <button class="sidebar-btn" onclick="loadTopSellers(this)">📊 Top Sellers (30d)</button>
         <button class="sidebar-btn" onclick="loadMarketShare(this)">🥧 Est. Market Share</button>
@@ -480,6 +481,7 @@ HTML = r"""<!DOCTYPE html>
           <button id="cg-mbrd"   class="cg-btn cg-active" onclick="switchChipsetGroup('mbrd')">Motherboard</button>
           <button id="cg-server" class="cg-btn"            onclick="switchChipsetGroup('server')">Server</button>
           <button id="cg-gpu"    class="cg-btn"            onclick="switchChipsetGroup('gpu')">VGA</button>
+          <button id="cg-cpu"    class="cg-btn"            onclick="switchChipsetGroup('cpu')">CPU</button>
         </div>
       </div>
       <div class="tbl-wrap" id="stic-chipset-tbl"><div class="spinner">Loading…</div></div>
@@ -734,6 +736,7 @@ HTML = r"""<!DOCTYPE html>
             <option value="PROD_VIDEO">GPU (PROD_VIDEO)</option>
             <option value="PROD_MBRD">Motherboard (PROD_MBRD)</option>
             <option value="PROD_MBRDS">Server/Pro (PROD_MBRDS)</option>
+            <option value="PROD_CPU">CPU (PROD_CPU)</option>
           </select>
         </div>
         <div class="edit-field" style="grid-column:1/-1">
@@ -1225,7 +1228,7 @@ let _cgRows        = [];
 function switchChipsetGroup(group) {
   _chipsetGroup  = group;
   _chipsetActive = null;
-  ['mbrd','server','gpu'].forEach(g => {
+  ['mbrd','server','gpu','cpu'].forEach(g => {
     document.getElementById('cg-'+g).classList.toggle('cg-active', g === group);
   });
   document.getElementById('stic-chipset-drill').style.display = 'none';
@@ -1443,11 +1446,12 @@ function renderSticSku(data) {
   const dists = [...new Set(price_history.map(r => r.distributor))];
   const dates  = [...new Set(price_history.map(r => r.date))].sort();
   const DIST_COLOURS = {
-    'VIP':        '#0078D4',   // blue
-    'M2M Direct': '#FFB900',   // amber
-    'TD Synnex':  '#D13438',   // red
-    'Target':     '#8A8886',   // grey
-    'Westcoast':  '#107C10',   // green
+    'VIP':          '#0078D4',   // blue
+    'M2M Direct':   '#FFB900',   // amber
+    'TD Synnex':    '#D13438',   // red
+    'Target':       '#8A8886',   // grey
+    'Westcoast':    '#107C10',   // green
+    'Ingram Micro': '#00B7C3',   // teal
   };
   const _fallback = ['#00B7C3','#8764B8','#E88C1A','#69797E'];
   const distColour = (d, i) => DIST_COLOURS[d] ?? _fallback[i % _fallback.length];
@@ -1629,7 +1633,7 @@ function loadReport(name, btn) {
 const REPORT_TITLES = {
   no_channel_stock:   'No Channel Stock 5+ Days',
   back_in_stock:      'Back In Stock',
-  single_distributor: 'Single Distributor Remaining',
+  single_distributor: 'Single Distributor Products',
   new_stock_arrival:  'New Stock Arrival',
   vip_out_on_price:   'VIP Out on Price',
   vip_static:         'VIP Static — Market Moving',
@@ -1655,10 +1659,10 @@ const REPORT_HELP = {
 <p><strong>How to use:</strong> Fast-moving opportunity list. These products just became available again — if VIP is not yet priced competitively or doesn't have stock, this is the moment to act before competitors react.</p>`
   },
   single_distributor: {
-    title: 'Single Distributor Remaining',
-    body: `<p>Products where <strong>exactly one distributor has stock today</strong>. All other distributors show zero or no stock.</p>
-<p><strong>VIP £</strong> tells you whether VIP is that sole supplier (blue = sole supplier and matches floor, red = VIP is the only one but priced above their own floor, which would only happen if multiple VIP rows exist) or whether a competitor holds it exclusively.</p>
-<p><strong>How to use:</strong> Supply concentration risk. If VIP is the sole supplier, this is a pricing power opportunity. If a competitor is the sole supplier, stock availability for VIP's customers may be at risk.</p>`
+    title: 'Single Distributor Products',
+    body: `<p>Products where <strong>exactly one distributor has stock today</strong>. The <strong>Sole Holder</strong> column shows which distributor that is.</p>
+<p>Use the filter to switch between <strong>All</strong>, <strong>VIP only</strong> (VIP holds it exclusively — pricing power opportunity), or <strong>Competitors</strong> (a competitor holds it exclusively — potential supply risk for VIP's customers).</p>
+<p><strong>How to use:</strong> VIP rows are supply concentration opportunities — no direct price competition. Competitor rows are risk signals — customers needing those products have nowhere to go in the channel except that competitor.</p>`
   },
   new_stock_arrival: {
     title: 'New Stock Arrival',
@@ -1818,6 +1822,31 @@ function _saveProduct() {
 
 let _reportCache = { name: null, rows: [] };
 
+function buildSingleDistFilterBar() {
+  return `<div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
+    <span style="font-size:12px;color:#605E5C;font-weight:600">Filter:</span>
+    <button onclick="applySingleDistFilter('all',this)"   id="sdf-all"  style="padding:4px 14px;font-size:12px;border-radius:3px;border:1px solid #C8C6C4;background:#0078D4;color:#fff;cursor:pointer;font-weight:600">All</button>
+    <button onclick="applySingleDistFilter('vip',this)"   id="sdf-vip"  style="padding:4px 14px;font-size:12px;border-radius:3px;border:1px solid #C8C6C4;background:#fff;color:#1a1a1a;cursor:pointer">VIP Only</button>
+    <button onclick="applySingleDistFilter('comp',this)"  id="sdf-comp" style="padding:4px 14px;font-size:12px;border-radius:3px;border:1px solid #C8C6C4;background:#fff;color:#1a1a1a;cursor:pointer">Competitors</button>
+  </div>`;
+}
+function applySingleDistFilter(mode, btn) {
+  ['sdf-all','sdf-vip','sdf-comp'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.style.background='#fff'; el.style.color='#1a1a1a'; el.style.fontWeight='400'; }
+  });
+  if (btn) { btn.style.background='#0078D4'; btn.style.color='#fff'; btn.style.fontWeight='600'; }
+  const filtered = _reportCache.rows.filter(r =>
+    mode === 'all'  ? true :
+    mode === 'vip'  ? r.sole_holder === 'VIP' :
+                      r.sole_holder !== 'VIP'
+  );
+  renderReportTable(_reportCache.name, filtered);
+  // Reapply button state after re-render
+  const el = document.getElementById('sdf-' + mode);
+  if (el) { el.style.background='#0078D4'; el.style.color='#fff'; el.style.fontWeight='600'; }
+}
+
 function buildReportFilterBar(rows) {
   const manufacturers  = [...new Set(rows.map(r=>r.manufacturer).filter(Boolean))].sort();
   const groups         = [...new Set(rows.map(r=>r.product_group).filter(Boolean))].sort();
@@ -1855,7 +1884,22 @@ function renderReportTable(name, rows) {
 
   let cols, rowFn;
 
-  if (name === 'vip_out_on_price') {
+  if (name === 'single_distributor') {
+    cols = ['Product','Model','Manufacturer','Sole Holder','Stock','Floor £','VIP £'];
+    rowFn = r => {
+      const isVip = r.sole_holder === 'VIP';
+      const holderBadge = isVip
+        ? `<span class="badge badge-blue">${r.sole_holder}</span>`
+        : `<span class="badge badge-grey">${r.sole_holder||'—'}</span>`;
+      return `<tr class="clickable" onclick="loadSticSku(${r.product_id},'report')" style="${isVip ? 'background:#f0f9f0' : ''}">
+        <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer}</td>
+        <td>${holderBadge}</td>
+        <td>${(r.total_stock||0).toLocaleString()}</td>
+        <td>${r.min_price ? '£'+r.min_price.toFixed(2) : '—'}</td>
+        <td>${vipCell(r.vip_price, r.min_price)}</td>
+      </tr>`;
+    };
+  } else if (name === 'vip_out_on_price') {
     cols = ['Product','Model','Manufacturer','Channel Stock','VIP Stock','Floor £','VIP £','Suggested Cost £'];
     rowFn = r => {
       const sug = r.min_price ? '£'+(r.min_price*0.96).toFixed(2) : '—';
@@ -1907,7 +1951,9 @@ function renderReportTable(name, rows) {
     </tr>`;
   }
 
-  const filterBar = (name === 'vip_out_on_price') ? buildReportFilterBar(_reportCache.rows) : '';
+  let filterBar = '';
+  if (name === 'vip_out_on_price') filterBar = buildReportFilterBar(_reportCache.rows);
+  if (name === 'single_distributor') filterBar = buildSingleDistFilterBar();
   const savedMfr  = document.getElementById('filter-mfr')?.value   || '';
   const savedGrp  = document.getElementById('filter-group')?.value || '';
 
@@ -1949,6 +1995,7 @@ function _renderTopSellers(rows, group) {
     { key: 'GPU',    label: '🎮 Graphics' },
     { key: 'MB',     label: '🖥 Motherboards' },
     { key: 'SERVER', label: '🗄 Server' },
+    { key: 'CPU',    label: '⚙️ CPUs' },
   ];
 
   const tabs = groups.map(g => {
@@ -2013,11 +2060,12 @@ function _renderTopSellers(rows, group) {
 
 // ── Estimated Market Share ────────────────────────────────────────────────────
 const DIST_COLOURS = {
-  'VIP':        '#0078D4',   // blue  — matches product page
-  'M2M Direct': '#FFB900',   // amber — matches product page
-  'TD Synnex':  '#D13438',   // red   — matches product page
-  'Target':     '#8A8886',   // grey  — matches product page
-  'Westcoast':  '#107C10',   // green — matches product page
+  'VIP':          '#0078D4',   // blue  — matches product page
+  'M2M Direct':   '#FFB900',   // amber — matches product page
+  'TD Synnex':    '#D13438',   // red   — matches product page
+  'Target':       '#8A8886',   // grey  — matches product page
+  'Westcoast':    '#107C10',   // green — matches product page
+  'Ingram Micro': '#00B7C3',   // teal
 };
 const DIST_COLOUR_FALLBACKS = ['#605E5C','#A19F9D','#C8C6C4','#8A8886','#323130'];
 
@@ -2056,6 +2104,7 @@ function _renderMarketShare(rows) {
     {key:'GPU', label:'🎮 Graphics'},
     {key:'MB',  label:'🖥 Motherboards'},
     {key:'SERVER', label:'🗄 Server'},
+    {key:'CPU', label:'⚙️ CPUs'},
   ];
   const currentYear = new Date().getFullYear();
   const currentQ    = _currentQuarter();
@@ -2416,15 +2465,68 @@ function loadScrapeGroups(btn) {
   document.getElementById('stic-scrape').classList.add('active');
   const el = document.getElementById('stic-scrape-content');
   el.innerHTML = '<div class="spinner">Loading…</div>';
-  fetch('/api/scrape/groups').then(r => r.json()).then(data => {
-    let html = '<h2 style="margin:0 0 4px">Refresh SKUs</h2>';
-    html += '<p style="color:#605E5C;margin:0 0 16px;font-size:13px">Manually trigger a scrape run for any group. Runs in the background — a Telegram message will confirm when complete. Last scraped dates show when this group was last successfully processed.</p>';
+
+  Promise.all([
+    fetch('/api/scrape/groups').then(r => r.json()),
+    fetch('/api/scrape/live-status').then(r => r.json()),
+  ]).then(([data, live]) => {
+    let html = '';
+
+    // ── Live status banner ───────────────────────────────────────────────────
+    if (live.running) {
+      const p = live.progress || {};
+      const cnt       = live.scraper_count || 1;
+      const runLabel  = cnt > 1 ? `${cnt} scrapers running` : 'Scraper is running';
+      const groupTxt  = p.group ? `Group ${p.group_idx}/${p.group_total}: <strong>${p.group}</strong>` : 'Starting up…';
+      const skuTxt    = p.sku_total ? `SKU <strong>${p.sku}</strong> of <strong>${p.sku_total}</strong>` + (p.current_sku ? ` &nbsp;·&nbsp; ${p.current_sku}` : '') : '';
+      const pct       = p.sku_total ? Math.round((p.sku / p.sku_total) * 100) : 0;
+      html += `
+        <div id="scrape-live-banner" style="background:#DFF6DD;border:1px solid #107C10;border-radius:6px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+          <span style="font-size:18px">⚙️</span>
+          <div style="flex:1;min-width:200px">
+            <div id="scrape-live-heading" style="font-size:13px;font-weight:600;color:#107C10;margin-bottom:3px">${runLabel}</div>
+            <div id="scrape-live-detail" style="font-size:12px;color:#323130">${groupTxt}${skuTxt ? '&nbsp;&nbsp;·&nbsp;&nbsp;' + skuTxt : ''}</div>
+            ${p.sku_total ? `<div style="margin-top:6px;background:#C8E6C9;border-radius:3px;height:6px;width:100%;max-width:400px">
+              <div id="scrape-live-bar" style="background:#107C10;height:6px;border-radius:3px;width:${pct}%"></div>
+            </div>` : ''}
+          </div>
+          <div style="font-size:11px;color:#605E5C">Auto-refreshes every 10s</div>
+        </div>`;
+    } else {
+      html += `
+        <div style="background:#f7f7f7;border:1px solid #e0e0e0;border-radius:6px;padding:10px 16px;margin-bottom:16px;font-size:12px;color:#605E5C;display:flex;align-items:center;gap:8px">
+          <span>⚫</span> No scraper currently running
+        </div>`;
+    }
+
+    // ── Schedule table ───────────────────────────────────────────────────────
+    html += `<div style="font-size:13px;font-weight:600;color:#1a1a1a;margin-bottom:8px">Scheduled Runs</div>`;
+    html += `<div class="tbl-wrap" style="margin-bottom:20px"><table><thead><tr><th>Run</th><th>Days</th><th>Time (UK)</th><th>SKUs</th><th>Est. Duration</th><th>Est. End</th><th>Next Run</th></tr></thead><tbody>`;
+    (live.schedule || []).forEach(s => {
+      html += `<tr>
+        <td><strong>${s.label}</strong></td>
+        <td>${s.days}</td>
+        <td>${s.time}</td>
+        <td>${s.sku_count}</td>
+        <td style="color:#605E5C">${s.est_duration}</td>
+        <td style="font-weight:600">${s.est_end}</td>
+        <td style="color:#107C10;font-weight:600">${s.next_label}</td>
+      </tr>`;
+    });
+    html += `</tbody></table></div>`;
+
+    // ── Group trigger table ──────────────────────────────────────────────────
+    html += `<div style="font-size:13px;font-weight:600;color:#1a1a1a;margin-bottom:8px">Manual Trigger by Group</div>`;
+    html += `<p style="color:#605E5C;margin:0 0 12px;font-size:13px">Runs in the background — a Telegram message will confirm when complete.</p>`;
     html += '<div class="tbl-wrap"><table><thead><tr><th>Group</th><th>Active SKUs</th><th>Last Scraped</th><th></th></tr></thead><tbody>';
     data.forEach(g => {
-      const running = _scrapeGroupsRunning[g.label];
+      const running = g.cpu_brand ? _scrapeGroupsRunning['CPU ' + g.cpu_brand.toUpperCase()]
+                                  : _scrapeGroupsRunning[g.label];
+      const onclick = g.cpu_brand ? `triggerCpuGroup('${g.cpu_brand}',this)`
+                                  : `triggerScrapeGroup('${g.label.replace(/'/g,"\\'")}',this)`;
       const btnHtml = running
         ? `<button class="scrape-trigger-btn" disabled style="opacity:0.5;cursor:default">⏳ Running…</button>`
-        : `<button class="scrape-trigger-btn" onclick="triggerScrapeGroup('${g.label.replace(/'/g,"\\'")}',this)">▶ Run</button>`;
+        : `<button class="scrape-trigger-btn" onclick="${onclick}">▶ Run</button>`;
       html += `<tr>
         <td><strong>${g.label}</strong></td>
         <td>${g.sku_count}</td>
@@ -2435,6 +2537,76 @@ function loadScrapeGroups(btn) {
     html += '</tbody></table></div>';
     el.innerHTML = html;
     makeSortableAll(el);
+
+    // ── Auto-refresh the banner every 20s while page is active ──────────────
+    clearInterval(_scrapePagePollInterval);
+    _scrapePagePollInterval = setInterval(() => {
+      const scrapeSection = document.getElementById('stic-scrape');
+      if (!scrapeSection || !scrapeSection.classList.contains('active')) {
+        clearInterval(_scrapePagePollInterval);
+        return;
+      }
+      fetch('/api/scrape/live-status').then(r => r.json()).then(live2 => {
+        const banner = document.getElementById('scrape-live-banner');
+        if (live2.running) {
+          const p = live2.progress || {};
+          const groupTxt = p.group ? `Group ${p.group_idx}/${p.group_total}: <strong>${p.group}</strong>` : 'Starting up…';
+          const skuTxt   = p.sku_total ? `SKU <strong>${p.sku}</strong> of <strong>${p.sku_total}</strong>` + (p.current_sku ? ` &nbsp;·&nbsp; ${p.current_sku}` : '') : '';
+          const pct      = p.sku_total ? Math.round((p.sku / p.sku_total) * 100) : 0;
+          if (!banner) { loadScrapeGroups(); return; }   // state change — full reload
+          // Use IDs to avoid browser colour-normalisation breaking style selectors
+          const cnt2    = live2.scraper_count || 1;
+          const heading = document.getElementById('scrape-live-heading');
+          const detail  = document.getElementById('scrape-live-detail');
+          const bar     = document.getElementById('scrape-live-bar');
+          if (heading) heading.textContent = cnt2 > 1 ? `${cnt2} scrapers running` : 'Scraper is running';
+          if (detail)  detail.innerHTML = groupTxt + (skuTxt ? '&nbsp;&nbsp;·&nbsp;&nbsp;' + skuTxt : '');
+          if (bar)     bar.style.width  = pct + '%';
+        } else if (banner) {
+          // Scraper just finished — reload immediately to clear the banner
+          loadScrapeGroups();
+        }
+      }).catch(() => {});
+    }, 10000);
+  });
+}
+let _scrapePagePollInterval = null;
+
+function triggerCpuGroup(brand, btn) {
+  const name = brand === 'amd' ? 'AMD CPUs (Retail + MPK)' : 'Intel CPUs (Intel + OEM)';
+  const key  = brand === 'amd' ? 'CPU AMD' : 'CPU INTEL';
+  if (!confirm(`Start scrape for "${name}"?\\n\\nThis will run in the background. You\\'ll get a Telegram notification when done.`)) return;
+  btn.disabled = true;
+  btn.textContent = '⏳ Launching…';
+  _scrapeGroupsRunning[key] = true;
+  fetch('/api/scrape/cpu', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({brand})
+  }).then(r => r.json()).then(data => {
+    if (!data.started) {
+      btn.disabled = false;
+      btn.textContent = `▶ Run ${name}`;
+      _scrapeGroupsRunning[key] = false;
+      alert('Failed to start: ' + (data.error || 'unknown error'));
+      return;
+    }
+    btn.textContent = `⏳ ${brand.toUpperCase()} Running…`;
+    const interval = setInterval(() => {
+      fetch('/api/scrape/group/status?label=' + encodeURIComponent(data.label)).then(r => r.json()).then(s => {
+        if (s.done) {
+          clearInterval(interval);
+          _scrapeGroupsRunning[key] = false;
+          loadScrapeGroups();
+        }
+      }).catch(() => clearInterval(interval));
+    }, 10000);
+    setTimeout(() => { clearInterval(interval); _scrapeGroupsRunning[key] = false; loadScrapeGroups(); }, 5400000);
+  }).catch(() => {
+    btn.disabled = false;
+    btn.textContent = `▶ Run ${name}`;
+    _scrapeGroupsRunning[key] = false;
+    alert('Network error — could not start scrape.');
   });
 }
 
@@ -2569,7 +2741,7 @@ function loadMissingResults(btn) {
         : '';
       html += `<div class="inv-subsection">
         <div class="inv-subsection-title" style="display:flex;align-items:center;justify-content:space-between">
-          <span>${label} — last scraped ${fmtDate(grp.last_scraped)} — ${grp.rows.length} missing${regBadge}</span>
+          <span>${label} — last scraped ${grp.last_scraped ? fmtDate(grp.last_scraped) : '<span style="color:#A19F9D">Never</span>'} — ${grp.rows.length} missing${regBadge}</span>
           <button class="miss-scrape-btn" data-label="${label}" onclick="scrapeMissingGroup('${safeLabel}',this)"
             style="padding:3px 12px;font-size:11px;font-weight:600;background:#107C10;color:#fff;border:none;border-radius:2px;cursor:pointer;text-transform:none;letter-spacing:0">▶ Scrape Missing</button>
         </div>
@@ -2957,7 +3129,7 @@ function _missingMsrpRender() {
   el.innerHTML = '<div class="spinner">Loading…</div>';
   fetch(`/api/catalogue/missing-msrp?mfr=${encodeURIComponent(mfr)}&grp=${encodeURIComponent(grp)}`)
     .then(r => r.json()).then(data => {
-      const grpLabel = { PROD_VIDEO: 'GPU', PROD_MBRD: 'Motherboard', PROD_MBRDS: 'Server/Pro' };
+      const grpLabel = { PROD_VIDEO: 'GPU', PROD_MBRD: 'Motherboard', PROD_MBRDS: 'Server/Pro', PROD_CPU: 'CPU' };
       let html = '<h2 style="margin:0 0 4px">Missing MSRP Report</h2>';
 
       // Summary table
@@ -3053,7 +3225,7 @@ function _missingEanRender() {
   el.innerHTML = '<div class="spinner">Loading…</div>';
   fetch(`/api/catalogue/missing-ean?mfr=${encodeURIComponent(mfr)}&grp=${encodeURIComponent(grp)}`)
     .then(r => r.json()).then(data => {
-      const grpLabel = { PROD_VIDEO: 'GPU', PROD_MBRD: 'Motherboard', PROD_MBRDS: 'Server/Pro' };
+      const grpLabel = { PROD_VIDEO: 'GPU', PROD_MBRD: 'Motherboard', PROD_MBRDS: 'Server/Pro', PROD_CPU: 'CPU' };
       let html = '<h2 style="margin:0 0 4px">Missing EAN Report</h2>';
 
       // Summary table
@@ -4283,6 +4455,7 @@ def stic_chipset_overview():
         "mbrd":   "p.product_group = 'PROD_MBRD'",
         "server": "p.product_group = 'PROD_MBRDS'",
         "gpu":    "p.product_group = 'PROD_VIDEO'",
+        "cpu":    "p.product_group = 'PROD_CPU'",
     }.get(group, "p.product_group = 'PROD_MBRD'")
 
     latest = latest_date_for_group(group_filter)
@@ -4337,6 +4510,7 @@ def stic_chipset_skus():
         "mbrd":   "p.product_group = 'PROD_MBRD'",
         "server": "p.product_group = 'PROD_MBRDS'",
         "gpu":    "p.product_group = 'PROD_VIDEO'",
+        "cpu":    "p.product_group = 'PROD_CPU'",
     }.get(group, "p.product_group = 'PROD_MBRD'")
 
     latest = latest_date_for_group(group_filter)
@@ -4533,7 +4707,8 @@ def stic_report(name):
         rows = qry(
             f"""SELECT product_id, model_no, manufacturer,
                    {PRICE_FLOOR} AS min_price, {STOCK_SUM} AS total_stock,
-                   MAX(CASE WHEN distributor='VIP' THEN price END) AS vip_price
+                   MAX(CASE WHEN distributor='VIP' THEN price END) AS vip_price,
+                   MAX(CASE WHEN qty>0 THEN distributor END) AS sole_holder
                 FROM stic_prices WHERE date=?
                 GROUP BY product_id, model_no, manufacturer
                 HAVING COUNT(CASE WHEN qty>0 THEN 1 END) = 1
@@ -4817,6 +4992,7 @@ def stic_top_sellers():
         "GPU":    ("PROD_VIDEO",),
         "MB":     ("PROD_MBRD", "PROD_MBRDS"),
         "SERVER": ("PROD_MBRDS",),
+        "CPU":    ("PROD_CPU",),
     }
     groups = group_map.get(group, ("PROD_VIDEO",))
     placeholders = ",".join("?" * len(groups))
@@ -4911,6 +5087,7 @@ def stic_market_share():
         "GPU":    ("PROD_VIDEO",),
         "MB":     ("PROD_MBRD", "PROD_MBRDS"),
         "SERVER": ("PROD_MBRDS",),
+        "CPU":    ("PROD_CPU",),
     }
     groups = group_map.get(group, ("PROD_VIDEO",))
     placeholders = ",".join("?" * len(groups))
@@ -5494,22 +5671,43 @@ def eol_set(product_id):
 @app.route("/api/scrape/groups")
 def scrape_groups():
     """Return the list of scrape groups with active SKU counts and last-scraped dates."""
+    # Individual groups — each has a single manufacturer (or None for all of that product_group)
     SCRAPE_GROUPS = [
-        ("PALIT",      "PROD_VIDEO", "Palit GPU"),
-        ("POWERCOLOR", "PROD_VIDEO", "PowerColor GPU"),
-        ("MSI",        "PROD_VIDEO", "MSI GPU"),
-        ("ASUS",       "PROD_VIDEO", "ASUS GPU"),
-        ("GIGABYTE",   "PROD_VIDEO", "Gigabyte GPU"),
-        ("MSI",        "PROD_MBRD",  "MSI Motherboards"),
-        ("GIGABYTE",   "PROD_MBRD",  "Gigabyte Motherboards"),
-        ("ASUS",       "PROD_MBRD",  "ASUS Motherboards"),
-        (None,         "PROD_MBRDS", "Server / Pro"),
+        ("PALIT",      "PROD_VIDEO", "Palit GPU",              None),
+        ("POWERCOLOR", "PROD_VIDEO", "PowerColor GPU",         None),
+        ("MSI",        "PROD_VIDEO", "MSI GPU",                None),
+        ("ASUS",       "PROD_VIDEO", "ASUS GPU",               None),
+        ("GIGABYTE",   "PROD_VIDEO", "Gigabyte GPU",           None),
+        ("MSI",        "PROD_MBRD",  "MSI Motherboards",       None),
+        ("GIGABYTE",   "PROD_MBRD",  "Gigabyte Motherboards",  None),
+        ("ASUS",       "PROD_MBRD",  "ASUS Motherboards",      None),
+        (None,         "PROD_MBRDS", "Server / Pro",           None),
+        # CPU combined groups — trigger field tells the frontend which endpoint to use
+        (None,         "PROD_CPU",   "AMD CPUs",               "amd"),
+        (None,         "PROD_CPU",   "Intel CPUs",             "intel"),
     ]
     db = get_db()
     result = []
-    for manufacturer, product_group, label in SCRAPE_GROUPS:
-        # Count active SKUs for this group
-        if manufacturer:
+    for manufacturer, product_group, label, cpu_brand in SCRAPE_GROUPS:
+        # For combined CPU rows, filter by manufacturer prefix; otherwise standard logic
+        if cpu_brand == "amd":
+            mfr_filter = "AND manufacturer IN ('AMD Retail','AMD MPK')"
+            count_params      = (product_group,)
+            last_params       = (product_group,)
+        elif cpu_brand == "intel":
+            mfr_filter = "AND manufacturer IN ('Intel','Intel OEM')"
+            count_params      = (product_group,)
+            last_params       = (product_group,)
+        else:
+            mfr_filter = ""
+            count_params = last_params = None
+
+        if cpu_brand:
+            row = db.execute(
+                f"SELECT COUNT(*) AS c FROM products WHERE eol=0 AND product_group=? {mfr_filter}",
+                count_params
+            ).fetchone()
+        elif manufacturer:
             row = db.execute(
                 "SELECT COUNT(*) AS c FROM products WHERE eol=0 AND manufacturer=? AND product_group=?",
                 (manufacturer, product_group)
@@ -5521,8 +5719,12 @@ def scrape_groups():
             ).fetchone()
         sku_count = row["c"] if row else 0
 
-        # Last date this group had any data in stic_prices
-        if manufacturer:
+        if cpu_brand:
+            last = db.execute(
+                f"SELECT MAX(date) AS d FROM stic_prices WHERE product_group=? {mfr_filter}",
+                last_params
+            ).fetchone()
+        elif manufacturer:
             last = db.execute(
                 "SELECT MAX(date) AS d FROM stic_prices WHERE manufacturer=? AND product_group=?",
                 (manufacturer, product_group)
@@ -5534,10 +5736,15 @@ def scrape_groups():
             ).fetchone()
         last_scraped = last["d"] if last else None
 
-        # Count how many distinct SKUs actually got data on the last_scraped date
         scraped_count = 0
         if last_scraped:
-            if manufacturer:
+            if cpu_brand:
+                sc = db.execute(
+                    f"SELECT COUNT(DISTINCT product_id) AS c FROM stic_prices "
+                    f"WHERE date=? AND product_group=? {mfr_filter}",
+                    (last_scraped,) + last_params
+                ).fetchone()
+            elif manufacturer:
                 sc = db.execute(
                     "SELECT COUNT(DISTINCT product_id) AS c FROM stic_prices "
                     "WHERE date=? AND manufacturer=? AND product_group=?",
@@ -5558,6 +5765,7 @@ def scrape_groups():
             "sku_count":     sku_count,
             "last_scraped":  last_scraped,
             "scraped_count": scraped_count,
+            "cpu_brand":     cpu_brand,   # "amd" | "intel" | null
         })
     db.close()
     return jsonify(result)
@@ -5576,6 +5784,10 @@ def scrape_missing():
         ("GIGABYTE",   "PROD_MBRD",  "Gigabyte Motherboards"),
         ("ASUS",       "PROD_MBRD",  "ASUS Motherboards"),
         (None,         "PROD_MBRDS", "Server / Pro"),
+        ("AMD Retail", "PROD_CPU",   "AMD Retail CPU"),
+        ("AMD MPK",    "PROD_CPU",   "AMD MPK CPU"),
+        ("Intel",      "PROD_CPU",   "Intel CPU"),
+        ("Intel OEM",  "PROD_CPU",   "Intel OEM CPU"),
     ]
     db = get_db()
     result = []
@@ -5592,40 +5804,61 @@ def scrape_missing():
                 (product_group,)
             ).fetchone()
         last_scraped = last["d"] if last else None
-        if not last_scraped:
-            continue
 
         # Find active SKUs in this group that have NO data on last_scraped date.
+        # When last_scraped is None the group has NEVER been scraped — include
+        # ALL active SKUs (last_good_date will be None for all of them).
         # Also pull the last date they DID have data (last_good_date) so the UI
         # can distinguish "never found" from "was working, now broken".
-        if manufacturer:
-            missing = db.execute(
-                """SELECT p.product_id, p.model_no, p.manufacturer, p.stic_url,
-                          (SELECT MAX(date) FROM stic_prices s
-                           WHERE s.product_id=p.product_id) AS last_good_date
-                   FROM products p
-                   WHERE p.eol=0 AND p.manufacturer=? AND p.product_group=?
-                     AND p.product_id NOT IN (
-                         SELECT DISTINCT product_id FROM stic_prices
-                         WHERE date=? AND manufacturer=? AND product_group=?
-                     )
-                   ORDER BY p.model_no""",
-                (manufacturer, product_group, last_scraped, manufacturer, product_group)
-            ).fetchall()
+        if last_scraped:
+            if manufacturer:
+                missing = db.execute(
+                    """SELECT p.product_id, p.model_no, p.manufacturer, p.stic_url,
+                              (SELECT MAX(date) FROM stic_prices s
+                               WHERE s.product_id=p.product_id) AS last_good_date
+                       FROM products p
+                       WHERE p.eol=0 AND p.manufacturer=? AND p.product_group=?
+                         AND p.product_id NOT IN (
+                             SELECT DISTINCT product_id FROM stic_prices
+                             WHERE date=? AND manufacturer=? AND product_group=?
+                         )
+                       ORDER BY p.model_no""",
+                    (manufacturer, product_group, last_scraped, manufacturer, product_group)
+                ).fetchall()
+            else:
+                missing = db.execute(
+                    """SELECT p.product_id, p.model_no, p.manufacturer, p.stic_url,
+                              (SELECT MAX(date) FROM stic_prices s
+                               WHERE s.product_id=p.product_id) AS last_good_date
+                       FROM products p
+                       WHERE p.eol=0 AND p.product_group=?
+                         AND p.product_id NOT IN (
+                             SELECT DISTINCT product_id FROM stic_prices
+                             WHERE date=? AND product_group=?
+                         )
+                       ORDER BY p.model_no""",
+                    (product_group, last_scraped, product_group)
+                ).fetchall()
         else:
-            missing = db.execute(
-                """SELECT p.product_id, p.model_no, p.manufacturer, p.stic_url,
-                          (SELECT MAX(date) FROM stic_prices s
-                           WHERE s.product_id=p.product_id) AS last_good_date
-                   FROM products p
-                   WHERE p.eol=0 AND p.product_group=?
-                     AND p.product_id NOT IN (
-                         SELECT DISTINCT product_id FROM stic_prices
-                         WHERE date=? AND product_group=?
-                     )
-                   ORDER BY p.model_no""",
-                (product_group, last_scraped, product_group)
-            ).fetchall()
+            # Never scraped — every active SKU in this group is missing
+            if manufacturer:
+                missing = db.execute(
+                    """SELECT p.product_id, p.model_no, p.manufacturer, p.stic_url,
+                              NULL AS last_good_date
+                       FROM products p
+                       WHERE p.eol=0 AND p.manufacturer=? AND p.product_group=?
+                       ORDER BY p.model_no""",
+                    (manufacturer, product_group)
+                ).fetchall()
+            else:
+                missing = db.execute(
+                    """SELECT p.product_id, p.model_no, p.manufacturer, p.stic_url,
+                              NULL AS last_good_date
+                       FROM products p
+                       WHERE p.eol=0 AND p.product_group=?
+                       ORDER BY p.model_no""",
+                    (product_group,)
+                ).fetchall()
 
         for row in missing:
             result.append({
@@ -5658,6 +5891,10 @@ def scrape_missing_group_trigger():
         ("GIGABYTE",   "PROD_MBRD",  "Gigabyte Motherboards"),
         ("ASUS",       "PROD_MBRD",  "ASUS Motherboards"),
         (None,         "PROD_MBRDS", "Server / Pro"),
+        ("AMD Retail", "PROD_CPU",   "AMD Retail CPU"),
+        ("AMD MPK",    "PROD_CPU",   "AMD MPK CPU"),
+        ("Intel",      "PROD_CPU",   "Intel CPU"),
+        ("Intel OEM",  "PROD_CPU",   "Intel OEM CPU"),
     ]
     data = request.get_json(silent=True) or {}
     label = (data.get("label") or "").strip()
@@ -5810,6 +6047,33 @@ def scrape_missing_all_status():
     })
 
 
+def _scraper_is_running():
+    """Return True if a live (non-zombie) stic_scraper.py process exists
+    AND the log has been written to within the last 90 seconds."""
+    import subprocess, os, time as _t
+    try:
+        r = subprocess.run(["pgrep", "-f", "stic_scraper.py"], capture_output=True, text=True)
+        pids = [p.strip() for p in r.stdout.strip().splitlines() if p.strip()]
+        live = []
+        for pid in pids:
+            try:
+                st = open(f"/proc/{pid}/status").read()
+                line = next((l for l in st.splitlines() if l.startswith("State:")), "")
+                if "Z" not in line:
+                    live.append(pid)
+            except Exception:
+                pass
+        if not live:
+            return False
+        # Secondary: log must have been written in last 90s
+        try:
+            return (_t.time() - os.path.getmtime("/opt/openclaw/logs/stic.log")) <= 90
+        except Exception:
+            return True
+    except Exception:
+        return False
+
+
 @app.route("/api/scrape/group", methods=["POST"])
 def scrape_group_trigger():
     """Launch stic_scraper.py --group <label> as a background subprocess."""
@@ -5823,6 +6087,7 @@ def scrape_group_trigger():
     VALID_LABELS = {
         "Palit GPU", "PowerColor GPU", "MSI GPU", "ASUS GPU", "Gigabyte GPU",
         "MSI Motherboards", "Gigabyte Motherboards", "ASUS Motherboards", "Server / Pro",
+        "AMD Retail CPU", "AMD MPK CPU", "Intel CPU", "Intel OEM CPU",
         "Probe SKUs",
     }
     if label not in VALID_LABELS:
@@ -5838,6 +6103,30 @@ def scrape_group_trigger():
         # Launch detached — portal doesn't wait for it
         proc = subprocess.Popen(
             cmd,
+            stdout=open("/opt/openclaw/logs/stic.log", "a"),
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        _scrape_group_jobs[label] = {"proc": proc, "done": False}
+        return jsonify({"started": True, "label": label})
+    except Exception as e:
+        return jsonify({"started": False, "error": str(e)})
+
+
+@app.route("/api/scrape/cpu", methods=["POST"])
+def scrape_cpu_trigger():
+    """Launch stic_scraper.py --cpus-amd or --cpus-intel as a background subprocess."""
+    import subprocess
+    data  = request.get_json(silent=True) or {}
+    brand = (data.get("brand") or "").strip().lower()   # "amd" or "intel"
+    if brand not in ("amd", "intel"):
+        return jsonify({"started": False, "error": "brand must be 'amd' or 'intel'"})
+
+    flag  = "--cpus-amd" if brand == "amd" else "--cpus-intel"
+    label = f"CPU {brand.upper()}"
+    try:
+        proc = subprocess.Popen(
+            ["/usr/bin/python3", "/opt/openclaw/data/stic/stic_scraper.py", flag, "--force"],
             stdout=open("/opt/openclaw/logs/stic.log", "a"),
             stderr=subprocess.STDOUT,
             start_new_session=True,
@@ -5913,6 +6202,183 @@ def scrape_sku_status():
     return jsonify({"done": job["done"]})
 
 
+@app.route("/api/scrape/live-status")
+def scrape_live_status():
+    """Return whether the cron scraper is running, current progress, and schedule."""
+    import subprocess, re, zoneinfo
+    from datetime import datetime, timedelta
+
+    # ── Is stic_scraper.py running? (exclude zombies via /proc/PID/status) ───
+    import os, time as _time
+    running = False
+    scraper_count = 0
+    try:
+        r = subprocess.run(["pgrep", "-f", "stic_scraper.py"], capture_output=True, text=True)
+        pids = [p.strip() for p in r.stdout.strip().splitlines() if p.strip()]
+        live_pids = []
+        for pid in pids:
+            try:
+                status = open(f"/proc/{pid}/status").read()
+                state_line = next((l for l in status.splitlines() if l.startswith("State:")), "")
+                if "Z" not in state_line:   # exclude zombies
+                    live_pids.append(pid)
+            except Exception:
+                pass   # process already gone
+        running = bool(live_pids)
+        scraper_count = len(live_pids)
+    except Exception:
+        running = False
+        scraper_count = 0
+
+    # ── Secondary check: if log hasn't been written to in 90s, scraper is done ─
+    # Catches processes stuck in cleanup/network after sending Telegram.
+    if running:
+        try:
+            log_mtime = os.path.getmtime("/opt/openclaw/logs/stic.log")
+            if _time.time() - log_mtime > 90:
+                running = False
+                scraper_count = 0
+        except Exception:
+            pass
+
+    # ── Parse progress from log ──────────────────────────────────────────────
+    progress = {}
+    if running:
+        log_path = "/opt/openclaw/logs/stic.log"
+        try:
+            with open(log_path, encoding="utf-8", errors="replace") as f:
+                lines = f.readlines()[-600:]
+            group_label = ""
+            group_idx = group_total = sku_idx = sku_total = 0
+            current_sku = ""
+            for line in reversed(lines):
+                if not current_sku:
+                    # e.g.   [62/62] GV-N507TWF3OCV2-16GD (ID: 128734)
+                    # Avoid matching [GROUP 1/2] lines — require no leading alpha before [
+                    m = re.search(r'(?<!\w)\[(\d+)/(\d+)\]\s+(\S+)', line)
+                    if m and "GROUP" not in line:
+                        sku_idx     = int(m.group(1))
+                        sku_total   = int(m.group(2))
+                        current_sku = m.group(3)
+                if not group_label:
+                    # e.g. [GROUP 5/9] Gigabyte GPU — 62 products
+                    m = re.search(r'\[GROUP\s+(\d+)/(\d+)\]\s+(.+?)\s+—', line)
+                    if m:
+                        group_idx   = int(m.group(1))
+                        group_total = int(m.group(2))
+                        group_label = m.group(3).strip()
+                if group_label and current_sku:
+                    break
+            # If still no group label (e.g. single-group portal run), look for
+            # the run-start log line: "Single-group run: Gigabyte GPU"
+            if not group_label and current_sku:
+                for line in reversed(lines):
+                    m = re.search(r'(?:Single-group run|Manual run|Morning run|Afternoon run):\s+(.+?)(?:\s+\(|$)', line)
+                    if m:
+                        group_label = m.group(1).strip()
+                        group_total = 1
+                        group_idx   = 1
+                        break
+            progress = {
+                "group": group_label,
+                "group_idx": group_idx,
+                "group_total": group_total,
+                "sku": sku_idx,
+                "sku_total": sku_total,
+                "current_sku": current_sku,
+            }
+        except Exception:
+            pass
+
+    # ── SKU counts for duration estimates ────────────────────────────────────
+    try:
+        db = get_db()
+        all_skus = db.execute(
+            "SELECT COUNT(*) AS c FROM products WHERE eol=0"
+        ).fetchone()["c"]
+        gpu_skus = db.execute(
+            "SELECT COUNT(*) AS c FROM products WHERE eol=0 AND product_group='PROD_VIDEO'"
+        ).fetchone()["c"]
+        # Count non-empty groups for each scope (groups with ≥1 active product)
+        all_groups = db.execute("""
+            SELECT COUNT(DISTINCT COALESCE(manufacturer,'') || '|' || product_group) AS c
+            FROM products WHERE eol=0
+        """).fetchone()["c"]
+        gpu_groups = db.execute("""
+            SELECT COUNT(DISTINCT manufacturer) AS c
+            FROM products WHERE eol=0 AND product_group='PROD_VIDEO'
+        """).fetchone()["c"]
+        db.close()
+    except Exception:
+        all_skus = gpu_skus = all_groups = gpu_groups = 0
+
+    def estimate_duration_secs(sku_count, group_count):
+        # avg 8s delay per SKU + ~1s long-pause amortised per SKU
+        # + avg 210s (2–5 min) gap between groups
+        # + avg 300s random start delay (0–10 min, cron fires at :25/:55)
+        return int(sku_count * 9 + max(0, group_count - 1) * 210 + 300)
+
+    def fmt_duration(secs):
+        h, m = divmod(secs // 60, 60)
+        if h:
+            return f"~{h}h {m}m"
+        return f"~{m}m"
+
+    # ── Scheduled runs ───────────────────────────────────────────────────────
+    tz = zoneinfo.ZoneInfo("Europe/London")
+    now = datetime.now(tz)
+
+    def next_weekday_at(hour, minute):
+        candidate = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if candidate <= now:
+            candidate += timedelta(days=1)
+        while candidate.weekday() >= 5:   # skip Sat/Sun
+            candidate += timedelta(days=1)
+        diff = candidate - now
+        hours_away = diff.total_seconds() / 3600
+        if hours_away < 1:
+            label = f"in {int(diff.total_seconds() / 60)} min"
+        elif hours_away < 24:
+            label = f"today {candidate.strftime('%H:%M')}"
+        else:
+            label = candidate.strftime("%a %H:%M")
+        return candidate, label
+
+    morning_dt,   next_morning_label   = next_weekday_at(8,  25)
+    afternoon_dt, next_afternoon_label = next_weekday_at(13, 55)
+
+    morning_dur   = estimate_duration_secs(all_skus, all_groups)
+    afternoon_dur = estimate_duration_secs(gpu_skus, gpu_groups)
+
+    morning_end   = morning_dt   + timedelta(seconds=morning_dur)
+    afternoon_end = afternoon_dt + timedelta(seconds=afternoon_dur)
+
+    schedule = [
+        {
+            "label":        "Morning full run — all groups",
+            "days":         "Mon–Fri",
+            "time":         "08:25",
+            "scope":        "--runall",
+            "sku_count":    all_skus,
+            "next_label":   next_morning_label,
+            "est_duration": fmt_duration(morning_dur),
+            "est_end":      morning_end.strftime("%H:%M"),
+        },
+        {
+            "label":        "Afternoon GPU-only run",
+            "days":         "Mon–Fri",
+            "time":         "13:55",
+            "scope":        "--gpus",
+            "sku_count":    gpu_skus,
+            "next_label":   next_afternoon_label,
+            "est_duration": fmt_duration(afternoon_dur),
+            "est_end":      afternoon_end.strftime("%H:%M"),
+        },
+    ]
+
+    return jsonify({"running": running, "scraper_count": scraper_count, "progress": progress, "schedule": schedule})
+
+
 @app.route("/api/import/template/new-skus")
 def import_template_new_skus():
     """Return a CSV template for the Add/Update SKUs import tool."""
@@ -5938,7 +6404,7 @@ def import_new_skus_preview():
     if not raw:
         return jsonify({"error": "No CSV content received."})
 
-    KNOWN_GROUPS = {"PROD_VIDEO", "PROD_MBRD", "PROD_MBRDS"}
+    KNOWN_GROUPS = {"PROD_VIDEO", "PROD_MBRD", "PROD_MBRDS", "PROD_CPU"}
     REQUIRED     = ("product_id", "model_no", "manufacturer", "product_group")
 
     try:
@@ -6012,7 +6478,7 @@ def import_new_skus_preview():
         note = ""
         status = "update" if pid in existing_ids else "new"
         if r.get("product_group") not in KNOWN_GROUPS:
-            note = f"Unrecognised group '{r['product_group']}' (expected PROD_VIDEO, PROD_MBRD, or PROD_MBRDS)"
+            note = f"Unrecognised group '{r['product_group']}' (expected PROD_VIDEO, PROD_MBRD, PROD_MBRDS, or PROD_CPU)"
             status = "warn"
             warn_count += 1
 
@@ -6466,7 +6932,7 @@ def catalogue_product(product_id):
                     except (ValueError, TypeError):
                         db.close()
                         return jsonify({"error": f"Invalid MSRP value: {val}"})
-            if field == "product_group" and val not in ("PROD_VIDEO", "PROD_MBRD", "PROD_MBRDS", None, ""):
+            if field == "product_group" and val not in ("PROD_VIDEO", "PROD_MBRD", "PROD_MBRDS", "PROD_CPU", None, ""):
                 db.close()
                 return jsonify({"error": f"Invalid product_group: {val}"})
             sets.append(f"{field} = ?")
