@@ -417,6 +417,8 @@ HTML = r"""<!DOCTYPE html>
         <button class="sidebar-btn" onclick="loadReport('back_in_stock',this)">Back in stock</button>
         <button class="sidebar-btn" onclick="loadReport('single_distributor',this)">Single distributor</button>
         <button class="sidebar-btn" onclick="loadReport('new_stock_arrival',this)">New stock arrival</button>
+        <button class="sidebar-btn" onclick="loadTopSellers(this)">📊 Top Sellers (30d)</button>
+        <button class="sidebar-btn" onclick="loadMarketShare(this)">🥧 Est. Market Share</button>
       </div>
     </div>
     <div class="sidebar-section">
@@ -525,6 +527,14 @@ HTML = r"""<!DOCTYPE html>
     <!-- Missing Results -->
     <div class="content-section" id="stic-missing">
       <div id="stic-missing-content"><div class="spinner">Loading…</div></div>
+    </div>
+    <!-- Top Sellers -->
+    <div class="content-section" id="stic-top-sellers">
+      <div id="stic-top-sellers-content"><div class="spinner">Loading…</div></div>
+    </div>
+    <!-- Market Share -->
+    <div class="content-section" id="stic-market-share">
+      <div id="stic-market-share-content"><div class="spinner">Loading…</div></div>
     </div>
   </div>
 </div>
@@ -1914,6 +1924,288 @@ function renderReportTable(name, rows) {
   if (savedGrp  && document.getElementById('filter-group')) document.getElementById('filter-group').value = savedGrp;
 }
 
+// ── Top Sellers (30-day stock-movement sellout) ───────────────────────────────
+let _topSellersGroup = 'GPU';
+
+function loadTopSellers(btn) {
+  if (currentSidebarBtn) currentSidebarBtn.classList.remove('active');
+  if (btn) { btn.classList.add('active'); currentSidebarBtn = btn; }
+  showSticSection('top-sellers');
+  _fetchTopSellers(_topSellersGroup);
+}
+
+function _fetchTopSellers(group) {
+  _topSellersGroup = group;
+  const el = document.getElementById('stic-top-sellers-content');
+  el.innerHTML = '<div class="spinner">Loading…</div>';
+  fetch('/api/stic/top-sellers?group=' + group)
+    .then(r => r.json())
+    .then(data => _renderTopSellers(data, group));
+}
+
+function _renderTopSellers(rows, group) {
+  const el = document.getElementById('stic-top-sellers-content');
+  const groups = [
+    { key: 'GPU',    label: '🎮 Graphics' },
+    { key: 'MB',     label: '🖥 Motherboards' },
+    { key: 'SERVER', label: '🗄 Server' },
+  ];
+
+  const tabs = groups.map(g => {
+    const active = g.key === group ? 'style="background:#0078D4;color:#fff;border-color:#0078D4"' : '';
+    return `<button class="ts-tab-btn" ${active} onclick="_fetchTopSellers('${g.key}')">${g.label}</button>`;
+  }).join('');
+
+  const groupLabel = (groups.find(g => g.key === group) || {}).label || group;
+
+  let html = `
+    <div class="section-title">📊 Top Sellers — Last 30 Days
+      <span style="font-size:12px;font-weight:400;color:#605E5C"> based on channel stock movements</span>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+      ${tabs}
+    </div>`;
+
+  if (!rows.length) {
+    html += `<p style="color:#A19F9D;padding:20px">No movement data available for ${groupLabel}.</p>`;
+    el.innerHTML = html;
+    return;
+  }
+
+  html += `
+    <div class="ts-note" style="background:#1e2533;border:1px solid #3a4660;border-radius:6px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#A19F9D">
+      ⚠️ <strong style="color:#C8C6C4">Estimated figures only.</strong>
+      Sales are inferred from day-on-day drops in distributor stock across the last 30 days.
+      Restocks and data gaps may affect accuracy. VIP sales = drops in VIP stock specifically.
+    </div>
+    <div class="tbl-wrap"><table><thead><tr>
+      <th>VIP SKU</th><th>Manufacturer</th><th>Model</th>
+      <th>Est. Sales (30d)</th><th>Est. VIP Sales (30d)</th>
+    </tr></thead><tbody>`;
+
+  const maxSales = rows[0]?.est_sales || 1;
+  rows.forEach((r, i) => {
+    const barW = Math.round((r.est_sales / maxSales) * 80);
+    const rankBadge = i < 3
+      ? `<span style="display:inline-block;width:20px;height:20px;border-radius:50%;background:${['#FFD700','#C0C0C0','#CD7F32'][i]};color:#000;font-size:10px;font-weight:700;line-height:20px;text-align:center;margin-right:6px">${i+1}</span>`
+      : `<span style="color:#605E5C;font-size:11px;margin-right:6px">${i+1}</span>`;
+    const vipSales = r.est_vip_sales > 0
+      ? `<span style="color:#107C10;font-weight:600">${r.est_vip_sales.toLocaleString()}</span>`
+      : `<span style="color:#605E5C">—</span>`;
+    html += `<tr class="clickable" onclick="loadSticSku(${r.product_id},'top-sellers')">
+      <td>${r.product_id}</td>
+      <td>${r.manufacturer || '—'}</td>
+      <td>${rankBadge}${r.model_no}</td>
+      <td>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="background:#0078D4;height:6px;width:${barW}px;border-radius:3px;min-width:4px;flex-shrink:0"></div>
+          <span style="font-weight:600">${r.est_sales.toLocaleString()}</span>
+        </div>
+      </td>
+      <td>${vipSales}</td>
+    </tr>`;
+  });
+
+  html += '</tbody></table></div>';
+  el.innerHTML = html;
+  makeSortableAll(el);
+}
+
+// ── Estimated Market Share ────────────────────────────────────────────────────
+const DIST_COLOURS = {
+  'VIP':        '#0078D4',   // blue  — matches product page
+  'M2M Direct': '#FFB900',   // amber — matches product page
+  'TD Synnex':  '#D13438',   // red   — matches product page
+  'Target':     '#8A8886',   // grey  — matches product page
+  'Westcoast':  '#107C10',   // green — matches product page
+};
+const DIST_COLOUR_FALLBACKS = ['#605E5C','#A19F9D','#C8C6C4','#8A8886','#323130'];
+
+function _distColour(name, idx) {
+  return DIST_COLOURS[name] || DIST_COLOUR_FALLBACKS[idx % DIST_COLOUR_FALLBACKS.length];
+}
+
+function _currentQuarter() {
+  const m = new Date().getMonth(); // 0-based
+  return Math.floor(m / 3) + 1;
+}
+
+let _msState = { year: new Date().getFullYear(), q: _currentQuarter(), group: 'GPU' };
+
+function loadMarketShare(btn) {
+  if (currentSidebarBtn) currentSidebarBtn.classList.remove('active');
+  if (btn) { btn.classList.add('active'); currentSidebarBtn = btn; }
+  showSticSection('market-share');
+  _fetchMarketShare();
+}
+
+function _fetchMarketShare() {
+  const el = document.getElementById('stic-market-share-content');
+  el.innerHTML = '<div class="spinner">Loading…</div>';
+  const { year, q, group } = _msState;
+  fetch(`/api/stic/market-share?year=${year}&quarter=${q}&group=${group}`)
+    .then(r => r.json())
+    .then(data => _renderMarketShare(data));
+}
+
+function _renderMarketShare(rows) {
+  const el = document.getElementById('stic-market-share-content');
+  const { year, q, group } = _msState;
+  const qLabels = {1:'Q1 Jan–Mar', 2:'Q2 Apr–Jun', 3:'Q3 Jul–Sep', 4:'Q4 Oct–Dec'};
+  const groupDefs = [
+    {key:'GPU', label:'🎮 Graphics'},
+    {key:'MB',  label:'🖥 Motherboards'},
+    {key:'SERVER', label:'🗄 Server'},
+  ];
+  const currentYear = new Date().getFullYear();
+  const currentQ    = _currentQuarter();
+
+  // ── Header + nav ────────────────────────────────────────────────────────────
+  const yearNav = `
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap">
+      <button class="ts-tab-btn" onclick="_msNav('year',-1)">◀</button>
+      <span style="font-size:16px;font-weight:600;min-width:48px;text-align:center">${year}</span>
+      <button class="ts-tab-btn" onclick="_msNav('year',1)" ${year>=currentYear?'disabled':''}>▶</button>
+      <span style="color:#605E5C;font-size:12px;margin-left:4px">|</span>
+      ${[1,2,3,4].map(i => {
+        const isFuture = year === currentYear && i > currentQ;
+        const active   = i === q ? 'style="background:#0078D4;color:#fff;border-color:#0078D4"' : '';
+        return `<button class="ts-tab-btn" ${active} ${isFuture?'disabled title="No data yet"':''} onclick="_msSetQ(${i})">${qLabels[i]}</button>`;
+      }).join('')}
+    </div>`;
+
+  const catTabs = groupDefs.map(g => {
+    const active = g.key === group ? 'style="background:#0078D4;color:#fff;border-color:#0078D4"' : '';
+    return `<button class="ts-tab-btn" ${active} onclick="_msSetGroup('${g.key}')">${g.label}</button>`;
+  }).join('');
+
+  let html = `
+    <div class="section-title">🥧 Estimated Market Share — ${qLabels[q]} ${year}</div>
+    ${yearNav}
+    <div style="display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap">${catTabs}</div>`;
+
+  if (!rows.length) {
+    html += `<p style="color:#A19F9D;padding:20px">No data available for ${qLabels[q]} ${year}. Data collection started April 2026.</p>`;
+    el.innerHTML = html;
+    return;
+  }
+
+  html += `<div class="ts-note" style="background:#EFF6FC;border:1px solid #C7E0F4;border-radius:6px;padding:10px 14px;margin-bottom:18px;font-size:12px;color:#444">
+    ⚠️ <strong style="color:#1a1a1a">Estimates only</strong> — inferred from day-on-day stock drops, excluding same-size reversals within 2 days.
+    ${year === currentYear && q === currentQ ? `<strong style="color:#1a1a1a">Q${q} is in progress</strong> — figures will grow as the quarter continues.` : ''}
+  </div>`;
+
+  // ── Group data by manufacturer ───────────────────────────────────────────────
+  const byMfr = {};
+  rows.forEach(r => {
+    if (!byMfr[r.manufacturer]) byMfr[r.manufacturer] = {};
+    byMfr[r.manufacturer][r.distributor] = r.est_sales;
+  });
+
+  // Overall (all manufacturers combined)
+  const overallDists = {};
+  rows.forEach(r => {
+    overallDists[r.distributor] = (overallDists[r.distributor] || 0) + r.est_sales;
+  });
+
+  // Sort manufacturers by total descending
+  const mfrList = Object.entries(byMfr)
+    .map(([m, dists]) => ({ mfr: m, dists, total: Object.values(dists).reduce((a,b)=>a+b,0) }))
+    .sort((a,b) => b.total - a.total);
+
+  // ── Overall card (full width) ────────────────────────────────────────────────
+  const overallTotal = Object.values(overallDists).reduce((a,b)=>a+b,0);
+  html += `<div style="margin-bottom:24px">
+    <div style="font-size:13px;font-weight:600;color:#1a1a1a;margin-bottom:12px">Overall Channel Distribution — ${overallTotal.toLocaleString()} est. units</div>
+    <div style="display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start">
+      ${_pieCardHtml('All Manufacturers', overallDists, overallTotal, 110)}
+    </div>
+  </div>
+  <hr style="border:none;border-top:1px solid #e0e0e0;margin-bottom:20px">
+  <div style="font-size:13px;font-weight:600;color:#1a1a1a;margin-bottom:14px">By Manufacturer</div>
+  <div style="display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start">`;
+
+  mfrList.forEach(({ mfr, dists, total }) => {
+    html += _pieCardHtml(mfr, dists, total, 80);
+  });
+  html += '</div>';
+
+  el.innerHTML = html;
+}
+
+function _pieCardHtml(title, dists, total, r) {
+  // Sort distributors by value desc
+  const sorted = Object.entries(dists).sort((a,b)=>b[1]-a[1]);
+  const slices  = sorted.map(([d, v], i) => ({ d, v, c: _distColour(d, i) }));
+
+  const svg = _svgDonut(slices, total, r);
+
+  const legendRows = slices.map(s => {
+    const pct = total > 0 ? ((s.v / total)*100).toFixed(1) : '0';
+    return `<tr>
+      <td style="color:#1a1a1a"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${s.c};margin-right:5px"></span>${s.d}</td>
+      <td style="text-align:right;padding-left:12px;font-variant-numeric:tabular-nums;color:#1a1a1a">${s.v.toLocaleString()}</td>
+      <td style="text-align:right;padding-left:8px;color:#767676;font-variant-numeric:tabular-nums">${pct}%</td>
+    </tr>`;
+  }).join('');
+
+  const cardW = r * 2 + 170;
+  return `<div style="background:#f7f7f7;border:1px solid #e0e0e0;border-radius:8px;padding:14px;min-width:${cardW}px;max-width:420px">
+    <div style="font-size:13px;font-weight:600;color:#1a1a1a;margin-bottom:10px">${title}
+      <span style="font-weight:400;font-size:11px;color:#767676;margin-left:6px">${total.toLocaleString()} units</span>
+    </div>
+    <div style="display:flex;gap:16px;align-items:center">
+      ${svg}
+      <table style="font-size:12px;border-collapse:collapse;flex:1">${legendRows}</table>
+    </div>
+  </div>`;
+}
+
+function _svgDonut(slices, total, R) {
+  const r = Math.round(R * 0.48);  // inner radius ~48% of outer
+  const cx = R + 8, cy = R + 8;
+  const size = (R + 8) * 2;
+
+  if (!total) return `<svg width="${size}" height="${size}"><circle cx="${cx}" cy="${cy}" r="${R}" fill="#e0e0e0"/></svg>`;
+
+  // Handle single-slice case (full circle)
+  if (slices.length === 1) {
+    return `<svg width="${size}" height="${size}" style="flex-shrink:0">
+      <circle cx="${cx}" cy="${cy}" r="${R}" fill="${slices[0].c}"/>
+      <circle cx="${cx}" cy="${cy}" r="${r}" fill="#f7f7f7"/>
+    </svg>`;
+  }
+
+  let angle = -Math.PI / 2;
+  const paths = slices.map(s => {
+    const sweep = (s.v / total) * 2 * Math.PI;
+    if (sweep < 0.0001) return '';
+    const a2 = angle + sweep;
+    const x1o = cx + R * Math.cos(angle),  y1o = cy + R * Math.sin(angle);
+    const x2o = cx + R * Math.cos(a2),     y2o = cy + R * Math.sin(a2);
+    const x1i = cx + r * Math.cos(a2),     y1i = cy + r * Math.sin(a2);
+    const x2i = cx + r * Math.cos(angle),  y2i = cy + r * Math.sin(angle);
+    const lg  = sweep > Math.PI ? 1 : 0;
+    const path = `M${x1o.toFixed(1)},${y1o.toFixed(1)} A${R},${R} 0 ${lg},1 ${x2o.toFixed(1)},${y2o.toFixed(1)} L${x1i.toFixed(1)},${y1i.toFixed(1)} A${r},${r} 0 ${lg},0 ${x2i.toFixed(1)},${y2i.toFixed(1)} Z`;
+    angle = a2;
+    return `<path d="${path}" fill="${s.c}" stroke="#f7f7f7" stroke-width="1.5"/>`;
+  }).join('');
+
+  return `<svg width="${size}" height="${size}" style="flex-shrink:0">${paths}</svg>`;
+}
+
+function _msNav(field, delta) {
+  if (field === 'year') {
+    _msState.year = Math.max(2026, _msState.year + delta);
+    // Clamp quarter to current if moved to current year
+    const curQ = _currentQuarter();
+    if (_msState.year === new Date().getFullYear() && _msState.q > curQ) _msState.q = curQ;
+  }
+  _fetchMarketShare();
+}
+function _msSetQ(q)     { _msState.q = q; _fetchMarketShare(); }
+function _msSetGroup(g) { _msState.group = g; _fetchMarketShare(); }
+
 function loadInvestigateReport(btn) {
   if (btn) {
     document.querySelectorAll('#sidebar-stic .sidebar-btn').forEach(b=>b.classList.remove('active'));
@@ -2393,34 +2685,46 @@ function scrapeMissingGroup(label, btn, _resolveCallback) {
   });
 }
 
-async function scrapeAllMissingSequential(btn) {
-  // Collect groups sorted smallest-first from the rendered buttons
-  const btns = Array.from(document.querySelectorAll('.miss-scrape-btn'));
-  if (!btns.length) return;
-  // Sort by the SKU count shown in the heading (cheapest first)
-  const groups = btns.map(b => ({
-    label: b.dataset.label,
-    btn: b,
-    count: parseInt(b.closest('.inv-subsection')
-             ?.querySelector('.inv-subsection-title span')
-             ?.textContent?.match(/(\d+) missing/)?.[1] || '999')
-  })).sort((a, b) => a.count - b.count);
-
+function scrapeAllMissingSequential(btn) {
+  // Server-side run — one POST, browser can close immediately.
+  // The server handles all groups, inter-group gaps, and login itself.
   btn.disabled = true;
-  const total = groups.length;
-  for (let i = 0; i < groups.length; i++) {
-    const g = groups[i];
-    btn.textContent = `⏳ ${i+1}/${total}: ${g.label} (${g.count} SKUs)…`;
-    await new Promise(resolve => scrapeMissingGroup(g.label, g.btn, resolve));
-    // Inter-group gap — 2 to 4 minutes, matching the main run_groups() pacing
-    if (i < groups.length - 1) {
-      const gapSec = Math.floor(Math.random() * 120) + 120; // 120–240 s
-      btn.textContent = `⏸ ${i+1}/${total} done — waiting ${Math.round(gapSec/60)}m before next group…`;
-      await new Promise(r => setTimeout(r, gapSec * 1000));
-    }
-  }
-  btn.textContent = '✓ All done';
-  setTimeout(() => { btn.textContent = '▶ Run All (sequential)'; }, 4000);
+  btn.textContent = '⏳ Starting…';
+
+  fetch('/api/scrape/missing-all', { method: 'POST' })
+    .then(r => r.json())
+    .then(data => {
+      if (!data.started) {
+        alert(data.error || 'Could not start missing-all run');
+        btn.disabled = false;
+        btn.textContent = '▶ Run All (sequential)';
+        return;
+      }
+      btn.textContent = '⏳ Running on server — you can close this tab';
+      // Poll status every 10s so the button reflects progress if tab stays open
+      const poll = setInterval(() => {
+        fetch('/api/scrape/missing-all/status')
+          .then(r => r.json())
+          .then(s => {
+            if (s.done) {
+              clearInterval(poll);
+              btn.disabled = false;
+              btn.textContent = '✓ Done';
+              setTimeout(() => {
+                btn.textContent = '▶ Run All (sequential)';
+                loadMissing();
+              }, 3000);
+            } else if (s.current) {
+              btn.textContent = `⏳ ${s.current}`;
+            }
+          }).catch(() => {});
+      }, 10000);
+    })
+    .catch(() => {
+      btn.disabled = false;
+      btn.textContent = '▶ Run All (sequential)';
+      alert('Network error starting run');
+    });
 }
 
 // ── Catalogue: Products view ──────────────────────────────────────────────────
@@ -4498,6 +4802,150 @@ def retailer_links(product_id):
     return jsonify(links)
 
 
+@app.route("/api/stic/top-sellers")
+def stic_top_sellers():
+    """
+    Return top-30 SKUs by estimated sales for the last 30 days.
+    Sales are inferred from day-on-day drops in total channel stock.
+    VIP sales = drops in VIP distributor stock specifically.
+
+    Query param:
+      group = GPU | MB | SERVER
+    """
+    group = request.args.get("group", "GPU").upper()
+    group_map = {
+        "GPU":    ("PROD_VIDEO",),
+        "MB":     ("PROD_MBRD", "PROD_MBRDS"),
+        "SERVER": ("PROD_MBRDS",),
+    }
+    groups = group_map.get(group, ("PROD_VIDEO",))
+    placeholders = ",".join("?" * len(groups))
+
+    # Calculate drops per distributor per day.
+    # Rules:
+    #  1. Only count a drop when BOTH the current and previous reading are non-NULL
+    #     (avoids missed-scrape-day zeros creating phantom drops).
+    #  2. Exclude a drop if the stock fully restores (next_qty >= prev_qty) within
+    #     2 days — that pattern indicates a cancelled reservation or allocation
+    #     hold being released, not a real sale.
+    rows = qry(f"""
+        WITH per_dist AS (
+            SELECT
+                date,
+                product_id,
+                model_no,
+                manufacturer,
+                distributor,
+                qty,
+                LAG(qty)  OVER (PARTITION BY product_id, distributor ORDER BY date) AS prev_qty,
+                LEAD(qty)  OVER (PARTITION BY product_id, distributor ORDER BY date) AS next_qty,
+                LEAD(date) OVER (PARTITION BY product_id, distributor ORDER BY date) AS next_date
+            FROM stic_prices
+            WHERE date >= DATE('now', '-30 days')
+              AND product_group IN ({placeholders})
+        ),
+        drops AS (
+            SELECT
+                product_id,
+                MAX(model_no)     AS model_no,
+                MAX(manufacturer) AS manufacturer,
+                SUM(CASE
+                    WHEN prev_qty IS NOT NULL AND qty IS NOT NULL AND prev_qty > qty
+                     AND NOT (next_qty IS NOT NULL
+                              AND next_qty >= prev_qty
+                              AND julianday(next_date) - julianday(date) <= 2)
+                    THEN prev_qty - qty ELSE 0
+                END) AS est_sales,
+                SUM(CASE
+                    WHEN distributor = 'VIP'
+                     AND prev_qty IS NOT NULL AND qty IS NOT NULL AND prev_qty > qty
+                     AND NOT (next_qty IS NOT NULL
+                              AND next_qty >= prev_qty
+                              AND julianday(next_date) - julianday(date) <= 2)
+                    THEN prev_qty - qty ELSE 0
+                END) AS est_vip_sales
+            FROM per_dist
+            GROUP BY product_id
+        )
+        SELECT product_id, manufacturer, model_no, est_sales, est_vip_sales
+        FROM drops
+        WHERE est_sales > 0
+        ORDER BY est_sales DESC
+        LIMIT 30
+    """, tuple(groups))
+
+    return jsonify(rows)
+
+
+@app.route("/api/stic/market-share")
+def stic_market_share():
+    """
+    Estimated distributor market share for a financial quarter.
+    Uses the same stock-drop logic as top-sellers (NULL-safe, reversal-excluded).
+
+    Query params:
+      year    = 4-digit year (default: current year)
+      quarter = 1-4 (default: current quarter)
+      group   = GPU | MB | SERVER
+    """
+    from datetime import datetime as _dt
+    now = _dt.now()
+    try:
+        year    = int(request.args.get("year",    now.year))
+        quarter = int(request.args.get("quarter", (now.month - 1) // 3 + 1))
+    except (ValueError, TypeError):
+        year, quarter = now.year, 1
+
+    quarter = max(1, min(4, quarter))
+
+    q_ranges = {
+        1: (f"{year}-01-01", f"{year}-03-31"),
+        2: (f"{year}-04-01", f"{year}-06-30"),
+        3: (f"{year}-07-01", f"{year}-09-30"),
+        4: (f"{year}-10-01", f"{year}-12-31"),
+    }
+    start_date, end_date = q_ranges[quarter]
+
+    group = request.args.get("group", "GPU").upper()
+    group_map = {
+        "GPU":    ("PROD_VIDEO",),
+        "MB":     ("PROD_MBRD", "PROD_MBRDS"),
+        "SERVER": ("PROD_MBRDS",),
+    }
+    groups = group_map.get(group, ("PROD_VIDEO",))
+    placeholders = ",".join("?" * len(groups))
+
+    rows = qry(f"""
+        WITH per_dist AS (
+            SELECT date, product_id, manufacturer, distributor, qty,
+                LAG(qty)   OVER (PARTITION BY product_id, distributor ORDER BY date) AS prev_qty,
+                LEAD(qty)  OVER (PARTITION BY product_id, distributor ORDER BY date) AS next_qty,
+                LEAD(date) OVER (PARTITION BY product_id, distributor ORDER BY date) AS next_date
+            FROM stic_prices
+            WHERE date >= ? AND date <= ?
+              AND product_group IN ({placeholders})
+        ),
+        drops AS (
+            SELECT manufacturer, distributor,
+                SUM(CASE
+                    WHEN prev_qty IS NOT NULL AND qty IS NOT NULL AND prev_qty > qty
+                     AND NOT (next_qty IS NOT NULL
+                              AND next_qty >= prev_qty
+                              AND julianday(next_date) - julianday(date) <= 2)
+                    THEN prev_qty - qty ELSE 0
+                END) AS est_sales
+            FROM per_dist
+            GROUP BY manufacturer, distributor
+        )
+        SELECT manufacturer, distributor, est_sales
+        FROM drops
+        WHERE est_sales > 0
+        ORDER BY manufacturer, est_sales DESC
+    """, (start_date, end_date) + tuple(groups))
+
+    return jsonify(rows)
+
+
 @app.route("/api/stic/purge-dates", methods=["POST"])
 def stic_purge_dates():
     """Delete all stic_prices rows for a product on the given dates (all distributors)."""
@@ -5298,6 +5746,68 @@ def scrape_missing_group_status():
         if _missing_scrape_active == label:
             _missing_scrape_active = None   # release the lock when job exits
     return jsonify({"done": job["done"]})
+
+
+_missing_all_job = None   # {"proc": proc, "done": bool, "started": str}
+
+@app.route("/api/scrape/missing-all", methods=["POST"])
+def scrape_missing_all_trigger():
+    """Launch stic_scraper.py --missing-all as a single server-side background job.
+    Browser-independent — the full sequential run happens on the server."""
+    import subprocess
+    global _missing_all_job
+
+    # Refuse if already running
+    if _missing_all_job and not _missing_all_job.get("done") \
+            and _missing_all_job["proc"].poll() is None:
+        return jsonify({"started": False,
+                        "error": "A missing-all run is already in progress"})
+
+    try:
+        proc = subprocess.Popen(
+            ["/usr/bin/python3", "/opt/openclaw/data/stic/stic_scraper.py",
+             "--missing-all"],
+            stdout=open("/opt/openclaw/logs/stic.log", "a"),
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        _missing_all_job = {
+            "proc": proc,
+            "done": False,
+            "started": __import__("datetime").datetime.now().strftime("%H:%M"),
+        }
+        return jsonify({"started": True})
+    except Exception as e:
+        return jsonify({"started": False, "error": str(e)})
+
+
+@app.route("/api/scrape/missing-all/status")
+def scrape_missing_all_status():
+    global _missing_all_job
+    if not _missing_all_job:
+        return jsonify({"running": False, "done": True, "current": "Not started"})
+    if not _missing_all_job["done"] and _missing_all_job["proc"].poll() is not None:
+        _missing_all_job["done"] = True
+    running = not _missing_all_job["done"]
+
+    # Read current group from the scraper's status file if available
+    import json as _json, os as _os
+    status_path = "/opt/openclaw/data/stic/missing_all_status.json"
+    current = ""
+    if _os.path.exists(status_path):
+        try:
+            with open(status_path) as f:
+                s = _json.load(f)
+            current = s.get("current", "")
+        except Exception:
+            pass
+
+    return jsonify({
+        "running": running,
+        "done": not running,
+        "current": current,
+        "started": _missing_all_job.get("started", ""),
+    })
 
 
 @app.route("/api/scrape/group", methods=["POST"])
