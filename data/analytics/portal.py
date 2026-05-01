@@ -1458,18 +1458,16 @@ function renderSticSku(data) {
         style="padding:3px 10px;background:#107C10;color:#fff;border:none;border-radius:2px;cursor:pointer;font-size:12px"
         title="Re-scrape STIC now for this SKU and refresh the page">▶ Scrape Now</button>
     </div>
-    <div style="flex:1;min-width:0">
-      <div style="font-size:11px;font-weight:600;color:#605E5C;margin-bottom:3px">Notes</div>
-      <div style="display:flex;gap:5px;align-items:flex-start">
-        <textarea id="sku-notes-${info.product_id}" rows="2"
-          placeholder="Add notes…"
-          style="flex:1;min-width:0;padding:4px 7px;font-size:12px;border:1px solid #C8C6C4;border-radius:2px;font-family:inherit;resize:vertical"
-        >${info.notes ? info.notes.replace(/</g,'&lt;') : ''}</textarea>
-        <button onclick="saveNotes(${info.product_id})"
-          style="padding:3px 10px;background:#0078D4;color:#fff;border:none;border-radius:2px;cursor:pointer;font-size:12px;white-space:nowrap">Save</button>
-        <button onclick="clearNotes(${info.product_id})"
-          style="padding:3px 10px;background:#fff;color:#D13438;border:1px solid #D13438;border-radius:2px;cursor:pointer;font-size:12px;white-space:nowrap">Clear</button>
-      </div>
+    <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+      <span style="font-size:11px;font-weight:600;color:#605E5C;white-space:nowrap">Notes</span>
+      <textarea id="sku-notes-${info.product_id}" rows="1"
+        placeholder="Add notes…"
+        style="width:160px;padding:3px 6px;font-size:12px;border:1px solid #C8C6C4;border-radius:2px;font-family:inherit;resize:none"
+      >${info.notes ? info.notes.replace(/</g,'&lt;') : ''}</textarea>
+      <button onclick="saveNotes(${info.product_id})"
+        style="padding:3px 8px;background:#0078D4;color:#fff;border:none;border-radius:2px;cursor:pointer;font-size:12px;white-space:nowrap">Save</button>
+      <button onclick="clearNotes(${info.product_id})"
+        style="padding:3px 8px;background:#fff;color:#D13438;border:1px solid #D13438;border-radius:2px;cursor:pointer;font-size:12px;white-space:nowrap">Clear</button>
     </div>
   </div>`;
 
