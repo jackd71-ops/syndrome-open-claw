@@ -264,16 +264,89 @@ def scrape_amazon(page, asin):
     url = f"https://www.amazon.co.uk/dp/{asin}"
     page.goto(url, wait_until="domcontentloaded", timeout=25000)
     time.sleep(random.uniform(4, 7))
-    for sel in [".a-price .a-offscreen", "#apex_offerDisplay_desktop .a-price .a-offscreen"]:
-        try:
-            el = page.query_selector(sel)
-            if el:
-                p = parse_price(el.inner_text())
-                if p:
-                    return p
-        except Exception:
-            pass
-    return None
+
+    # Use JS to detect condition (used vs new) and seller type in one pass
+    result = page.evaluate("""() => {
+        // ── Used/condition detection ─────────────────────────────────────────
+        // Amazon shows condition text ("Used: Like New", "Condition: Used" etc.)
+        // in several possible locations when no new stock is available.
+        const conditionSelectors = [
+            '#apex_desktop_qualityTierMessage',
+            '#apex_desktop_itemInformation',
+            '.a-section.a-spacing-none .a-color-secondary',
+            '#buyNewSection',
+            '#usedBuySection',
+            '.olp-used-price',
+            '#apex_offerDisplay_desktop .a-color-secondary',
+        ];
+        const usedPattern = /\\bused\\b|like new|very good|\\bgood\\b|acceptable|refurbished/i;
+        for (const sel of conditionSelectors) {
+            const el = document.querySelector(sel);
+            if (el && usedPattern.test(el.textContent)) {
+                return {price: null, seller_type: 'USED'};
+            }
+        }
+
+        // Also check: if the "add to basket" button says "Add used to Cart"
+        const basketBtn = document.querySelector('#add-to-cart-button, #submit\\.buy-now');
+        if (basketBtn && /used/i.test(basketBtn.textContent)) {
+            return {price: null, seller_type: 'USED'};
+        }
+
+        // ── Seller type detection (FBA vs Amazon direct) ─────────────────────
+        let seller_type = null;
+        const merchantSelectors = [
+            '#merchant-info',
+            '#tabular-buybox-truncate-0',
+            '#sellerProfileTriggerId',
+            '#SSOFpopoverLink',
+            '.tabular-buybox-text',
+        ];
+        for (const sel of merchantSelectors) {
+            const el = document.querySelector(sel);
+            if (el) {
+                const text = el.textContent.toLowerCase();
+                // FBA: sold by 3rd party, fulfilled/dispatched by Amazon
+                if ((text.includes('fulfilled by amazon') || text.includes('dispatched from and sold by amazon'))
+                    && !text.includes('amazon.co.uk') && text.includes('sold by')) {
+                    seller_type = 'FBA';
+                    break;
+                }
+                break;  // only check first match
+            }
+        }
+
+        // ── Price extraction ─────────────────────────────────────────────────
+        const priceSelectors = [
+            '#corePrice_feature_div .a-price .a-offscreen',
+            '.a-price .a-offscreen',
+            '#apex_offerDisplay_desktop .a-price .a-offscreen',
+        ];
+        for (const sel of priceSelectors) {
+            const el = document.querySelector(sel);
+            if (el && el.textContent.trim()) {
+                return {price: el.textContent.trim(), seller_type: seller_type};
+            }
+        }
+        return {price: null, seller_type: null};
+    }""")
+
+    if not result or not isinstance(result, dict):
+        return None, None
+
+    seller_type = result.get('seller_type')
+
+    # If detected as used, return with no price
+    if seller_type == 'USED':
+        return None, 'USED'
+
+    raw_price = result.get('price')
+    if raw_price:
+        p = parse_price(raw_price)
+        if p:
+            return p, seller_type
+
+    return None, None
 
 # ── Currys scraper (search by SKU → product page redirect) ───────────────────
 def scrape_currys(page, sku):
@@ -413,61 +486,64 @@ def scrape_product(page, product, retailer, id_codes):
     if name == "Scan":
         url = id_codes.get(product["product_id"], {}).get("scan_url")
         if not url:
-            return None, "NOT_STOCKED"
+            return None, "NOT_STOCKED", None
         try:
             price = scrape_scan(url)
-            return (price, None) if price else (None, "NOT_FOUND")
+            return (price, None, None) if price else (None, "NOT_FOUND", None)
         except Exception as e:
             log(f"    [{name}] ERROR: {e}")
-            return None, "ERROR"
+            return None, "ERROR", None
 
     # Very: patchright + Xvfb subprocess, uses stored Very URL
     if name == "Very":
         url = id_codes.get(product["product_id"], {}).get("very_url")
         sku = id_codes.get(product["product_id"], {}).get("very_sku")
         if not url:
-            return None, "OUT_OF_STOCK" if sku else "NOT_STOCKED"
+            return None, "OUT_OF_STOCK" if sku else "NOT_STOCKED", None
         try:
             price = scrape_very(url)
-            return (price, None) if price else (None, "NOT_FOUND")
+            return (price, None, None) if price else (None, "NOT_FOUND", None)
         except Exception as e:
             log(f"    [{name}] ERROR: {e}")
-            return None, "ERROR"
+            return None, "ERROR", None
 
     # Box: patchright + Xvfb subprocess, uses stored Box URL
     if name == "Box":
         url = id_codes.get(product["product_id"], {}).get("box_url")
         if not url:
-            return None, "NOT_STOCKED"
+            return None, "NOT_STOCKED", None
         try:
             price = scrape_box(url)
-            return (price, None) if price else (None, "NOT_FOUND")
+            return (price, None, None) if price else (None, "NOT_FOUND", None)
         except Exception as e:
             log(f"    [{name}] ERROR: {e}")
-            return None, "ERROR"
+            return None, "ERROR", None
 
     # Overclockers: uses OCUK code from retailer_ids, scraped via camoufox subprocess
     if name == "Overclockers":
         code = id_codes.get(product["product_id"], {}).get("ocuk_code")
         if not code:
-            return None, "NOT_STOCKED"
+            return None, "NOT_STOCKED", None
         try:
             price = scrape_overclockers(code)
-            return (price, None) if price else (None, "NOT_FOUND")
+            return (price, None, None) if price else (None, "NOT_FOUND", None)
         except Exception as e:
             log(f"    [{name}] ERROR: {e}")
-            return None, "ERROR"
+            return None, "ERROR", None
 
     # All other retailers: use id_codes from Retailer_IDs sheet
     prod_id = product["product_id"]
     code    = id_codes.get(prod_id, {}).get(id_col) if id_col else None
 
     if id_col and not code:
-        return None, "NOT_STOCKED"
+        return None, "NOT_STOCKED", None
 
     try:
+        amz_seller_type = None
         if name == "Amazon UK":
-            price = scrape_amazon(page, code)
+            price, amz_seller_type = scrape_amazon(page, code)
+            if amz_seller_type == 'USED':
+                return None, "OUT_OF_STOCK", 'USED'
         elif name == "Currys":
             price = scrape_currys(page, code)
         elif name == "Argos":
@@ -477,15 +553,15 @@ def scrape_product(page, product, retailer, id_codes):
         elif name == "AWD-IT":
             price = scrape_awdit(page, code)
         else:
-            return None, "NOT_FOUND"
+            return None, "NOT_FOUND", None
 
-        return (price, None) if price else (None, "NOT_FOUND")
+        return (price, None, amz_seller_type) if price else (None, "NOT_FOUND", None)
 
     except PlaywrightTimeout:
-        return None, "TIMEOUT"
+        return None, "TIMEOUT", None
     except Exception as e:
         log(f"    [{name}] ERROR: {e}")
-        return None, "ERROR"
+        return None, "ERROR", None
 
 # ── Telegram ──────────────────────────────────────────────────────────────────
 def send_telegram(message):
@@ -514,7 +590,7 @@ _RETAILER_DB_NAME = {
     "Very":         "Very",
 }
 
-def write_to_db(date_str, product, retailer_prices_dict, retailer_in_stock_dict=None):
+def write_to_db(date_str, product, retailer_prices_dict, retailer_in_stock_dict=None, retailer_seller_type_dict=None):
     """Write one row per retailer for this product. Never raises — logs on failure."""
     try:
         d, m, y = date_str.split("-")
@@ -529,6 +605,8 @@ def write_to_db(date_str, product, retailer_prices_dict, retailer_in_stock_dict=
 
         if retailer_in_stock_dict is None:
             retailer_in_stock_dict = {}
+        if retailer_seller_type_dict is None:
+            retailer_seller_type_dict = {}
 
         db = sqlite3.connect(DB_PATH)
         db.execute("PRAGMA journal_mode=WAL")
@@ -537,14 +615,15 @@ def write_to_db(date_str, product, retailer_prices_dict, retailer_in_stock_dict=
             below_msrp = None
             if price is not None and msrp is not None:
                 below_msrp = 1 if price < msrp else 0
-            in_stock = retailer_in_stock_dict.get(retailer_name)
+            in_stock    = retailer_in_stock_dict.get(retailer_name)
+            seller_type = retailer_seller_type_dict.get(retailer_name)
             db.execute(
                 """INSERT OR IGNORE INTO retailer_prices
                    (date, product_id, model_no, description, manufacturer,
-                    product_group, msrp, retailer, price, below_msrp, in_stock)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                    product_group, msrp, retailer, price, below_msrp, in_stock, seller_type)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (iso_date, product_id, model_no, description, manufacturer,
-                 product_group, msrp, db_retailer, price, below_msrp, in_stock),
+                 product_group, msrp, db_retailer, price, below_msrp, in_stock, seller_type),
             )
         db.commit()
         db.close()
@@ -1848,38 +1927,45 @@ def run(offset, limit, date_str, notify=False):
             page.mouse.move(random.randint(200,1100), random.randint(150,600))
 
             # Scrape active retailers; collect prices and in_stock for DB write
-            db_prices   = {}
-            db_in_stock = {}
+            db_prices      = {}
+            db_in_stock    = {}
+            db_seller_type = {}
 
             for retailer in active:
                 name  = retailer["name"]
-                price, status = scrape_product(page, product, retailer, id_codes)
+                price, status, seller_type = scrape_product(page, product, retailer, id_codes)
 
                 if price is not None:
-                    below = " ⚠️ BELOW MSRP" if msrp and price < msrp else ""
-                    log(f"    [{name}] £{price:.2f}{below}")
-                    db_prices[name]   = price
-                    db_in_stock[name] = 1
+                    below    = " ⚠️ BELOW MSRP" if msrp and price < msrp else ""
+                    fba_note = " [FBA]" if seller_type == 'FBA' else ""
+                    log(f"    [{name}] £{price:.2f}{below}{fba_note}")
+                    db_prices[name]      = price
+                    db_in_stock[name]    = 1
+                    db_seller_type[name] = seller_type
                     found += 1
                 elif status == "OUT_OF_STOCK":
-                    log(f"    [{name}] out of stock")
-                    db_prices[name]   = None
-                    db_in_stock[name] = 0
+                    used_note = " (used only)" if seller_type == 'USED' else ""
+                    log(f"    [{name}] out of stock{used_note}")
+                    db_prices[name]      = None
+                    db_in_stock[name]    = 0
+                    db_seller_type[name] = seller_type
                     not_stocked += 1
                 elif status == "NOT_STOCKED":
                     log(f"    [{name}] not stocked (no ID code)")
-                    db_prices[name]   = None
-                    db_in_stock[name] = None
+                    db_prices[name]      = None
+                    db_in_stock[name]    = None
+                    db_seller_type[name] = None
                     not_stocked += 1
                 else:
                     log(f"    [{name}] not found ({status})")
-                    db_prices[name]   = None
-                    db_in_stock[name] = None
+                    db_prices[name]      = None
+                    db_in_stock[name]    = None
+                    db_seller_type[name] = None
                     not_found += 1
 
                 time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
 
-            write_to_db(date_str, product, db_prices, db_in_stock)
+            write_to_db(date_str, product, db_prices, db_in_stock, db_seller_type)
 
             products_done += 1
             completed.add(product_id)

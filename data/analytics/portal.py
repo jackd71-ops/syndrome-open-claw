@@ -152,6 +152,7 @@ def _init_products():
     for col_sql in [
         "ALTER TABLE products ADD COLUMN stic_url TEXT",
         "ALTER TABLE products ADD COLUMN stic_exclude INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE retailer_prices ADD COLUMN seller_type TEXT",
     ]:
         try:
             db.execute(col_sql)
@@ -4160,8 +4161,19 @@ function loadRetDailySkuDrill(mfr, group) {
         document.getElementById('ret-daily-sku-tbl').innerHTML = '<p style="color:#A19F9D;padding:20px">No SKUs found</p>';
         return;
       }
-      let html = '<table><thead><tr><th>Product</th><th>Model</th><th>Description</th><th>MSRP</th><th>Lowest Today</th><th>Retailer</th><th>Below MSRP</th></tr></thead><tbody>';
+      let html = '<table><thead><tr><th>Product</th><th>Model</th><th>Description</th><th>MSRP</th><th>Lowest Today</th><th>Retailer</th><th>Amazon</th><th>Below MSRP</th></tr></thead><tbody>';
       rows.forEach(r => {
+        // Amazon status cell
+        let amzCell;
+        if (r.amazon_oos) {
+          amzCell = '<span style="background:#A4262C;color:#fff;border-radius:3px;padding:1px 5px;font-size:11px">OOS</span>';
+        } else if (r.amazon_fba_price != null) {
+          amzCell = '<span style="background:#FF9900;color:#fff;border-radius:3px;padding:1px 5px;font-size:11px">FBA</span> £' + r.amazon_fba_price.toFixed(2);
+        } else if (r.amazon_price != null) {
+          amzCell = '£' + r.amazon_price.toFixed(2);
+        } else {
+          amzCell = '<span style="color:#A19F9D">—</span>';
+        }
         html += `<tr class="clickable" onclick="loadRetSku(${r.product_id},'overview')" title="Click for full SKU detail">
           <td>${r.product_id}</td>
           <td>${r.model_no}</td>
@@ -4169,6 +4181,7 @@ function loadRetDailySkuDrill(mfr, group) {
           <td>${r.msrp ? '£'+r.msrp.toFixed(2) : '—'}</td>
           <td>${r.min_price ? '£'+r.min_price.toFixed(2) : '—'}</td>
           <td>${r.cheapest_retailer || '—'}</td>
+          <td>${amzCell}</td>
           <td>${r.below_msrp ? '<span class="badge badge-red">Yes</span>' : '—'}</td>
         </tr>`;
       });
@@ -4247,6 +4260,20 @@ function renderRetSku(data) {
   let html = `<h3 style="margin-bottom:8px">${info.manufacturer} ${info.model_no}</h3>
     <p style="color:#605E5C;margin-bottom:16px">Product: ${info.product_id} | MSRP: ${info.msrp ? '£'+info.msrp.toFixed(2) : '—'}</p>`;
 
+  // Amazon status banner
+  const amzRow = snapshot.find(r => r.retailer === 'Amazon');
+  if (amzRow) {
+    if (amzRow.price == null) {
+      html += `<div style="background:#FFF4CE;border:1px solid #D29200;border-radius:4px;padding:8px 12px;margin-bottom:12px;font-size:13px">
+        ⚠️ <strong>Amazon:</strong> No price recorded today — assumed <strong>Out of Stock</strong>
+      </div>`;
+    } else if (amzRow.seller_type === 'FBA') {
+      html += `<div style="background:#FFF4CE;border:1px solid #FF9900;border-radius:4px;padding:8px 12px;margin-bottom:12px;font-size:13px">
+        🔶 <strong>Amazon:</strong> Buy box held by an <strong>FBA</strong> (3rd-party) seller at <strong>£${amzRow.price.toFixed(2)}</strong> — Amazon may not be offering direct stock
+      </div>`;
+    }
+  }
+
   html += `<div class="section-title">Current Snapshot</div>
     <p style="font-size:12px;color:#A19F9D;margin:-8px 0 10px">Click a retailer name to open the scraped listing. Use Purge to wipe bad price history.</p>
     <div class="tbl-wrap"><table><thead><tr><th>Retailer</th><th>Price</th><th>vs MSRP</th><th>In Stock</th><th></th></tr></thead><tbody>`;
@@ -4270,9 +4297,12 @@ function renderRetSku(data) {
       <button style="${btnStyle}" onclick="purgeRetailerData(${info.product_id},'${retEsc}')" title="Purge all history for ${ret}">🗑 All</button>
       <button style="${btnStyle}" onclick="openPurgeDatesModal(${info.product_id},'${retEsc}')" title="Choose specific dates to purge">📅 Dates</button>
     </span>`;
+    const stBadge = r.seller_type === 'FBA' ? ' <span style="background:#FF9900;color:#fff;border-radius:3px;padding:1px 5px;font-size:11px">FBA</span>'
+                 : r.seller_type === 'USED' ? ' <span style="background:#797673;color:#fff;border-radius:3px;padding:1px 5px;font-size:11px">Used</span>'
+                 : '';
     html += `<tr>
       <td><span style="${linkStyle}" ${linkClick}>${ret}</span></td>
-      <td>${r.price ? '£'+r.price.toFixed(2) : '<span style="color:#A19F9D">No data</span>'}</td>
+      <td>${r.price ? '£'+r.price.toFixed(2) : '<span style="color:#A19F9D">No data</span>'}${stBadge}</td>
       <td>${belowBadge}</td>
       <td>${stockCell}</td>
       <td>${actions}</td></tr>`;
@@ -5453,7 +5483,7 @@ def retailer_daily_overview_skus():
            ORDER BY r.model_no""",
         (latest, mfr, group)
     )
-    # Resolve cheapest retailer per product with a second pass
+    # Resolve cheapest retailer + Amazon status per product with a second pass
     db = get_db()
     result = []
     for row in rows:
@@ -5466,6 +5496,32 @@ def retailer_daily_overview_skus():
             row['cheapest_retailer'] = cr['retailer'] if cr else None
         else:
             row['cheapest_retailer'] = None
+
+        # Amazon status: direct price / FBA buy-box / OOS
+        amz_row = db.execute(
+            "SELECT price, seller_type FROM retailer_prices WHERE date=? AND product_id=? AND retailer='Amazon' LIMIT 1",
+            (latest, row['product_id'])
+        ).fetchone()
+        if amz_row is None:
+            row['amazon_price']     = None
+            row['amazon_fba_price'] = None
+            row['amazon_oos']       = False
+        else:
+            amz = dict(amz_row)
+            if amz['seller_type'] == 'FBA' and amz['price'] is not None:
+                row['amazon_price']     = None
+                row['amazon_fba_price'] = amz['price']
+                row['amazon_oos']       = False
+            elif amz['seller_type'] is None and amz['price'] is not None:
+                row['amazon_price']     = amz['price']
+                row['amazon_fba_price'] = None
+                row['amazon_oos']       = False
+            else:
+                # price IS NULL (USED sentinel, or scraped but no price) → treat as OOS
+                row['amazon_price']     = None
+                row['amazon_fba_price'] = None
+                row['amazon_oos']       = True
+
         result.append(row)
     db.close()
     return jsonify(result)
@@ -5507,7 +5563,7 @@ def retailer_sku(product_id):
     ) or {}
 
     snapshot = qry(
-        "SELECT retailer, price, below_msrp FROM retailer_prices WHERE date=? AND product_id=? ORDER BY retailer",
+        "SELECT retailer, price, below_msrp, seller_type FROM retailer_prices WHERE date=? AND product_id=? ORDER BY retailer",
         (latest, product_id)
     )
 
