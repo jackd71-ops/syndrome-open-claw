@@ -7089,7 +7089,7 @@ def catalogue_product_prices(product_id):
     db = get_db()
     if request.method == "GET":
         rows = db.execute(
-            "SELECT rowid, date, distributor, price, qty FROM stic_prices "
+            "SELECT id AS rowid, date, distributor, price, qty FROM stic_prices "
             "WHERE product_id=? ORDER BY date DESC, distributor",
             (product_id,)
         ).fetchall()
