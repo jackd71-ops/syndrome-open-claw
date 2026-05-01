@@ -517,7 +517,6 @@ HTML = r"""<!DOCTYPE html>
         Scraper <span class="arrow">▾</span>
       </div>
       <div class="sidebar-items">
-        <button class="sidebar-btn" onclick="loadScrapeGroups(this)">⟳ Refresh SKUs</button>
         <button class="sidebar-btn" onclick="loadMissingResults(this)">❌ Missing Results</button>
       </div>
     </div>
@@ -573,10 +572,6 @@ HTML = r"""<!DOCTYPE html>
     <!-- Probe SKUs -->
     <div class="content-section" id="stic-probe">
       <div id="stic-probe-content"><div class="spinner">Loading…</div></div>
-    </div>
-    <!-- Scrape Groups -->
-    <div class="content-section" id="stic-scrape">
-      <div id="stic-scrape-content"><div class="spinner">Loading…</div></div>
     </div>
     <!-- Missing Results -->
     <div class="content-section" id="stic-missing">
@@ -702,6 +697,14 @@ HTML = r"""<!DOCTYPE html>
         <button class="sidebar-btn" onclick="loadMissingMsrp(this)">⚠️ Missing MSRP Report</button>
       </div>
     </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-header" onclick="toggleSection(this)">
+        Scraper <span class="arrow">▾</span>
+      </div>
+      <div class="sidebar-items">
+        <button class="sidebar-btn" onclick="loadScrapeGroups(this)">⟳ Refresh SKUs</button>
+      </div>
+    </div>
   </div>
   <div class="main" id="main-catalogue">
     <!-- Products view -->
@@ -727,6 +730,10 @@ HTML = r"""<!DOCTYPE html>
     <!-- Missing EAN report -->
     <div class="content-section" id="cat-missing-ean">
       <div id="cat-missing-ean-content"><div class="spinner">Loading…</div></div>
+    </div>
+    <!-- Scraper — Refresh SKUs -->
+    <div class="content-section" id="stic-scrape">
+      <div id="stic-scrape-content"><div class="spinner">Loading…</div></div>
     </div>
   </div>
 </div>
@@ -2525,10 +2532,10 @@ let _scrapeGroupsRunning = {};   // label → true while a trigger is in-flight
 
 function loadScrapeGroups(btn) {
   if (btn) {
-    document.querySelectorAll('#sidebar-stic .sidebar-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('#sidebar-catalogue .sidebar-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
   }
-  document.querySelectorAll('#main-stic .content-section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('#main-catalogue .content-section').forEach(s => s.classList.remove('active'));
   document.getElementById('stic-scrape').classList.add('active');
   const el = document.getElementById('stic-scrape-content');
   el.innerHTML = '<div class="spinner">Loading…</div>';
