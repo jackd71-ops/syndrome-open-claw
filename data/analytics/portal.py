@@ -66,13 +66,65 @@ def latest_date_for_group(group_filter):
     if not rows:
         return None
     counts = [(r["date"], r["c"]) for r in rows]
-    # Use the most recent date that has at least 50% of the max seen
+    # Use the most recent date that has at least 80% of the max seen
     max_c = max(c for _, c in counts)
-    threshold = max(1, max_c * 0.5)
+    threshold = max(1, max_c * 0.8)
     for date, c in counts:
         if c >= threshold:
             return date
     return counts[0][0]  # fallback: most recent regardless
+
+# All scrape groups — (manufacturer, product_group, label)
+# manufacturer=None means no manufacturer filter (e.g. Server/Pro)
+SCRAPE_GROUPS = [
+    ("PALIT",      "PROD_VIDEO", "Palit GPU"),
+    ("POWERCOLOR", "PROD_VIDEO", "PowerColor GPU"),
+    ("MSI",        "PROD_VIDEO", "MSI GPU"),
+    ("ASUS",       "PROD_VIDEO", "ASUS GPU"),
+    ("GIGABYTE",   "PROD_VIDEO", "Gigabyte GPU"),
+    ("MSI",        "PROD_MBRD",  "MSI Motherboards"),
+    ("GIGABYTE",   "PROD_MBRD",  "Gigabyte Motherboards"),
+    ("ASUS",       "PROD_MBRD",  "ASUS Motherboards"),
+    (None,         "PROD_MBRDS", "Server / Pro"),
+    ("AMD Retail", "PROD_CPU",   "AMD Retail CPU"),
+    ("AMD MPK",    "PROD_CPU",   "AMD MPK CPU"),
+    ("Intel",      "PROD_CPU",   "Intel CPU"),
+    ("Intel OEM",  "PROD_CPU",   "Intel OEM CPU"),
+]
+
+
+def _all_group_dates():
+    """Return list of (manufacturer, product_group, latest_date) for every scrape group."""
+    result = []
+    for mfr, grp, _ in SCRAPE_GROUPS:
+        if mfr:
+            gf = f"p.product_group='{grp}' AND p.manufacturer='{mfr}'"
+        else:
+            gf = f"p.product_group='{grp}'"
+        date = latest_date_for_group(gf)
+        if date:
+            result.append((mfr, grp, date))
+    return result
+
+
+def _group_date_where(alias=""):
+    """Return (where_sql, params) restricting stic_prices rows to each group's latest date.
+    alias: table alias e.g. 'a' produces 'a.manufacturer', '' produces 'manufacturer'.
+    """
+    gd = _all_group_dates()
+    if not gd:
+        return "1=0", []
+    p = f"{alias}." if alias else ""
+    clauses, params = [], []
+    for mfr, grp, date in gd:
+        if mfr:
+            clauses.append(f"({p}manufacturer=? AND {p}product_group=? AND {p}date=?)")
+            params.extend([mfr, grp, date])
+        else:
+            clauses.append(f"({p}product_group=? AND {p}date=?)")
+            params.extend([grp, date])
+    return "(" + " OR ".join(clauses) + ")", params
+
 
 def prev_date(table, current):
     r = qry_one(
@@ -4603,8 +4655,7 @@ def stic_search():
 
 @app.route("/api/stic/sku/<int:product_id>")
 def stic_sku(product_id):
-    latest = latest_date("stic_prices")
-
+    # Get info first so we can resolve per-group latest date
     info = qry_one(
         """SELECT s.product_id, s.model_no, s.manufacturer, s.product_group,
                p.stic_url, p.ean, p.description, p.notes
@@ -4625,6 +4676,17 @@ def stic_sku(product_id):
 
     if not info:
         return jsonify({})
+
+    # Resolve latest date at manufacturer+product_group level
+    _mfr = info['manufacturer']
+    _grp = info['product_group']
+    if _mfr and _grp:
+        _gf = f"p.product_group='{_grp}' AND p.manufacturer='{_mfr}'"
+    elif _grp:
+        _gf = f"p.product_group='{_grp}'"
+    else:
+        _gf = None
+    latest = (latest_date_for_group(_gf) if _gf else None) or latest_date("stic_prices")
 
     snapshot = qry(
         "SELECT distributor, price, qty FROM stic_prices WHERE date=? AND product_id=? ORDER BY distributor",
@@ -4704,16 +4766,17 @@ def stic_report(name):
         )
 
     elif name == "single_distributor":
+        _gdw, _gdp = _group_date_where()
         rows = qry(
             f"""SELECT product_id, model_no, manufacturer,
                    {PRICE_FLOOR} AS min_price, {STOCK_SUM} AS total_stock,
                    MAX(CASE WHEN distributor='VIP' THEN price END) AS vip_price,
                    MAX(CASE WHEN qty>0 THEN distributor END) AS sole_holder
-                FROM stic_prices WHERE date=?
+                FROM stic_prices WHERE {_gdw}
                 GROUP BY product_id, model_no, manufacturer
                 HAVING COUNT(CASE WHEN qty>0 THEN 1 END) = 1
                 ORDER BY total_stock DESC LIMIT 200""",
-            (latest,)
+            _gdp
         )
 
     elif name == "new_stock_arrival":
@@ -4740,6 +4803,7 @@ def stic_report(name):
         )
 
     elif name == "vip_out_on_price":
+        _gdw, _gdp = _group_date_where("a")
         rows = qry(
             f"""SELECT a.product_id, a.model_no, a.manufacturer, a.product_group,
                    {STOCK_SUM.replace('qty', 'a.qty')} AS total_stock,
@@ -4747,7 +4811,7 @@ def stic_report(name):
                    MIN(CASE WHEN a.price>0 AND a.qty>0 THEN a.price END) AS min_price,
                    MAX(CASE WHEN a.distributor='VIP' THEN a.price END) AS vip_price
                 FROM stic_prices a
-                WHERE a.date=?
+                WHERE {_gdw}
                 GROUP BY a.product_id, a.model_no, a.manufacturer, a.product_group
                 HAVING MAX(CASE WHEN a.distributor='VIP' AND a.qty>0 THEN 1 ELSE 0 END) = 1
                    AND MAX(CASE WHEN a.distributor='VIP' THEN a.price END) IS NOT NULL
@@ -4755,20 +4819,21 @@ def stic_report(name):
                        > MIN(CASE WHEN a.price>0 AND a.qty>0 THEN a.price END)
                 ORDER BY MAX(CASE WHEN a.distributor='VIP' THEN COALESCE(a.qty,0) END) DESC
                 LIMIT 200""",
-            (latest,)
+            _gdp
         )
 
     elif name == "vip_static":
         cutoff = qry_one(
             "SELECT MIN(date) AS d FROM (SELECT DISTINCT date FROM stic_prices ORDER BY date DESC LIMIT 7)"
         )["d"]
+        _gdw, _gdp = _group_date_where("a")
         rows = qry(
             f"""SELECT a.product_id, a.model_no, a.manufacturer,
                    {STOCK_SUM.replace('qty', 'a.qty')} AS total_stock,
                    MIN(CASE WHEN a.price>0 AND a.qty>0 THEN a.price END) AS min_price,
                    MAX(CASE WHEN a.distributor='VIP' THEN a.price END) AS vip_price
                 FROM stic_prices a
-                WHERE a.date=?
+                WHERE {_gdw}
                 GROUP BY a.product_id, a.model_no, a.manufacturer
                 HAVING MAX(CASE WHEN a.distributor='VIP' THEN COALESCE(a.qty,0) END) > 0
                    AND a.product_id IN (
@@ -4780,38 +4845,41 @@ def stic_report(name):
                    )
                 ORDER BY MAX(CASE WHEN a.distributor='VIP' THEN COALESCE(a.qty,0) END) DESC
                 LIMIT 100""",
-            (latest, cutoff)
+            _gdp + [cutoff]
         )
 
     elif name == "vip_exclusive":
+        _gdw, _gdp = _group_date_where()
         rows = qry(
             f"""SELECT product_id, model_no, manufacturer,
                    {PRICE_FLOOR} AS min_price,
                    SUM(CASE WHEN distributor='VIP' THEN COALESCE(qty,0) ELSE 0 END) AS total_stock,
                    MAX(CASE WHEN distributor='VIP' THEN price END) AS vip_price
-                FROM stic_prices WHERE date=?
+                FROM stic_prices WHERE {_gdw}
                 GROUP BY product_id, model_no, manufacturer
                 HAVING COUNT(CASE WHEN qty>0 THEN 1 END) = 1
                    AND SUM(CASE WHEN distributor='VIP' AND qty>0 THEN 1 ELSE 0 END) > 0
                 ORDER BY total_stock DESC LIMIT 100""",
-            (latest,)
+            _gdp
         )
 
     elif name == "vip_price_gap":
+        _gdw, _gdp = _group_date_where("v")
+        _gdw2, _gdp2 = _group_date_where("f")
         rows = qry(
             f"""SELECT v.product_id, v.model_no, v.manufacturer,
-                   v.price AS vip_price, f.floor_price AS floor_price,
-                   (v.price - f.floor_price) AS gap
+                   v.price AS vip_price, fl.floor_price AS floor_price,
+                   (v.price - fl.floor_price) AS gap
                 FROM stic_prices v
                 JOIN (SELECT product_id,
-                             MIN(CASE WHEN price>0 AND qty>0 THEN price END) AS floor_price
-                      FROM stic_prices WHERE date=? GROUP BY product_id) f
-                  ON f.product_id = v.product_id
-                WHERE v.date=? AND v.distributor='VIP' AND v.qty>0
-                  AND v.price IS NOT NULL AND f.floor_price IS NOT NULL
-                  AND v.price > f.floor_price
+                             MIN(CASE WHEN f.price>0 AND f.qty>0 THEN f.price END) AS floor_price
+                      FROM stic_prices f WHERE {_gdw2} GROUP BY f.product_id) fl
+                  ON fl.product_id = v.product_id
+                WHERE {_gdw} AND v.distributor='VIP' AND v.qty>0
+                  AND v.price IS NOT NULL AND fl.floor_price IS NOT NULL
+                  AND v.price > fl.floor_price
                 ORDER BY gap DESC LIMIT 100""",
-            (latest, latest)
+            _gdp2 + _gdp
         )
 
     elif name == "never_stocked":
@@ -5774,21 +5842,6 @@ def scrape_groups():
 @app.route("/api/scrape/missing")
 def scrape_missing():
     """Return all active SKUs that have no data on their group's last-scraped date."""
-    SCRAPE_GROUPS = [
-        ("PALIT",      "PROD_VIDEO", "Palit GPU"),
-        ("POWERCOLOR", "PROD_VIDEO", "PowerColor GPU"),
-        ("MSI",        "PROD_VIDEO", "MSI GPU"),
-        ("ASUS",       "PROD_VIDEO", "ASUS GPU"),
-        ("GIGABYTE",   "PROD_VIDEO", "Gigabyte GPU"),
-        ("MSI",        "PROD_MBRD",  "MSI Motherboards"),
-        ("GIGABYTE",   "PROD_MBRD",  "Gigabyte Motherboards"),
-        ("ASUS",       "PROD_MBRD",  "ASUS Motherboards"),
-        (None,         "PROD_MBRDS", "Server / Pro"),
-        ("AMD Retail", "PROD_CPU",   "AMD Retail CPU"),
-        ("AMD MPK",    "PROD_CPU",   "AMD MPK CPU"),
-        ("Intel",      "PROD_CPU",   "Intel CPU"),
-        ("Intel OEM",  "PROD_CPU",   "Intel OEM CPU"),
-    ]
     db = get_db()
     result = []
     for manufacturer, product_group, label in SCRAPE_GROUPS:
