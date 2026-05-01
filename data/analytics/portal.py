@@ -638,6 +638,23 @@ HTML = r"""<!DOCTYPE html>
     <!-- Overview / KPI -->
     <div class="content-section active" id="ret-overview">
       <div id="retailer-kpi" class="kpi-row"><div class="spinner">Loading…</div></div>
+      <div id="ret-daily-overview" style="margin-top:4px">
+        <div class="tbl-wrap" id="ret-daily-mfr-tbl"><div class="spinner">Loading…</div></div>
+        <div id="ret-daily-group-drill" style="display:none;margin-top:4px">
+          <div class="drill-header">
+            <span id="ret-daily-group-title" class="section-title" style="margin:0"></span>
+            <button class="drill-close" onclick="closeRetDailyGroupDrill()">✕ Close</button>
+          </div>
+          <div class="tbl-wrap" id="ret-daily-group-tbl"></div>
+        </div>
+        <div id="ret-daily-sku-drill" style="display:none;margin-top:4px">
+          <div class="drill-header">
+            <span id="ret-daily-sku-title" class="section-title" style="margin:0"></span>
+            <button class="drill-close" onclick="closeRetDailySkuDrill()">✕ Close</button>
+          </div>
+          <div class="tbl-wrap" id="ret-daily-sku-tbl"></div>
+        </div>
+      </div>
     </div>
     <!-- Search -->
     <div class="content-section" id="ret-search">
@@ -4023,7 +4040,143 @@ function loadRetailerKpi() {
       <div class="kpi-card"><div class="label">Prices Scraped Today</div><div class="value">${data.prices_today}</div></div>
       <div class="kpi-card"><div class="label">Last Scraped</div><div class="value" style="font-size:16px">${fmtDate(data.latest_date)}</div></div>
     `;
+    loadRetDailyOverview();
   });
+}
+
+// ── Retailer Daily Overview — 3-tier drill ────────────────────────────────────
+let _retDailyMfr = null, _retDailyGroup = null;
+let _retDailyMfrRows = [], _retDailyGroupRows = [];
+const _retGroupLabel = {PROD_CPU:'CPU', PROD_MBRD:'Motherboard', PROD_MBRDS:'Server / Pro MB', PROD_VIDEO:'GPU', PROBE:'Probe'};
+function _retGrpLbl(g) { return _retGroupLabel[g] || g; }
+
+function loadRetDailyOverview() {
+  document.getElementById('ret-daily-mfr-tbl').innerHTML = '<div class="spinner">Loading…</div>';
+  fetch('/api/retailer/daily-overview').then(r=>r.json()).then(rows => {
+    _retDailyMfrRows = rows;
+    if (!rows.length) {
+      document.getElementById('ret-daily-mfr-tbl').innerHTML = '<p style="color:#A19F9D;padding:20px">No data available</p>';
+      return;
+    }
+    let html = '<table><thead><tr><th>Manufacturer</th><th>Groups</th><th>SKUs</th><th>Prices Today</th><th>Below MSRP</th><th>Retailers Active</th></tr></thead><tbody>';
+    rows.forEach((r, i) => {
+      const sel = r.manufacturer === _retDailyMfr ? ' row-selected' : '';
+      html += `<tr class="clickable${sel}" data-ri="${i}" title="Click to view product groups">
+        <td><strong>${r.manufacturer}</strong></td>
+        <td>${r.group_count}</td>
+        <td>${r.sku_count}</td>
+        <td>${r.prices_today}</td>
+        <td>${r.below_msrp > 0 ? `<span class="badge badge-red">${r.below_msrp}</span>` : '—'}</td>
+        <td>${r.retailers_active}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    const el = document.getElementById('ret-daily-mfr-tbl');
+    el.innerHTML = html;
+    makeSortableAll(el);
+    document.querySelectorAll('#ret-daily-mfr-tbl tr[data-ri]').forEach(tr => {
+      tr.addEventListener('click', () => {
+        const row = _retDailyMfrRows[+tr.dataset.ri];
+        if (_retDailyMfr === row.manufacturer) {
+          closeRetDailyGroupDrill(); return;
+        }
+        document.querySelectorAll('#ret-daily-mfr-tbl tr.row-selected').forEach(r => r.classList.remove('row-selected'));
+        tr.classList.add('row-selected');
+        _retDailyMfr = row.manufacturer;
+        closeRetDailySkuDrill();
+        loadRetDailyGroupDrill(row.manufacturer);
+      });
+    });
+    if (_retDailyMfr) loadRetDailyGroupDrill(_retDailyMfr);
+  });
+}
+
+function loadRetDailyGroupDrill(mfr) {
+  const drillEl = document.getElementById('ret-daily-group-drill');
+  drillEl.style.display = 'block';
+  document.getElementById('ret-daily-group-title').textContent = mfr + ' — Product Groups';
+  document.getElementById('ret-daily-group-tbl').innerHTML = '<div class="spinner">Loading…</div>';
+  fetch('/api/retailer/daily-overview/groups?mfr=' + encodeURIComponent(mfr))
+    .then(r=>r.json()).then(rows => {
+      _retDailyGroupRows = rows;
+      if (!rows.length) {
+        document.getElementById('ret-daily-group-tbl').innerHTML = '<p style="color:#A19F9D;padding:20px">No data</p>';
+        return;
+      }
+      let html = '<table><thead><tr><th>Product Group</th><th>SKUs</th><th>Prices Today</th><th>Below MSRP</th><th>In Stock</th><th>Lowest Price</th></tr></thead><tbody>';
+      rows.forEach((r, i) => {
+        const sel = r.product_group === _retDailyGroup ? ' row-selected' : '';
+        html += `<tr class="clickable${sel}" data-gi="${i}" title="Click to view SKUs">
+          <td><strong>${_retGrpLbl(r.product_group)}</strong></td>
+          <td>${r.sku_count}</td>
+          <td>${r.prices_today}</td>
+          <td>${r.below_msrp > 0 ? `<span class="badge badge-red">${r.below_msrp}</span>` : '—'}</td>
+          <td>${r.in_stock > 0 ? r.in_stock : '—'}</td>
+          <td>${r.min_price ? '£'+r.min_price.toFixed(2) : '—'}</td>
+        </tr>`;
+      });
+      html += '</tbody></table>';
+      const el = document.getElementById('ret-daily-group-tbl');
+      el.innerHTML = html;
+      makeSortableAll(el);
+      document.querySelectorAll('#ret-daily-group-tbl tr[data-gi]').forEach(tr => {
+        tr.addEventListener('click', () => {
+          const row = _retDailyGroupRows[+tr.dataset.gi];
+          if (_retDailyGroup === row.product_group) {
+            closeRetDailySkuDrill(); return;
+          }
+          document.querySelectorAll('#ret-daily-group-tbl tr.row-selected').forEach(r => r.classList.remove('row-selected'));
+          tr.classList.add('row-selected');
+          _retDailyGroup = row.product_group;
+          loadRetDailySkuDrill(mfr, row.product_group);
+        });
+      });
+      if (_retDailyGroup) loadRetDailySkuDrill(mfr, _retDailyGroup);
+    });
+}
+
+function loadRetDailySkuDrill(mfr, group) {
+  const drillEl = document.getElementById('ret-daily-sku-drill');
+  drillEl.style.display = 'block';
+  document.getElementById('ret-daily-sku-title').textContent = mfr + ' ' + _retGrpLbl(group) + ' — SKUs';
+  document.getElementById('ret-daily-sku-tbl').innerHTML = '<div class="spinner">Loading…</div>';
+  fetch('/api/retailer/daily-overview/skus?mfr=' + encodeURIComponent(mfr) + '&group=' + encodeURIComponent(group))
+    .then(r=>r.json()).then(rows => {
+      if (!rows.length) {
+        document.getElementById('ret-daily-sku-tbl').innerHTML = '<p style="color:#A19F9D;padding:20px">No SKUs found</p>';
+        return;
+      }
+      let html = '<table><thead><tr><th>Product</th><th>Model</th><th>Description</th><th>MSRP</th><th>Lowest Today</th><th>Retailer</th><th>Below MSRP</th></tr></thead><tbody>';
+      rows.forEach(r => {
+        html += `<tr class="clickable" onclick="loadRetSku(${r.product_id},'overview')" title="Click for full SKU detail">
+          <td>${r.product_id}</td>
+          <td>${r.model_no}</td>
+          <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.description||''}">${r.description||'—'}</td>
+          <td>${r.msrp ? '£'+r.msrp.toFixed(2) : '—'}</td>
+          <td>${r.min_price ? '£'+r.min_price.toFixed(2) : '—'}</td>
+          <td>${r.cheapest_retailer || '—'}</td>
+          <td>${r.below_msrp ? '<span class="badge badge-red">Yes</span>' : '—'}</td>
+        </tr>`;
+      });
+      html += '</tbody></table>';
+      const el = document.getElementById('ret-daily-sku-tbl');
+      el.innerHTML = html;
+      makeSortableAll(el);
+    });
+}
+
+function closeRetDailyGroupDrill() {
+  _retDailyMfr = null;
+  _retDailyGroup = null;
+  document.getElementById('ret-daily-group-drill').style.display = 'none';
+  document.getElementById('ret-daily-sku-drill').style.display = 'none';
+  document.querySelectorAll('#ret-daily-mfr-tbl tr.row-selected').forEach(r => r.classList.remove('row-selected'));
+}
+
+function closeRetDailySkuDrill() {
+  _retDailyGroup = null;
+  document.getElementById('ret-daily-sku-drill').style.display = 'none';
+  document.querySelectorAll('#ret-daily-group-tbl tr.row-selected').forEach(r => r.classList.remove('row-selected'));
 }
 
 // ── Retailer search ───────────────────────────────────────────────────────────
@@ -5214,6 +5367,94 @@ def retailer_kpi():
         "SELECT COUNT(*) AS n FROM retailer_prices WHERE date=? AND price IS NOT NULL", (latest,)
     )["n"]
     return jsonify({"total_skus": total, "below_msrp_today": below, "prices_today": prices, "latest_date": latest})
+
+
+@app.route("/api/retailer/daily-overview")
+def retailer_daily_overview():
+    latest = latest_date("retailer_prices")
+    if not latest:
+        return jsonify([])
+    rows = qry(
+        """SELECT
+               r.manufacturer,
+               COUNT(DISTINCT r.product_group)                              AS group_count,
+               COUNT(DISTINCT r.product_id)                                 AS sku_count,
+               COUNT(CASE WHEN r.price IS NOT NULL THEN 1 END)              AS prices_today,
+               COUNT(CASE WHEN r.below_msrp=1 THEN 1 END)                  AS below_msrp,
+               COUNT(DISTINCT CASE WHEN r.price IS NOT NULL THEN r.retailer END) AS retailers_active
+           FROM retailer_prices r
+           WHERE r.date=?
+           GROUP BY r.manufacturer
+           ORDER BY r.manufacturer""",
+        (latest,)
+    )
+    return jsonify(rows)
+
+
+@app.route("/api/retailer/daily-overview/groups")
+def retailer_daily_overview_groups():
+    mfr = request.args.get("mfr", "").strip()
+    if not mfr:
+        return jsonify([])
+    latest = latest_date("retailer_prices")
+    if not latest:
+        return jsonify([])
+    rows = qry(
+        """SELECT
+               r.product_group,
+               COUNT(DISTINCT r.product_id)                            AS sku_count,
+               COUNT(CASE WHEN r.price IS NOT NULL THEN 1 END)         AS prices_today,
+               COUNT(CASE WHEN r.below_msrp=1 THEN 1 END)             AS below_msrp,
+               COUNT(CASE WHEN r.in_stock=1 THEN 1 END)               AS in_stock,
+               MIN(CASE WHEN r.price IS NOT NULL THEN r.price END)     AS min_price
+           FROM retailer_prices r
+           WHERE r.date=? AND r.manufacturer=?
+           GROUP BY r.product_group
+           ORDER BY r.product_group""",
+        (latest, mfr)
+    )
+    return jsonify(rows)
+
+
+@app.route("/api/retailer/daily-overview/skus")
+def retailer_daily_overview_skus():
+    mfr   = request.args.get("mfr",   "").strip()
+    group = request.args.get("group", "").strip()
+    if not mfr or not group:
+        return jsonify([])
+    latest = latest_date("retailer_prices")
+    if not latest:
+        return jsonify([])
+    rows = qry(
+        """SELECT
+               r.product_id,
+               r.model_no,
+               r.description,
+               r.msrp,
+               MIN(CASE WHEN r.price IS NOT NULL THEN r.price END)  AS min_price,
+               MAX(r.below_msrp)                                     AS below_msrp
+           FROM retailer_prices r
+           WHERE r.date=? AND r.manufacturer=? AND r.product_group=?
+           GROUP BY r.product_id, r.model_no, r.description, r.msrp
+           ORDER BY r.model_no""",
+        (latest, mfr, group)
+    )
+    # Resolve cheapest retailer per product with a second pass
+    db = get_db()
+    result = []
+    for row in rows:
+        row = dict(row)
+        if row['min_price'] is not None:
+            cr = db.execute(
+                "SELECT retailer FROM retailer_prices WHERE date=? AND product_id=? AND price=? LIMIT 1",
+                (latest, row['product_id'], row['min_price'])
+            ).fetchone()
+            row['cheapest_retailer'] = cr['retailer'] if cr else None
+        else:
+            row['cheapest_retailer'] = None
+        result.append(row)
+    db.close()
+    return jsonify(result)
 
 
 @app.route("/api/retailer/search")
