@@ -557,7 +557,7 @@ HTML = r"""<!DOCTYPE html>
 
     <!-- SKU Drill-down -->
     <div class="content-section" id="stic-sku">
-      <button class="back-btn" id="stic-sku-back" onclick="showSticSection('overview')">← Back</button>
+      <button class="back-btn" id="stic-sku-back" onclick="showSticSection('overview')" style="display:none"></button>
       <div id="stic-sku-content"><div class="spinner">Loading…</div></div>
     </div>
 
@@ -1432,11 +1432,12 @@ function renderSticSku(data) {
     `Group: ${info.product_group || '—'}`,
   ];
   if (info.description) metaParts.push(`Description: ${info.description}`);
-  let html = `<div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px">
+  let html = `<div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px">
     <div style="flex:1">
       <h3 style="margin:0 0 4px">${info.manufacturer} — ${info.model_no}</h3>
       <p style="color:#605E5C;margin:0;font-size:12px">${metaParts.join(' | ')}</p>
     </div>
+    <button class="back-btn" onclick="showSticSection(sticSkuBackSection)" style="margin-top:2px">← Back</button>
     <button class="watch-btn" data-watch-pid="${info.product_id}"
       onclick="toggleWatch(${info.product_id},event)"
       title="${_watchedIds.has(info.product_id)?'Remove from watchlist':'Add to watchlist'}"
