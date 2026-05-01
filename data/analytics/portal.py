@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from flask import Flask, jsonify, request, render_template_string
 
 app = Flask(__name__)
-DB_PATH = "/opt/openclaw/data/analytics/prices.db"
+DB_PATH = "/opt/stic-scraper/analytics/prices.db"
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
@@ -6257,9 +6257,9 @@ def scrape_missing_group_trigger():
     pid_list = ",".join(str(r["product_id"]) for r in missing)
     try:
         proc = subprocess.Popen(
-            ["/usr/bin/python3", "/opt/openclaw/data/stic/stic_scraper.py",
+            ["/usr/bin/python3", "/opt/stic-scraper/scraper/stic_scraper.py",
              "--rescrape", pid_list],
-            stdout=open("/opt/openclaw/logs/stic.log", "a"),
+            stdout=open("/opt/stic-scraper/logs/stic.log", "a"),
             stderr=subprocess.STDOUT,
             start_new_session=True,
         )
@@ -6301,9 +6301,9 @@ def scrape_missing_all_trigger():
 
     try:
         proc = subprocess.Popen(
-            ["/usr/bin/python3", "/opt/openclaw/data/stic/stic_scraper.py",
+            ["/usr/bin/python3", "/opt/stic-scraper/scraper/stic_scraper.py",
              "--missing-all"],
-            stdout=open("/opt/openclaw/logs/stic.log", "a"),
+            stdout=open("/opt/stic-scraper/logs/stic.log", "a"),
             stderr=subprocess.STDOUT,
             start_new_session=True,
         )
@@ -6328,7 +6328,7 @@ def scrape_missing_all_status():
 
     # Read current group from the scraper's status file if available
     import json as _json, os as _os
-    status_path = "/opt/openclaw/data/stic/missing_all_status.json"
+    status_path = "/opt/stic-scraper/data/missing_all_status.json"
     current = ""
     if _os.path.exists(status_path):
         try:
@@ -6366,7 +6366,7 @@ def _scraper_is_running():
             return False
         # Secondary: log must have been written in last 90s
         try:
-            return (_t.time() - os.path.getmtime("/opt/openclaw/logs/stic.log")) <= 90
+            return (_t.time() - os.path.getmtime("/opt/stic-scraper/logs/stic.log")) <= 90
         except Exception:
             return True
     except Exception:
@@ -6395,14 +6395,14 @@ def scrape_group_trigger():
     try:
         cmd = [
             "/usr/bin/python3",
-            "/opt/openclaw/data/stic/stic_scraper.py",
+            "/opt/stic-scraper/scraper/stic_scraper.py",
             "--group", label,
             "--force",   # manual portal trigger always re-scrapes regardless of prior runs today
         ]
         # Launch detached — portal doesn't wait for it
         proc = subprocess.Popen(
             cmd,
-            stdout=open("/opt/openclaw/logs/stic.log", "a"),
+            stdout=open("/opt/stic-scraper/logs/stic.log", "a"),
             stderr=subprocess.STDOUT,
             start_new_session=True,
         )
@@ -6425,8 +6425,8 @@ def scrape_cpu_trigger():
     label = f"CPU {brand.upper()}"
     try:
         proc = subprocess.Popen(
-            ["/usr/bin/python3", "/opt/openclaw/data/stic/stic_scraper.py", flag, "--force"],
-            stdout=open("/opt/openclaw/logs/stic.log", "a"),
+            ["/usr/bin/python3", "/opt/stic-scraper/scraper/stic_scraper.py", flag, "--force"],
+            stdout=open("/opt/stic-scraper/logs/stic.log", "a"),
             stderr=subprocess.STDOUT,
             start_new_session=True,
         )
@@ -6467,12 +6467,12 @@ def scrape_sku_trigger():
     try:
         cmd = [
             "/usr/bin/python3",
-            "/opt/openclaw/data/stic/stic_scraper.py",
+            "/opt/stic-scraper/scraper/stic_scraper.py",
             "--rescrape", str(product_id),
         ]
         proc = subprocess.Popen(
             cmd,
-            stdout=open("/opt/openclaw/logs/stic.log", "a"),
+            stdout=open("/opt/stic-scraper/logs/stic.log", "a"),
             stderr=subprocess.STDOUT,
             start_new_session=True,
         )
@@ -6533,7 +6533,7 @@ def scrape_live_status():
     # Catches processes stuck in cleanup/network after sending Telegram.
     if running:
         try:
-            log_mtime = os.path.getmtime("/opt/openclaw/logs/stic.log")
+            log_mtime = os.path.getmtime("/opt/stic-scraper/logs/stic.log")
             if _time.time() - log_mtime > 90:
                 running = False
                 scraper_count = 0
@@ -6543,7 +6543,7 @@ def scrape_live_status():
     # ── Parse progress from log ──────────────────────────────────────────────
     progress = {}
     if running:
-        log_path = "/opt/openclaw/logs/stic.log"
+        log_path = "/opt/stic-scraper/logs/stic.log"
         try:
             with open(log_path, encoding="utf-8", errors="replace") as f:
                 lines = f.readlines()[-600:]
@@ -7596,7 +7596,7 @@ def _msrp_preview(tool_id, csv_text):
     # ── Write import debug log ───────────────────────────────────────────────
     try:
         import json as _json
-        _log_path = "/opt/openclaw/logs/import.log"
+        _log_path = "/opt/stic-scraper/logs/import.log"
         _ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         _bad_rows  = [r for r in error_rows if r["_action"] == "bad_value"]
         _miss_rows = [r for r in error_rows if r["_action"] == "not_found"]

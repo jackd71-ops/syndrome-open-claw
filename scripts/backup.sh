@@ -6,6 +6,7 @@ LOG="/opt/openclaw/logs/backup.log"
 
 echo "[$TIMESTAMP] Starting backup..." >> "$LOG"
 
+# OpenClaw (AI assistant, config, workspace)
 rsync -av --delete \
   -e "ssh -i /home/adminclaude/.ssh/id_ed25519_openclaw -o BatchMode=yes" \
   /opt/openclaw/config/ \
@@ -23,7 +24,21 @@ rsync -av --delete \
 
 MAIN_OK=$?
 
-# Backup rclone config (OneDrive OAuth token) into a subdir of the same backup path
+# STIC scraper + portal (standalone, separate from OpenClaw)
+rsync -av --delete \
+  -e "ssh -i /home/adminclaude/.ssh/id_ed25519_openclaw -o BatchMode=yes" \
+  /opt/stic-scraper/scraper/ \
+  /opt/stic-scraper/analytics/ \
+  /opt/stic-scraper/data/ \
+  /opt/stic-scraper/general/ \
+  /opt/stic-scraper/docs/ \
+  /opt/stic-scraper/secrets.json \
+  truenas_admin@192.168.1.158:/mnt/Deep/backups/stic-scraper/ \
+  >> "$LOG" 2>&1
+
+STIC_OK=$?
+
+# Backup rclone config (OneDrive OAuth token)
 rsync -av \
   -e "ssh -i /home/adminclaude/.ssh/id_ed25519_openclaw -o BatchMode=yes" \
   /home/adminclaude/.config/rclone/ \
@@ -32,8 +47,8 @@ rsync -av \
 
 RCLONE_OK=$?
 
-if [ $MAIN_OK -eq 0 ] && [ $RCLONE_OK -eq 0 ]; then
+if [ $MAIN_OK -eq 0 ] && [ $STIC_OK -eq 0 ] && [ $RCLONE_OK -eq 0 ]; then
   echo "[$TIMESTAMP] Backup complete." >> "$LOG"
 else
-  echo "[$TIMESTAMP] Backup FAILED (main=$MAIN_OK rclone=$RCLONE_OK)." >> "$LOG"
+  echo "[$TIMESTAMP] Backup FAILED (openclaw=$MAIN_OK stic=$STIC_OK rclone=$RCLONE_OK)." >> "$LOG"
 fi

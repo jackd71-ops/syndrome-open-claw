@@ -52,17 +52,17 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 from patchright.sync_api import sync_playwright as patchright_playwright
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-DB_PATH            = "/opt/openclaw/data/analytics/prices.db"
-OUTPUT_DIR         = "/opt/openclaw/data/general"
-PROGRESS_PATH      = "/opt/openclaw/data/stic/retailer_progress_{date}.json"
-LOG_PATH           = "/opt/openclaw/logs/retailer.log"
-SECRETS_PATH       = "/opt/openclaw/secrets.json"
-AWDIT_CATALOG_PATH = "/opt/openclaw/data/stic/awdit_catalog.json"
-SCAN_SCRAPE_PATH   = "/opt/openclaw/data/stic/scan_scrape.py"
-VERY_SCRAPE_PATH   = "/opt/openclaw/data/stic/very_scrape.py"
-BOX_SCRAPE_PATH    = "/opt/openclaw/data/stic/box_scrape.py"
-ARGOS_SCRAPE_PATH  = "/opt/openclaw/data/stic/argos_scrape.py"
-LOCK_PATH          = "/opt/openclaw/data/stic/retailer_scraper.lock"
+DB_PATH            = "/opt/stic-scraper/analytics/prices.db"
+OUTPUT_DIR         = "/opt/stic-scraper/general"
+PROGRESS_PATH      = "/opt/stic-scraper/data/retailer_progress_{date}.json"
+LOG_PATH           = "/opt/stic-scraper/logs/retailer.log"
+SECRETS_PATH       = "/opt/stic-scraper/secrets.json"
+AWDIT_CATALOG_PATH = "/opt/stic-scraper/data/awdit_catalog.json"
+SCAN_SCRAPE_PATH   = "/opt/stic-scraper/scraper/scan_scrape.py"
+VERY_SCRAPE_PATH   = "/opt/stic-scraper/scraper/very_scrape.py"
+BOX_SCRAPE_PATH    = "/opt/stic-scraper/scraper/box_scrape.py"
+ARGOS_SCRAPE_PATH  = "/opt/stic-scraper/scraper/argos_scrape.py"
+LOCK_PATH          = "/opt/stic-scraper/data/retailer_scraper.lock"
 
 # Populated by discover_* functions; consumed by run_discovery_sanity_report()
 _DISCOVERY_LOG: list = []
@@ -389,7 +389,7 @@ def scrape_argos(sku):
 
 
 # ── Overclockers scraper (camoufox + Xvfb subprocess) ────────────────────────
-OCUK_SCRAPE_PATH = "/opt/openclaw/data/stic/ocuk_scrape.py"
+OCUK_SCRAPE_PATH = "/opt/stic-scraper/scraper/ocuk_scrape.py"
 
 def scrape_overclockers(code):
     try:

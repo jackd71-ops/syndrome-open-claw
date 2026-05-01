@@ -1,12 +1,11 @@
 #!/bin/bash
 # Nightly sync of production source files to GitHub
-# Copies live .py files and scripts into the docs repos and pushes if anything changed.
 # No secrets are committed — all credentials live in secrets.json (not tracked).
 
 DOCS="/opt/openclaw/docs"
-DOCS_STIC="/opt/openclaw/docs-stic"
-LIVE_ANALYTICS="/opt/openclaw/data/analytics"
-LIVE_STIC="/opt/openclaw/data/stic"
+DOCS_STIC="/opt/stic-scraper/docs"
+LIVE_ANALYTICS="/opt/stic-scraper/analytics"
+LIVE_STIC="/opt/stic-scraper/scraper"
 LIVE_SCRIPTS="/opt/openclaw/scripts"
 LOG="/opt/openclaw/logs/git-sync.log"
 TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")

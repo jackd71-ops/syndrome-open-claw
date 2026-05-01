@@ -22,10 +22,10 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
 # ── Paths ────────────────────────────────────────────────────────────────────
-CACHE_PATH    = "/opt/openclaw/data/stic/url_cache.json"
-PROGRESS_PATH = "/opt/openclaw/data/stic/progress_{date}.json"
-SESSION_PATH  = "/opt/openclaw/data/stic/session.json"
-LOG_PATH      = "/opt/openclaw/logs/stic.log"
+CACHE_PATH    = "/opt/stic-scraper/data/url_cache.json"
+PROGRESS_PATH = "/opt/stic-scraper/data/progress_{date}.json"
+SESSION_PATH  = "/opt/stic-scraper/data/session.json"
+LOG_PATH      = "/opt/stic-scraper/logs/stic.log"
 
 # ── STIC config ───────────────────────────────────────────────────────────────
 STIC_BASE     = "https://www.stockinthechannel.co.uk"
@@ -33,7 +33,7 @@ STIC_LOGIN    = "https://www.stockinthechannel.co.uk/Account/Login"
 STIC_SEARCH   = "https://www.stockinthechannel.co.uk/Search?q={query}"
 
 # Credentials — stored in secrets.json
-SECRETS_PATH  = "/opt/openclaw/secrets.json"
+SECRETS_PATH  = "/opt/stic-scraper/secrets.json"
 
 # OneDrive destination (rclone remote path)
 ONEDRIVE_DEST = "onedrive:Documents/STIC"
@@ -280,7 +280,7 @@ def check_data_bleed(iso_date: str) -> list[dict]:
 
 
 # ── Write result to SQLite ────────────────────────────────────────────────────
-_DB_PATH = "/opt/openclaw/data/analytics/prices.db"
+_DB_PATH = "/opt/stic-scraper/analytics/prices.db"
 
 _DIST_DB_NAME = {
     "TD Synnex UK": "TD Synnex",
@@ -350,7 +350,7 @@ def login(page, username: str, password: str) -> bool:
         time.sleep(random.uniform(0.8, 1.5))
 
         # Screenshot pre-submit for debug
-        page.screenshot(path="/opt/openclaw/data/stic/pre_submit.png")
+        page.screenshot(path="/opt/stic-scraper/data/pre_submit.png")
 
         # Submit by pressing Enter on password field — more reliable than button click
         page.press('input[type="password"]', "Enter")
@@ -368,8 +368,8 @@ def login(page, username: str, password: str) -> bool:
         log(f"Page has 'register': {'register' in content}")
 
         # Save screenshot for inspection
-        page.screenshot(path="/opt/openclaw/data/stic/login_debug.png")
-        log("Screenshot saved to /opt/openclaw/data/stic/login_debug.png")
+        page.screenshot(path="/opt/stic-scraper/data/login_debug.png")
+        log("Screenshot saved to /opt/stic-scraper/data/login_debug.png")
 
         if "logout" in content or "sign out" in content or "my account" in content:
             log("Login successful.")
@@ -1445,7 +1445,7 @@ def run_groups(groups: list, date_str: str, random_start_delay: bool = True, for
 
 
 # ── Missing-all server-side sequential run ───────────────────────────────────
-MISSING_ALL_STATUS_PATH = "/opt/openclaw/data/stic/missing_all_status.json"
+MISSING_ALL_STATUS_PATH = "/opt/stic-scraper/data/missing_all_status.json"
 
 def _write_missing_status(data: dict):
     """Write current run status to a file the portal can poll."""
