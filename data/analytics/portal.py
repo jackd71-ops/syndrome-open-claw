@@ -1443,32 +1443,33 @@ function renderSticSku(data) {
       style="margin-top:2px">${_watchedIds.has(info.product_id)?'★':'☆'}</button>
     ${eolBtnHtml(info.product_id)}
   </div>
-  <div style="margin-bottom:12px;font-size:12px;color:#605E5C">
-    <span style="font-weight:600">STIC URL:</span>
-    ${info.stic_url
-      ? `<a href="${info.stic_url}" target="_blank" style="color:#0078D4;margin-left:6px">${info.stic_url}</a>`
-      : `<span style="margin-left:6px;color:#A19F9D">Not yet cached — will be saved on next successful scrape</span>`}
-    <span style="margin-left:12px">
-      <input id="stic-url-input-${info.product_id}" type="text" placeholder="Paste correct STIC URL to override…"
-        style="width:340px;padding:3px 7px;font-size:12px;border:1px solid #8A8886;border-radius:2px;font-family:inherit"/>
+  <div style="display:flex;align-items:flex-start;gap:16px;margin-bottom:14px">
+    <div style="display:flex;align-items:center;gap:4px;flex-shrink:0;flex-wrap:wrap;font-size:12px;color:#605E5C">
+      <span style="font-weight:600">STIC URL:</span>
+      ${info.stic_url
+        ? `<a href="${info.stic_url}" target="_blank" title="${info.stic_url}"
+             style="color:#0078D4;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:middle">🔗 View page</a>`
+        : `<span style="color:#A19F9D;font-size:11px">Not cached</span>`}
+      <input id="stic-url-input-${info.product_id}" type="text" placeholder="Paste URL to override…"
+        style="width:170px;padding:3px 7px;font-size:12px;border:1px solid #8A8886;border-radius:2px;font-family:inherit;margin-left:4px"/>
       <button onclick="saveSticUrl(${info.product_id})"
-        style="margin-left:4px;padding:3px 10px;background:#0078D4;color:#fff;border:none;border-radius:2px;cursor:pointer;font-size:12px">Save</button>
+        style="padding:3px 10px;background:#0078D4;color:#fff;border:none;border-radius:2px;cursor:pointer;font-size:12px">Save</button>
       <button id="rescrape-btn-${info.product_id}" onclick="triggerRescrape(${info.product_id})"
-        style="margin-left:8px;padding:3px 10px;background:#107C10;color:#fff;border:none;border-radius:2px;cursor:pointer;font-size:12px"
+        style="padding:3px 10px;background:#107C10;color:#fff;border:none;border-radius:2px;cursor:pointer;font-size:12px"
         title="Re-scrape STIC now for this SKU and refresh the page">▶ Scrape Now</button>
-    </span>
-  </div>
-  <div style="margin-bottom:14px">
-    <div style="font-size:11px;font-weight:600;color:#605E5C;margin-bottom:4px">Notes</div>
-    <div style="display:flex;gap:6px;align-items:flex-start">
-      <textarea id="sku-notes-${info.product_id}" rows="2"
-        placeholder="Add notes — why EOL'd, why not listed, anything useful for later…"
-        style="flex:1;max-width:600px;padding:5px 8px;font-size:12px;border:1px solid #C8C6C4;border-radius:2px;font-family:inherit;resize:vertical"
-      >${info.notes ? info.notes.replace(/</g,'&lt;') : ''}</textarea>
-      <button onclick="saveNotes(${info.product_id})"
-        style="padding:5px 12px;background:#0078D4;color:#fff;border:none;border-radius:2px;cursor:pointer;font-size:12px;white-space:nowrap">Save</button>
-      <button onclick="clearNotes(${info.product_id})"
-        style="padding:5px 12px;background:#fff;color:#D13438;border:1px solid #D13438;border-radius:2px;cursor:pointer;font-size:12px;white-space:nowrap">Clear</button>
+    </div>
+    <div style="flex:1;min-width:0">
+      <div style="font-size:11px;font-weight:600;color:#605E5C;margin-bottom:3px">Notes</div>
+      <div style="display:flex;gap:5px;align-items:flex-start">
+        <textarea id="sku-notes-${info.product_id}" rows="2"
+          placeholder="Add notes…"
+          style="flex:1;min-width:0;padding:4px 7px;font-size:12px;border:1px solid #C8C6C4;border-radius:2px;font-family:inherit;resize:vertical"
+        >${info.notes ? info.notes.replace(/</g,'&lt;') : ''}</textarea>
+        <button onclick="saveNotes(${info.product_id})"
+          style="padding:3px 10px;background:#0078D4;color:#fff;border:none;border-radius:2px;cursor:pointer;font-size:12px;white-space:nowrap">Save</button>
+        <button onclick="clearNotes(${info.product_id})"
+          style="padding:3px 10px;background:#fff;color:#D13438;border:1px solid #D13438;border-radius:2px;cursor:pointer;font-size:12px;white-space:nowrap">Clear</button>
+      </div>
     </div>
   </div>`;
 
