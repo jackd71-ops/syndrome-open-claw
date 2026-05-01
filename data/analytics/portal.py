@@ -148,11 +148,15 @@ def _init_products():
         eol           INTEGER NOT NULL DEFAULT 0,
         stic_url      TEXT
     )""")
-    # Migrate: add stic_url column if upgrading from older schema
-    try:
-        db.execute("ALTER TABLE products ADD COLUMN stic_url TEXT")
-    except Exception:
-        pass  # column already exists
+    # Migrate: add columns if upgrading from older schema
+    for col_sql in [
+        "ALTER TABLE products ADD COLUMN stic_url TEXT",
+        "ALTER TABLE products ADD COLUMN stic_exclude INTEGER NOT NULL DEFAULT 0",
+    ]:
+        try:
+            db.execute(col_sql)
+        except Exception:
+            pass  # column already exists
     db.commit()
     db.close()
 
@@ -933,6 +937,13 @@ HTML = r"""<!DOCTYPE html>
               <option value="1">End of Life</option>
             </select>
           </div>
+          <div class="edit-field">
+            <label>STIC Scraper</label>
+            <select id="ep-stic-exclude">
+              <option value="0">Include</option>
+              <option value="1">Exclude (retail only)</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -1516,6 +1527,7 @@ function renderSticSku(data) {
       <p style="color:#605E5C;margin:0;font-size:12px">${metaParts.join(' | ')}</p>
     </div>
     <button class="back-btn" onclick="showSticSection(sticSkuBackSection)" style="margin-top:2px">← Back</button>
+    ${info.stic_exclude ? `<span style="background:#797673;color:#fff;border-radius:3px;padding:3px 8px;font-size:12px;margin-top:2px" title="Excluded from STIC scraper — retail only">STIC Excluded</span>` : ''}
     <button class="watch-btn" data-watch-pid="${info.product_id}"
       onclick="toggleWatch(${info.product_id},event)"
       title="${_watchedIds.has(info.product_id)?'Remove from watchlist':'Add to watchlist'}"
@@ -1904,9 +1916,10 @@ function _openProductEdit(productId, focusMsrp, focusFieldId) {
       document.getElementById('ep-box-url').value       = p.box_url      || '';
       document.getElementById('ep-msg').textContent     = '';
       document.getElementById('edit-modal-title').textContent = `Edit Product — ${p.product_id}`;
-      document.getElementById('ep-stic-url').value = p.stic_url || '';
-      document.getElementById('ep-notes').value    = p.notes    || '';
-      document.getElementById('ep-eol').value      = p.eol ? '1' : '0';
+      document.getElementById('ep-stic-url').value      = p.stic_url      || '';
+      document.getElementById('ep-notes').value         = p.notes         || '';
+      document.getElementById('ep-eol').value           = p.eol          ? '1' : '0';
+      document.getElementById('ep-stic-exclude').value  = p.stic_exclude ? '1' : '0';
 
       // Highlight the appropriate field
       const targetId = focusFieldId || (focusMsrp ? 'ep-msrp' : 'ep-model-no');
@@ -2080,6 +2093,7 @@ function _saveProduct() {
     stic_url:      document.getElementById('ep-stic-url').value.trim()    || null,
     notes:         document.getElementById('ep-notes').value.trim()       || null,
     eol:           parseInt(document.getElementById('ep-eol').value),
+    stic_exclude:  parseInt(document.getElementById('ep-stic-exclude').value),
   };
   const msg = document.getElementById('ep-msg');
   msg.style.color = '#605E5C';
@@ -6357,7 +6371,7 @@ def scrape_missing():
                               (SELECT MAX(date) FROM stic_prices s
                                WHERE s.product_id=p.product_id) AS last_good_date
                        FROM products p
-                       WHERE p.eol=0 AND p.manufacturer=? AND p.product_group=?
+                       WHERE p.eol=0 AND p.stic_exclude=0 AND p.manufacturer=? AND p.product_group=?
                          AND p.product_id NOT IN (
                              SELECT DISTINCT product_id FROM stic_prices
                              WHERE date=? AND manufacturer=? AND product_group=?
@@ -6371,7 +6385,7 @@ def scrape_missing():
                               (SELECT MAX(date) FROM stic_prices s
                                WHERE s.product_id=p.product_id) AS last_good_date
                        FROM products p
-                       WHERE p.eol=0 AND p.product_group=?
+                       WHERE p.eol=0 AND p.stic_exclude=0 AND p.product_group=?
                          AND p.product_id NOT IN (
                              SELECT DISTINCT product_id FROM stic_prices
                              WHERE date=? AND product_group=?
@@ -6386,7 +6400,7 @@ def scrape_missing():
                     """SELECT p.product_id, p.model_no, p.manufacturer, p.stic_url,
                               NULL AS last_good_date
                        FROM products p
-                       WHERE p.eol=0 AND p.manufacturer=? AND p.product_group=?
+                       WHERE p.eol=0 AND p.stic_exclude=0 AND p.manufacturer=? AND p.product_group=?
                        ORDER BY p.model_no""",
                     (manufacturer, product_group)
                 ).fetchall()
@@ -6395,7 +6409,7 @@ def scrape_missing():
                     """SELECT p.product_id, p.model_no, p.manufacturer, p.stic_url,
                               NULL AS last_good_date
                        FROM products p
-                       WHERE p.eol=0 AND p.product_group=?
+                       WHERE p.eol=0 AND p.stic_exclude=0 AND p.product_group=?
                        ORDER BY p.model_no""",
                     (product_group,)
                 ).fetchall()
@@ -7481,7 +7495,7 @@ def catalogue_product(product_id):
     if request.method == "GET":
         row = db.execute(
             "SELECT p.product_id, p.model_no, p.manufacturer, p.product_group, "
-            "p.description, p.chipset, p.ean, p.msrp, p.stic_url, p.eol, p.notes, "
+            "p.description, p.chipset, p.ean, p.msrp, p.stic_url, p.eol, p.notes, p.stic_exclude, "
             "r.amazon_asin, r.currys_sku, r.very_sku, r.very_url, r.argos_sku, "
             "r.ccl_url, r.awdit_url, r.scan_ln, r.scan_url, r.ocuk_code, r.box_url "
             "FROM products p "
@@ -7497,7 +7511,7 @@ def catalogue_product(product_id):
     data = request.get_json(silent=True) or {}
 
     # ── Update products table ──────────────────────────────────────────────────
-    product_fields = ["model_no", "manufacturer", "product_group", "description", "chipset", "ean", "msrp", "stic_url", "notes", "eol"]
+    product_fields = ["model_no", "manufacturer", "product_group", "description", "chipset", "ean", "msrp", "stic_url", "notes", "eol", "stic_exclude"]
     sets, params = [], []
     for field in product_fields:
         if field in data:
@@ -7517,7 +7531,7 @@ def catalogue_product(product_id):
             if field == "product_group" and val not in ("PROD_VIDEO", "PROD_MBRD", "PROD_MBRDS", "PROD_CPU", None, ""):
                 db.close()
                 return jsonify({"error": f"Invalid product_group: {val}"})
-            if field == "eol":
+            if field in ("eol", "stic_exclude"):
                 val = 1 if val else 0
             sets.append(f"{field} = ?")
             params.append(val)

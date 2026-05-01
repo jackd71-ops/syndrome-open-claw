@@ -156,7 +156,7 @@ def clear_stic_url(product_id):
 def count_products() -> int:
     """Count active (non-EOL) products in the products DB table."""
     db = _db_products_conn()
-    row = db.execute("SELECT COUNT(*) AS c FROM products WHERE eol=0").fetchone()
+    row = db.execute("SELECT COUNT(*) AS c FROM products WHERE eol=0 AND stic_exclude=0").fetchone()
     db.close()
     return row["c"] if row else 0
 
@@ -187,7 +187,7 @@ def _row_to_product(row) -> dict:
 def read_products(start: int, end: int) -> list:
     """Read active products from DB, ordered by product_id. Row numbers are 1-based."""
     db = _db_products_conn()
-    rows = db.execute("SELECT * FROM products WHERE eol=0 ORDER BY product_id").fetchall()
+    rows = db.execute("SELECT * FROM products WHERE eol=0 AND stic_exclude=0 ORDER BY product_id").fetchall()
     db.close()
     products = []
     for row_num, row in enumerate(rows, start=1):
@@ -206,12 +206,12 @@ def read_products_for_group(manufacturer: str | None, product_group: str) -> lis
     db = _db_products_conn()
     if manufacturer:
         rows = db.execute(
-            "SELECT * FROM products WHERE eol=0 AND manufacturer=? AND product_group=? ORDER BY product_id",
+            "SELECT * FROM products WHERE eol=0 AND stic_exclude=0 AND manufacturer=? AND product_group=? ORDER BY product_id",
             (manufacturer, product_group)
         ).fetchall()
     else:
         rows = db.execute(
-            "SELECT * FROM products WHERE eol=0 AND product_group=? ORDER BY product_id",
+            "SELECT * FROM products WHERE eol=0 AND stic_exclude=0 AND product_group=? ORDER BY product_id",
             (product_group,)
         ).fetchall()
     db.close()
