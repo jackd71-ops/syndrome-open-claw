@@ -613,6 +613,7 @@ HTML = r"""<!DOCTYPE html>
         <button class="sidebar-btn" onclick="loadRetReport('out_of_stock',this)">Out of Stock Today</button>
         <button class="sidebar-btn" onclick="loadRetReport('back_in_stock',this)">Back in Stock</button>
         <button class="sidebar-btn" onclick="loadRetReport('never_listed',this)">Never Listed</button>
+        <button class="sidebar-btn" onclick="showRetAmazonOos(this)">Amazon OOS</button>
       </div>
     </div>
     <div class="sidebar-section">
@@ -678,6 +679,20 @@ HTML = r"""<!DOCTYPE html>
     <div class="content-section" id="ret-report">
       <button class="back-btn" onclick="showRetSection('overview')">← Back to Overview</button>
       <div id="ret-report-content"><div class="spinner">Loading…</div></div>
+    </div>
+    <!-- Amazon OOS report -->
+    <div class="content-section" id="ret-amazon-oos">
+      <button class="back-btn" onclick="showRetSection('overview')">← Back to Overview</button>
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap">
+        <h3 style="margin:0">Amazon OOS Report</h3>
+        <span id="ret-aoos-date" style="font-size:12px;color:#A19F9D"></span>
+        <select id="ret-aoos-mfr" onchange="loadRetAmazonOos()" style="padding:4px 8px;border:1px solid #C8C6C4;border-radius:2px;background:#fff;font-size:13px">
+          <option value="">All Manufacturers</option>
+        </select>
+        <span id="ret-aoos-count" style="font-size:12px;color:#A19F9D"></span>
+      </div>
+      <p style="font-size:12px;color:#A19F9D;margin:-4px 0 12px">Products where Amazon scraped today but returned no price — Amazon itself is not offering stock. FBA sellers are separate and not shown here.</p>
+      <div class="tbl-wrap" id="ret-aoos-tbl"><div class="spinner">Loading…</div></div>
     </div>
   </div>
 </div>
@@ -4206,6 +4221,62 @@ function closeRetDailySkuDrill() {
   document.querySelectorAll('#ret-daily-group-tbl tr.row-selected').forEach(r => r.classList.remove('row-selected'));
 }
 
+// ── Amazon OOS report ─────────────────────────────────────────────────────────
+let _aaoosMfrsLoaded = false;
+
+function showRetAmazonOos(btn) {
+  showRetSection('amazon-oos', btn);
+  if (!_aaoosMfrsLoaded) {
+    fetch('/api/retailer/amazon-oos/manufacturers').then(r=>r.json()).then(mfrs => {
+      const sel = document.getElementById('ret-aoos-mfr');
+      mfrs.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m; opt.textContent = m;
+        sel.appendChild(opt);
+      });
+      _aaoosMfrsLoaded = true;
+    });
+  }
+  loadRetAmazonOos();
+}
+
+function loadRetAmazonOos() {
+  const mfr = document.getElementById('ret-aoos-mfr').value;
+  document.getElementById('ret-aoos-tbl').innerHTML = '<div class="spinner">Loading…</div>';
+  document.getElementById('ret-aoos-count').textContent = '';
+  fetch('/api/retailer/amazon-oos' + (mfr ? '?mfr=' + encodeURIComponent(mfr) : ''))
+    .then(r=>r.json()).then(data => {
+      document.getElementById('ret-aoos-date').textContent = data.date ? 'Date: ' + data.date : '';
+      const rows = data.rows || [];
+      document.getElementById('ret-aoos-count').textContent = rows.length + ' product' + (rows.length!==1?'s':'');
+      if (!rows.length) {
+        document.getElementById('ret-aoos-tbl').innerHTML = '<p style="color:#107C10;padding:20px">✓ No Amazon OOS products found for this selection.</p>';
+        return;
+      }
+      let html = '<table><thead><tr>'
+        + '<th>Product</th><th>Model</th><th>Manufacturer</th><th>Description</th>'
+        + '<th>MSRP</th><th>Last Amazon Price</th><th>Last Seen</th>'
+        + '</tr></thead><tbody>';
+      rows.forEach(r => {
+        const lastPrice = r.last_amazon_price != null ? '£' + r.last_amazon_price.toFixed(2) : '<span style="color:#A19F9D">Never</span>';
+        const lastDate  = r.last_amazon_date  || '<span style="color:#A19F9D">—</span>';
+        html += `<tr class="clickable" onclick="loadRetSku(${r.product_id},'amazon-oos')" title="Click for full SKU detail">
+          <td>${r.product_id}</td>
+          <td>${r.model_no}</td>
+          <td>${r.manufacturer}</td>
+          <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.description||''}">${r.description||'—'}</td>
+          <td>${r.msrp ? '£'+r.msrp.toFixed(2) : '—'}</td>
+          <td>${lastPrice}</td>
+          <td>${lastDate}</td>
+        </tr>`;
+      });
+      html += '</tbody></table>';
+      const el = document.getElementById('ret-aoos-tbl');
+      el.innerHTML = html;
+      makeSortableAll(el);
+    });
+}
+
 // ── Retailer search ───────────────────────────────────────────────────────────
 function doRetSearch() {
   const q = document.getElementById('ret-search-input').value.trim();
@@ -5525,6 +5596,63 @@ def retailer_daily_overview_skus():
         result.append(row)
     db.close()
     return jsonify(result)
+
+
+@app.route("/api/retailer/amazon-oos/manufacturers")
+def retailer_amazon_oos_manufacturers():
+    """Distinct manufacturers that have at least one Amazon OOS record on the latest date."""
+    latest = latest_date("retailer_prices")
+    if not latest:
+        return jsonify([])
+    rows = qry(
+        """SELECT DISTINCT manufacturer FROM retailer_prices
+           WHERE date=? AND retailer='Amazon' AND price IS NULL
+           ORDER BY manufacturer""",
+        (latest,)
+    )
+    return jsonify([r["manufacturer"] for r in rows])
+
+
+@app.route("/api/retailer/amazon-oos")
+def retailer_amazon_oos():
+    """Products where Amazon scraped today but returned no price (OOS for Amazon direct)."""
+    mfr    = request.args.get("mfr", "").strip()
+    latest = latest_date("retailer_prices")
+    if not latest:
+        return jsonify({"date": None, "rows": []})
+
+    params      = [latest]
+    mfr_clause  = ""
+    if mfr:
+        mfr_clause = "AND rp.manufacturer = ?"
+        params.append(mfr)
+
+    rows = qry(
+        f"""SELECT
+               rp.product_id,
+               rp.model_no,
+               rp.manufacturer,
+               rp.description,
+               rp.msrp,
+               (SELECT MAX(r2.price)
+                FROM retailer_prices r2
+                WHERE r2.product_id = rp.product_id
+                  AND r2.retailer   = 'Amazon'
+                  AND r2.price IS NOT NULL) AS last_amazon_price,
+               (SELECT MAX(r2.date)
+                FROM retailer_prices r2
+                WHERE r2.product_id = rp.product_id
+                  AND r2.retailer   = 'Amazon'
+                  AND r2.price IS NOT NULL) AS last_amazon_date
+           FROM retailer_prices rp
+           WHERE rp.date     = ?
+             AND rp.retailer = 'Amazon'
+             AND rp.price IS NULL
+             {mfr_clause}
+           ORDER BY rp.manufacturer, rp.model_no""",
+        params
+    )
+    return jsonify({"date": latest, "rows": rows})
 
 
 @app.route("/api/retailer/search")
