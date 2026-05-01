@@ -1501,7 +1501,7 @@ function renderSticSku(data) {
         title="Delete bad data for one or more days">🗑 Purge Days</button>
     </div>
   </div>
-  <div style="display:flex;gap:12px">
+  <div style="display:flex;gap:12px;margin-bottom:20px">
     <div style="flex:1;min-width:0">${chTableHtml(ch_left)}</div>
     <div style="flex:1;min-width:0">${ch_right.length ? chTableHtml(ch_right) : ''}</div>
   </div>`;
