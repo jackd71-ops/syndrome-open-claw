@@ -691,7 +691,7 @@ HTML = r"""<!DOCTYPE html>
         </select>
         <span id="ret-aoos-count" style="font-size:12px;color:#A19F9D"></span>
       </div>
-      <p style="font-size:12px;color:#A19F9D;margin:-4px 0 12px">Products where Amazon scraped today but returned no price — Amazon itself is not offering stock. FBA sellers are separate and not shown here.</p>
+      <p style="font-size:12px;color:#A19F9D;margin:-4px 0 12px">Products where Amazon direct is not selling today. Includes rows where an FBA (3rd-party) seller has the buy box — Amazon themselves are OOS regardless. FBA price shown where captured.</p>
       <div class="tbl-wrap" id="ret-aoos-tbl"><div class="spinner">Loading…</div></div>
     </div>
   </div>
@@ -4179,13 +4179,17 @@ function loadRetDailySkuDrill(mfr, group) {
       let html = '<table><thead><tr><th>Product</th><th>Model</th><th>Description</th><th>MSRP</th><th>Lowest Today</th><th>Retailer</th><th>Amazon</th><th>Below MSRP</th></tr></thead><tbody>';
       rows.forEach(r => {
         // Amazon status cell
+        // amazon_oos = Amazon direct not selling; fba_price = FBA seller price if present
         let amzCell;
-        if (r.amazon_oos) {
-          amzCell = '<span style="background:#A4262C;color:#fff;border-radius:3px;padding:1px 5px;font-size:11px">OOS</span>';
-        } else if (r.amazon_fba_price != null) {
-          amzCell = '<span style="background:#FF9900;color:#fff;border-radius:3px;padding:1px 5px;font-size:11px">FBA</span> £' + r.amazon_fba_price.toFixed(2);
-        } else if (r.amazon_price != null) {
+        if (r.amazon_price != null) {
+          // Amazon direct — in stock
           amzCell = '£' + r.amazon_price.toFixed(2);
+        } else if (r.amazon_oos) {
+          const oosBadge = '<span style="background:#A4262C;color:#fff;border-radius:3px;padding:1px 5px;font-size:11px">Amz OOS</span>';
+          const fbaPart  = r.amazon_fba_price != null
+            ? ' <span style="background:#FF9900;color:#fff;border-radius:3px;padding:1px 5px;font-size:11px">FBA</span> £' + r.amazon_fba_price.toFixed(2)
+            : '';
+          amzCell = oosBadge + fbaPart;
         } else {
           amzCell = '<span style="color:#A19F9D">—</span>';
         }
@@ -4255,17 +4259,21 @@ function loadRetAmazonOos() {
       }
       let html = '<table><thead><tr>'
         + '<th>Product</th><th>Model</th><th>Manufacturer</th><th>Description</th>'
-        + '<th>MSRP</th><th>Last Amazon Price</th><th>Last Seen</th>'
+        + '<th>MSRP</th><th>FBA Price Today</th><th>Last Direct Price</th><th>Last Direct Date</th>'
         + '</tr></thead><tbody>';
       rows.forEach(r => {
-        const lastPrice = r.last_amazon_price != null ? '£' + r.last_amazon_price.toFixed(2) : '<span style="color:#A19F9D">Never</span>';
-        const lastDate  = r.last_amazon_date  || '<span style="color:#A19F9D">—</span>';
+        const fbaCell   = (r.seller_type === 'FBA' && r.fba_price != null)
+          ? '<span style="background:#FF9900;color:#fff;border-radius:3px;padding:1px 5px;font-size:11px">FBA</span> £' + r.fba_price.toFixed(2)
+          : '<span style="color:#A19F9D">—</span>';
+        const lastPrice = r.last_direct_price != null ? '£' + r.last_direct_price.toFixed(2) : '<span style="color:#A19F9D">Never direct</span>';
+        const lastDate  = r.last_direct_date  || '<span style="color:#A19F9D">—</span>';
         html += `<tr class="clickable" onclick="loadRetSku(${r.product_id},'amazon-oos')" title="Click for full SKU detail">
           <td>${r.product_id}</td>
           <td>${r.model_no}</td>
           <td>${r.manufacturer}</td>
           <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.description||''}">${r.description||'—'}</td>
           <td>${r.msrp ? '£'+r.msrp.toFixed(2) : '—'}</td>
+          <td>${fbaCell}</td>
           <td>${lastPrice}</td>
           <td>${lastDate}</td>
         </tr>`;
@@ -4331,16 +4339,16 @@ function renderRetSku(data) {
   let html = `<h3 style="margin-bottom:8px">${info.manufacturer} ${info.model_no}</h3>
     <p style="color:#605E5C;margin-bottom:16px">Product: ${info.product_id} | MSRP: ${info.msrp ? '£'+info.msrp.toFixed(2) : '—'}</p>`;
 
-  // Amazon status banner
+  // Amazon status banner — shown whenever Amazon themselves are not selling
   const amzRow = snapshot.find(r => r.retailer === 'Amazon');
   if (amzRow) {
-    if (amzRow.price == null) {
+    const amzDirectOos = amzRow.seller_type !== null || amzRow.price == null;
+    if (amzDirectOos) {
+      const fbaPart = (amzRow.seller_type === 'FBA' && amzRow.price != null)
+        ? ` An FBA (3rd-party) seller has the buy box at <strong>£${amzRow.price.toFixed(2)}</strong>.`
+        : ' No alternative seller price recorded either.';
       html += `<div style="background:#FFF4CE;border:1px solid #D29200;border-radius:4px;padding:8px 12px;margin-bottom:12px;font-size:13px">
-        ⚠️ <strong>Amazon:</strong> No price recorded today — assumed <strong>Out of Stock</strong>
-      </div>`;
-    } else if (amzRow.seller_type === 'FBA') {
-      html += `<div style="background:#FFF4CE;border:1px solid #FF9900;border-radius:4px;padding:8px 12px;margin-bottom:12px;font-size:13px">
-        🔶 <strong>Amazon:</strong> Buy box held by an <strong>FBA</strong> (3rd-party) seller at <strong>£${amzRow.price.toFixed(2)}</strong> — Amazon may not be offering direct stock
+        ⚠️ <strong>Amazon direct: Out of Stock</strong> — Amazon themselves are not offering this item.${fbaPart}
       </div>`;
     }
   }
@@ -5569,6 +5577,8 @@ def retailer_daily_overview_skus():
             row['cheapest_retailer'] = None
 
         # Amazon status: direct price / FBA buy-box / OOS
+        # amazon_oos = True whenever Amazon themselves are not the seller
+        # (FBA = 3rd party has buy box, so Amazon direct is OOS even if a price exists)
         amz_row = db.execute(
             "SELECT price, seller_type FROM retailer_prices WHERE date=? AND product_id=? AND retailer='Amazon' LIMIT 1",
             (latest, row['product_id'])
@@ -5576,19 +5586,21 @@ def retailer_daily_overview_skus():
         if amz_row is None:
             row['amazon_price']     = None
             row['amazon_fba_price'] = None
-            row['amazon_oos']       = False
+            row['amazon_oos']       = False   # no Amazon row = not scraped, no signal
         else:
             amz = dict(amz_row)
-            if amz['seller_type'] == 'FBA' and amz['price'] is not None:
-                row['amazon_price']     = None
-                row['amazon_fba_price'] = amz['price']
-                row['amazon_oos']       = False
-            elif amz['seller_type'] is None and amz['price'] is not None:
+            if amz['seller_type'] is None and amz['price'] is not None:
+                # Amazon direct — in stock
                 row['amazon_price']     = amz['price']
                 row['amazon_fba_price'] = None
                 row['amazon_oos']       = False
+            elif amz['seller_type'] == 'FBA':
+                # FBA has buy box → Amazon themselves are OOS, capture FBA price
+                row['amazon_price']     = None
+                row['amazon_fba_price'] = amz['price']
+                row['amazon_oos']       = True
             else:
-                # price IS NULL (USED sentinel, or scraped but no price) → treat as OOS
+                # price IS NULL — no price at all, Amazon OOS, no FBA either
                 row['amazon_price']     = None
                 row['amazon_fba_price'] = None
                 row['amazon_oos']       = True
@@ -5600,13 +5612,15 @@ def retailer_daily_overview_skus():
 
 @app.route("/api/retailer/amazon-oos/manufacturers")
 def retailer_amazon_oos_manufacturers():
-    """Distinct manufacturers that have at least one Amazon OOS record on the latest date."""
+    """Distinct manufacturers where Amazon is OOS (no direct price) on the latest date.
+    Includes rows where an FBA seller has the buy box."""
     latest = latest_date("retailer_prices")
     if not latest:
         return jsonify([])
     rows = qry(
         """SELECT DISTINCT manufacturer FROM retailer_prices
-           WHERE date=? AND retailer='Amazon' AND price IS NULL
+           WHERE date=? AND retailer='Amazon'
+             AND (price IS NULL OR seller_type IS NOT NULL)
            ORDER BY manufacturer""",
         (latest,)
     )
@@ -5615,7 +5629,8 @@ def retailer_amazon_oos_manufacturers():
 
 @app.route("/api/retailer/amazon-oos")
 def retailer_amazon_oos():
-    """Products where Amazon scraped today but returned no price (OOS for Amazon direct)."""
+    """Products where Amazon direct is OOS today — includes FBA buy-box rows
+    (Amazon themselves not selling) and null-price rows (no seller at all)."""
     mfr    = request.args.get("mfr", "").strip()
     latest = latest_date("retailer_prices")
     if not latest:
@@ -5634,20 +5649,24 @@ def retailer_amazon_oos():
                rp.manufacturer,
                rp.description,
                rp.msrp,
+               rp.seller_type,
+               rp.price                    AS fba_price,
                (SELECT MAX(r2.price)
                 FROM retailer_prices r2
-                WHERE r2.product_id = rp.product_id
-                  AND r2.retailer   = 'Amazon'
-                  AND r2.price IS NOT NULL) AS last_amazon_price,
+                WHERE r2.product_id  = rp.product_id
+                  AND r2.retailer    = 'Amazon'
+                  AND r2.seller_type IS NULL
+                  AND r2.price IS NOT NULL) AS last_direct_price,
                (SELECT MAX(r2.date)
                 FROM retailer_prices r2
-                WHERE r2.product_id = rp.product_id
-                  AND r2.retailer   = 'Amazon'
-                  AND r2.price IS NOT NULL) AS last_amazon_date
+                WHERE r2.product_id  = rp.product_id
+                  AND r2.retailer    = 'Amazon'
+                  AND r2.seller_type IS NULL
+                  AND r2.price IS NOT NULL) AS last_direct_date
            FROM retailer_prices rp
            WHERE rp.date     = ?
              AND rp.retailer = 'Amazon'
-             AND rp.price IS NULL
+             AND (rp.price IS NULL OR rp.seller_type IS NOT NULL)
              {mfr_clause}
            ORDER BY rp.manufacturer, rp.model_no""",
         params
