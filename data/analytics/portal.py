@@ -1422,6 +1422,7 @@ function vipCell(vip, floor) {
 function renderSticSku(data) {
   const el = document.getElementById('stic-sku-content');
   const { info, snapshot, price_history, stock_history, cheapest_history } = data;
+  _cheapestHistoryCache = cheapest_history; // cache for modal
 
   const metaParts = [
     `Product: ${info.product_id}`,
@@ -1478,18 +1479,32 @@ function renderSticSku(data) {
   });
   html += '</tbody></table></div>';
 
-  // Cheapest history table
+  // Cheapest history table — last 14 days split into two 7-day columns, full history in modal
+  const ch_sorted = [...cheapest_history].sort((a,b) => b.date.localeCompare(a.date)); // newest first
+  const ch_display = ch_sorted.slice(0, 14);
+  const ch_left  = ch_display.slice(0, 7);
+  const ch_right = ch_display.slice(7, 14);
+
+  function chRow(r) {
+    return r ? `<tr><td>${fmtDate(r.date)}</td><td>${r.distributor}</td><td>${r.price ? '£'+r.price.toFixed(2) : '—'}</td></tr>` : '<tr><td colspan="3" style="color:#aaa">—</td></tr>';
+  }
+  const chTableHtml = (rows) => `<table style="width:100%"><thead><tr><th>Date</th><th>Distributor</th><th>Price</th></tr></thead><tbody>${rows.map(chRow).join('')}</tbody></table>`;
+
   html += `<div style="display:flex;align-items:center;justify-content:space-between;margin:12px 0 4px">
     <div class="section-title" style="margin:0">Cheapest Price History</div>
-    <button onclick="openSticPurgeDatesModal(${info.product_id})"
-      style="padding:3px 10px;font-size:11px;background:#A4262C;color:#fff;border:none;border-radius:2px;cursor:pointer"
-      title="Delete bad data for one or more days">🗑 Purge Days</button>
+    <div style="display:flex;gap:6px">
+      <button onclick="openCheapestHistoryModal(${info.product_id})"
+        style="padding:3px 10px;font-size:11px;background:#0078D4;color:#fff;border:none;border-radius:2px;cursor:pointer"
+        title="View full price history">📋 All History</button>
+      <button onclick="openSticPurgeDatesModal(${info.product_id})"
+        style="padding:3px 10px;font-size:11px;background:#A4262C;color:#fff;border:none;border-radius:2px;cursor:pointer"
+        title="Delete bad data for one or more days">🗑 Purge Days</button>
+    </div>
   </div>
-  <div class="tbl-wrap"><table><thead><tr><th>Date</th><th>Distributor</th><th>Price</th></tr></thead><tbody>`;
-  cheapest_history.forEach(r => {
-    html += `<tr><td>${fmtDate(r.date)}</td><td>${r.distributor}</td><td>${r.price ? '£'+r.price.toFixed(2) : '—'}</td></tr>`;
-  });
-  html += '</tbody></table></div>';
+  <div style="display:flex;gap:12px">
+    <div style="flex:1;min-width:0">${chTableHtml(ch_left)}</div>
+    <div style="flex:1;min-width:0">${ch_right.length ? chTableHtml(ch_right) : ''}</div>
+  </div>`;
 
   el.innerHTML = html;
   makeSortableAll(el);
@@ -4038,6 +4053,42 @@ function confirmPurgeDates() {
     const back = document.getElementById('ret-sku-back').dataset.back || 'overview';
     loadRetSku(_pdm.product_id, back);
   }).catch(() => alert('Purge failed — check connection.'));
+}
+
+// ── Cheapest history modal ─────────────────────────────────────────────────────
+let _cheapestHistoryCache = null;
+function openCheapestHistoryModal(productId) {
+  // Reuse cached data if available (already loaded on SKU page)
+  const allHistory = _cheapestHistoryCache || [];
+  const sorted = [...allHistory].sort((a,b) => b.date.localeCompare(a.date));
+  let rows = sorted.map(r =>
+    `<tr><td>${fmtDate(r.date)}</td><td>${r.distributor}</td><td>${r.price ? '£'+r.price.toFixed(2) : '—'}</td></tr>`
+  ).join('');
+
+  // Build modal
+  let modal = document.getElementById('cheapest-hist-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'cheapest-hist-modal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center';
+    modal.innerHTML = `<div style="background:#fff;border-radius:4px;padding:20px;width:480px;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.2)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <strong>Full Cheapest Price History</strong>
+        <button onclick="document.getElementById('cheapest-hist-modal').remove()"
+          style="background:none;border:none;font-size:18px;cursor:pointer;color:#666">✕</button>
+      </div>
+      <div id="cheapest-hist-modal-body" style="overflow-y:auto;flex:1">
+        <table style="width:100%"><thead><tr><th>Date</th><th>Distributor</th><th>Price</th></tr></thead>
+        <tbody id="cheapest-hist-modal-rows"></tbody></table>
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:#888;text-align:right" id="cheapest-hist-modal-count"></div>
+    </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  }
+  document.getElementById('cheapest-hist-modal-rows').innerHTML = rows;
+  document.getElementById('cheapest-hist-modal-count').textContent = `${sorted.length} days total`;
+  document.getElementById('cheapest-hist-modal').style.display = 'flex';
 }
 
 // ── STIC purge (selected days) ────────────────────────────────────────────────
