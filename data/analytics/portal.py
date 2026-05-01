@@ -738,6 +738,38 @@ HTML = r"""<!DOCTYPE html>
   </div>
 </div>
 
+<!-- Price History Edit modal -->
+<div class="modal-backdrop" id="price-edit-modal" onclick="if(event.target===this)_closePriceEditModal()" style="display:none">
+  <div class="modal" style="width:720px;max-height:85vh;display:flex;flex-direction:column">
+    <div class="modal-header">
+      <h3 id="price-edit-modal-title">Edit Price History</h3>
+      <button class="modal-close" onclick="_closePriceEditModal()">✕</button>
+    </div>
+    <div class="modal-body" style="padding:16px 20px;overflow-y:auto;flex:1">
+      <div id="price-edit-controls" style="display:flex;gap:8px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
+        <select id="pe-new-date" style="padding:4px 8px;font-size:12px;border:1px solid #C8C6C4;border-radius:2px"></select>
+        <select id="pe-new-dist" style="padding:4px 8px;font-size:12px;border:1px solid #C8C6C4;border-radius:2px">
+          <option value="VIP">VIP</option>
+          <option value="Ingram Micro">Ingram Micro</option>
+          <option value="M2M Direct">M2M Direct</option>
+          <option value="TD Synnex">TD Synnex</option>
+          <option value="Target">Target</option>
+          <option value="Westcoast">Westcoast</option>
+        </select>
+        <input id="pe-new-price" type="number" step="0.01" min="0" placeholder="Price" style="width:90px;padding:4px 8px;font-size:12px;border:1px solid #C8C6C4;border-radius:2px">
+        <input id="pe-new-qty" type="number" min="0" placeholder="Qty" style="width:70px;padding:4px 8px;font-size:12px;border:1px solid #C8C6C4;border-radius:2px">
+        <button onclick="_peAddRow()" style="padding:4px 12px;background:#107C10;color:#fff;border:none;border-radius:2px;font-size:12px;cursor:pointer">+ Add Row</button>
+        <span style="margin-left:auto;font-size:11px;color:#605E5C" id="pe-change-count"></span>
+      </div>
+      <div id="price-edit-table-wrap"></div>
+    </div>
+    <div class="edit-footer">
+      <button onclick="_closePriceEditModal()" style="padding:6px 16px;border:1px solid #C8C6C4;background:#fff;border-radius:2px;font-size:13px;cursor:pointer">Cancel</button>
+      <button onclick="_savePriceEdits()" style="padding:6px 16px;background:#0078D4;color:#fff;border:none;border-radius:2px;font-size:13px;cursor:pointer;font-weight:600">Save Changes</button>
+    </div>
+  </div>
+</div>
+
 <!-- Info modal -->
 <div class="modal-backdrop" id="info-modal" onclick="if(event.target===this)closeHelp()">
   <div class="modal">
@@ -866,10 +898,32 @@ HTML = r"""<!DOCTYPE html>
         </div>
       </div>
 
+      <div style="margin:16px 0 12px;border-top:1px solid #EDEBE9;padding-top:14px">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#605E5C;margin-bottom:12px">Scraper &amp; Status</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
+          <div class="edit-field" style="grid-column:1/-1">
+            <label>STIC URL</label>
+            <input type="text" id="ep-stic-url" placeholder="https://www.stockinthechannel.co.uk/Product/...">
+          </div>
+          <div class="edit-field" style="grid-column:1/-1">
+            <label>Notes</label>
+            <textarea id="ep-notes" rows="2" style="width:100%;padding:5px 8px;font-size:12px;border:1px solid #C8C6C4;border-radius:2px;font-family:inherit;resize:vertical" placeholder="Internal notes…"></textarea>
+          </div>
+          <div class="edit-field">
+            <label>EOL</label>
+            <select id="ep-eol">
+              <option value="0">Active</option>
+              <option value="1">End of Life</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
       <div id="ep-msg" class="edit-msg"></div>
     </div>
     <div class="edit-footer">
       <button onclick="_closeEditModal()" style="padding:6px 16px;border:1px solid #C8C6C4;background:#fff;border-radius:2px;font-size:13px;cursor:pointer">Cancel</button>
+      <button onclick="_openPriceEditModal(document.getElementById('ep-product-id').value)" style="padding:6px 16px;border:1px solid #0078D4;color:#0078D4;background:#fff;border-radius:2px;font-size:13px;cursor:pointer;margin-right:auto">✏️ Price History</button>
       <button onclick="_saveProduct()" style="padding:6px 16px;background:#0078D4;color:#fff;border:none;border-radius:2px;font-size:13px;cursor:pointer;font-weight:600">Save</button>
     </div>
   </div>
@@ -1833,6 +1887,9 @@ function _openProductEdit(productId, focusMsrp, focusFieldId) {
       document.getElementById('ep-box-url').value       = p.box_url      || '';
       document.getElementById('ep-msg').textContent     = '';
       document.getElementById('edit-modal-title').textContent = `Edit Product — ${p.product_id}`;
+      document.getElementById('ep-stic-url').value = p.stic_url || '';
+      document.getElementById('ep-notes').value    = p.notes    || '';
+      document.getElementById('ep-eol').value      = p.eol ? '1' : '0';
 
       // Highlight the appropriate field
       const targetId = focusFieldId || (focusMsrp ? 'ep-msrp' : 'ep-model-no');
@@ -1845,6 +1902,134 @@ function _openProductEdit(productId, focusMsrp, focusFieldId) {
         f.focus(); if (f.select) f.select();
       }, 80);
     });
+}
+
+// ── Price History Edit Modal ───────────────────────────────────────────────────
+let _peProductId = null;
+let _peRows = [];      // {rowid, date, distributor, price, qty, _action: 'existing'|'new'|'deleted'}
+let _peNextTmp = -1;   // temp IDs for new rows
+
+function _openPriceEditModal(productId) {
+  _peProductId = productId;
+  document.getElementById('price-edit-modal-title').textContent = `Edit Price History — Product ${productId}`;
+  document.getElementById('price-edit-table-wrap').innerHTML = '<div class="spinner">Loading…</div>';
+  document.getElementById('price-edit-modal').style.display = 'flex';
+  fetch(`/api/catalogue/product/${productId}/stic-prices`)
+    .then(r => r.json()).then(data => {
+      _peRows = data.map(r => ({...r, _action: 'existing'}));
+      // Populate date dropdown with existing dates
+      const dates = [...new Set(_peRows.map(r => r.date))].sort().reverse();
+      const dateSel = document.getElementById('pe-new-date');
+      dateSel.innerHTML = dates.map(d => `<option value="${d}">${d}</option>`).join('');
+      _peRender();
+    });
+}
+
+function _closePriceEditModal() {
+  document.getElementById('price-edit-modal').style.display = 'none';
+  _peRows = [];
+  _peProductId = null;
+}
+
+function _peRender() {
+  const visible = _peRows.filter(r => r._action !== 'deleted');
+  const changed = _peRows.filter(r => r._action !== 'existing').length;
+  document.getElementById('pe-change-count').textContent = changed ? `${changed} unsaved change${changed>1?'s':''}` : '';
+
+  // Group by date for display
+  const byDate = {};
+  visible.forEach(r => {
+    if (!byDate[r.date]) byDate[r.date] = [];
+    byDate[r.date].push(r);
+  });
+  const dates = Object.keys(byDate).sort().reverse();
+
+  let html = '';
+  dates.forEach(dt => {
+    html += `<div style="margin-bottom:14px">
+      <div style="font-size:11px;font-weight:700;color:#605E5C;margin-bottom:4px;padding:4px 8px;background:#F3F2F1;border-radius:2px">${dt}</div>
+      <table style="width:100%"><thead><tr><th>Distributor</th><th>Price (£)</th><th>Stock</th><th></th></tr></thead><tbody>`;
+    byDate[dt].forEach(r => {
+      const isNew = r._action === 'new';
+      const rowStyle = isNew ? 'background:#f0fff0' : '';
+      html += `<tr style="${rowStyle}" data-rowid="${r.rowid}">
+        <td style="padding:3px 4px">${r.distributor}</td>
+        <td style="padding:3px 4px"><input type="number" step="0.01" min="0" value="${r.price !== null ? r.price : ''}" placeholder="—"
+          style="width:90px;padding:3px 6px;font-size:12px;border:1px solid #C8C6C4;border-radius:2px"
+          onchange="_peFieldChange(${r.rowid},'price',this.value)"></td>
+        <td style="padding:3px 4px"><input type="number" min="0" value="${r.qty !== null ? r.qty : ''}" placeholder="—"
+          style="width:70px;padding:3px 6px;font-size:12px;border:1px solid #C8C6C4;border-radius:2px"
+          onchange="_peFieldChange(${r.rowid},'qty',this.value)"></td>
+        <td style="padding:3px 4px"><button onclick="_peDeleteRow(${r.rowid})"
+          style="padding:2px 8px;background:#fff;color:#D13438;border:1px solid #D13438;border-radius:2px;font-size:11px;cursor:pointer">✕</button></td>
+      </tr>`;
+    });
+    html += '</tbody></table></div>';
+  });
+  if (!html) html = '<div style="color:#A19F9D;padding:12px">No price data.</div>';
+  document.getElementById('price-edit-table-wrap').innerHTML = html;
+}
+
+function _peFieldChange(rowid, field, val) {
+  const row = _peRows.find(r => r.rowid === rowid);
+  if (!row) return;
+  row[field] = val === '' ? null : parseFloat(val);
+  if (row._action === 'existing') row._action = 'modified';
+  const changed = _peRows.filter(r => r._action !== 'existing').length;
+  document.getElementById('pe-change-count').textContent = changed ? `${changed} unsaved change${changed>1?'s':''}` : '';
+}
+
+function _peDeleteRow(rowid) {
+  const row = _peRows.find(r => r.rowid === rowid);
+  if (!row) return;
+  if (row._action === 'new') {
+    _peRows = _peRows.filter(r => r.rowid !== rowid);
+  } else {
+    row._action = 'deleted';
+  }
+  _peRender();
+}
+
+function _peAddRow() {
+  const date = document.getElementById('pe-new-date').value;
+  const distributor = document.getElementById('pe-new-dist').value;
+  const price = document.getElementById('pe-new-price').value;
+  const qty = document.getElementById('pe-new-qty').value;
+  if (!date || !distributor) { alert('Select a date and distributor'); return; }
+  // Check for duplicate
+  if (_peRows.find(r => r.date === date && r.distributor === distributor && r._action !== 'deleted')) {
+    alert(`${distributor} already has a row for ${date}`); return;
+  }
+  _peRows.push({
+    rowid: _peNextTmp--,
+    date, distributor,
+    price: price !== '' ? parseFloat(price) : null,
+    qty:   qty   !== '' ? parseInt(qty)     : null,
+    _action: 'new'
+  });
+  _peRender();
+}
+
+function _savePriceEdits() {
+  const ops = _peRows
+    .filter(r => r._action !== 'existing')
+    .map(r => ({
+      action:      r._action,
+      rowid:       r._action !== 'new' ? r.rowid : undefined,
+      date:        r.date,
+      distributor: r.distributor,
+      price:       r.price,
+      qty:         r.qty,
+    }));
+  if (!ops.length) { _closePriceEditModal(); return; }
+  fetch(`/api/catalogue/product/${_peProductId}/stic-prices`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ops})
+  }).then(r => r.json()).then(d => {
+    if (d.error) { alert('Save failed: ' + d.error); return; }
+    _closePriceEditModal();
+  }).catch(() => alert('Save failed — check connection.'));
 }
 
 function _closeEditModal() {
@@ -1875,6 +2060,9 @@ function _saveProduct() {
     awdit_url:     document.getElementById('ep-awdit-url').value.trim()   || null,
     ccl_url:       document.getElementById('ep-ccl-url').value.trim()     || null,
     box_url:       document.getElementById('ep-box-url').value.trim()     || null,
+    stic_url:      document.getElementById('ep-stic-url').value.trim()    || null,
+    notes:         document.getElementById('ep-notes').value.trim()       || null,
+    eol:           parseInt(document.getElementById('ep-eol').value),
   };
   const msg = document.getElementById('ep-msg');
   msg.style.color = '#605E5C';
@@ -6896,6 +7084,48 @@ def notes_set(product_id):
 
 # ── Catalogue API ─────────────────────────────────────────────────────────────
 
+@app.route("/api/catalogue/product/<int:product_id>/stic-prices", methods=["GET", "POST"])
+def catalogue_product_prices(product_id):
+    db = get_db()
+    if request.method == "GET":
+        rows = db.execute(
+            "SELECT rowid, date, distributor, price, qty FROM stic_prices "
+            "WHERE product_id=? ORDER BY date DESC, distributor",
+            (product_id,)
+        ).fetchall()
+        db.close()
+        return jsonify([dict(r) for r in rows])
+
+    # POST — apply ops: modified, deleted, new
+    data = request.get_json(silent=True) or {}
+    ops = data.get("ops", [])
+    try:
+        for op in ops:
+            action = op.get("action")
+            if action == "modified":
+                db.execute(
+                    "UPDATE stic_prices SET price=?, qty=? WHERE rowid=? AND product_id=?",
+                    (op.get("price"), op.get("qty"), op["rowid"], product_id)
+                )
+            elif action == "deleted":
+                db.execute(
+                    "DELETE FROM stic_prices WHERE rowid=? AND product_id=?",
+                    (op["rowid"], product_id)
+                )
+            elif action == "new":
+                db.execute(
+                    "INSERT INTO stic_prices (product_id, date, distributor, price, qty, model_no, manufacturer, product_group) "
+                    "SELECT ?, ?, ?, ?, ?, model_no, manufacturer, product_group FROM products WHERE product_id=?",
+                    (product_id, op["date"], op["distributor"], op.get("price"), op.get("qty"), product_id)
+                )
+        db.commit()
+        db.close()
+        return jsonify({"ok": True})
+    except Exception as e:
+        db.close()
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/catalogue/products")
 def catalogue_products():
     """Return all active products for the Catalogue Products view."""
@@ -7010,7 +7240,7 @@ def catalogue_product(product_id):
     if request.method == "GET":
         row = db.execute(
             "SELECT p.product_id, p.model_no, p.manufacturer, p.product_group, "
-            "p.description, p.chipset, p.ean, p.msrp, "
+            "p.description, p.chipset, p.ean, p.msrp, p.stic_url, p.eol, p.notes, "
             "r.amazon_asin, r.currys_sku, r.very_sku, r.very_url, r.argos_sku, "
             "r.ccl_url, r.awdit_url, r.scan_ln, r.scan_url, r.ocuk_code, r.box_url "
             "FROM products p "
@@ -7026,7 +7256,7 @@ def catalogue_product(product_id):
     data = request.get_json(silent=True) or {}
 
     # ── Update products table ──────────────────────────────────────────────────
-    product_fields = ["model_no", "manufacturer", "product_group", "description", "chipset", "ean", "msrp"]
+    product_fields = ["model_no", "manufacturer", "product_group", "description", "chipset", "ean", "msrp", "stic_url", "notes", "eol"]
     sets, params = [], []
     for field in product_fields:
         if field in data:
@@ -7046,6 +7276,8 @@ def catalogue_product(product_id):
             if field == "product_group" and val not in ("PROD_VIDEO", "PROD_MBRD", "PROD_MBRDS", "PROD_CPU", None, ""):
                 db.close()
                 return jsonify({"error": f"Invalid product_group: {val}"})
+            if field == "eol":
+                val = 1 if val else 0
             sets.append(f"{field} = ?")
             params.append(val)
 
