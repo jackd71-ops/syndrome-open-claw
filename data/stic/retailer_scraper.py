@@ -651,8 +651,11 @@ def load_products_needing_awdit():
     """Return list of {product_id, model_no, manufacturer, product_group, chipset} rows with no AWD-IT URL."""
     con  = sqlite3.connect(DB_PATH)
     rows = con.execute(
-        _needs_query("(r.awdit_url IS NULL OR r.awdit_url = '')",
-                     extra_cols="p.product_group, p.chipset")
+        _needs_query(
+            "(r.awdit_url IS NULL OR r.awdit_url = '') "
+            "AND (r.awdit_searched = 0 OR r.awdit_searched IS NULL)",
+            extra_cols="p.product_group, p.chipset"
+        )
     ).fetchall()
     con.close()
     return [{"product_id": str(r[0]), "model_no": r[1] or "", "manufacturer": r[2] or "",
@@ -666,7 +669,8 @@ def load_products_needing_scan_url():
     rows = con.execute(
         _needs_query(
             "r.scan_ln IS NOT NULL AND r.scan_ln != '' "
-            "AND (r.scan_url IS NULL OR r.scan_url = '')",
+            "AND (r.scan_url IS NULL OR r.scan_url = '') "
+            "AND (r.scan_searched = 0 OR r.scan_searched IS NULL)",
             extra_cols="r.scan_ln"
         )
     ).fetchall()
@@ -681,7 +685,8 @@ def load_products_needing_scan_url_by_model():
     rows = con.execute(
         _needs_query(
             "(r.scan_url IS NULL OR r.scan_url = '') "
-            "AND p.model_no IS NOT NULL AND p.model_no != ''"
+            "AND p.model_no IS NOT NULL AND p.model_no != '' "
+            "AND (r.scan_searched = 0 OR r.scan_searched IS NULL)"
         )
     ).fetchall()
     con.close()
@@ -695,7 +700,8 @@ def load_products_needing_very_url():
     rows = con.execute(
         _needs_query(
             "r.very_sku IS NOT NULL AND r.very_sku != '' "
-            "AND (r.very_url IS NULL OR r.very_url = '')",
+            "AND (r.very_url IS NULL OR r.very_url = '') "
+            "AND (r.very_searched = 0 OR r.very_searched IS NULL)",
             extra_cols="r.very_sku"
         )
     ).fetchall()
@@ -710,7 +716,8 @@ def load_products_needing_box_url():
     rows = con.execute(
         _needs_query(
             "(r.box_url IS NULL OR r.box_url = '') "
-            "AND p.model_no IS NOT NULL AND p.model_no != ''"
+            "AND p.model_no IS NOT NULL AND p.model_no != '' "
+            "AND (r.box_searched = 0 OR r.box_searched IS NULL)"
         )
     ).fetchall()
     con.close()
@@ -724,7 +731,8 @@ def load_products_needing_ccl_url():
     rows = con.execute(
         _needs_query(
             "(r.ccl_url IS NULL OR r.ccl_url = '') "
-            "AND p.model_no IS NOT NULL AND p.model_no != ''"
+            "AND p.model_no IS NOT NULL AND p.model_no != '' "
+            "AND (r.ccl_searched = 0 OR r.ccl_searched IS NULL)"
         )
     ).fetchall()
     con.close()
@@ -739,6 +747,19 @@ _URL_COL_MAP = {
     "Box URL":    "box_url",
     "CCL URL":    "ccl_url",
 }
+
+
+def _mark_searched(col, product_ids):
+    """Mark products as searched-not-found for a discovery column (e.g. 'scan_searched')."""
+    if not product_ids:
+        return
+    con = sqlite3.connect(DB_PATH)
+    for pid in product_ids:
+        con.execute("INSERT OR IGNORE INTO retailer_ids (product_id) VALUES (?)", (int(pid),))
+        con.execute(f"UPDATE retailer_ids SET {col}=1 WHERE product_id=?", (int(pid),))
+    con.commit()
+    con.close()
+    log(f"[Discovery] Marked {len(product_ids)} products as searched (no {col.replace('_searched','').upper()} URL found).")
 
 def _write_discovered_urls(col_name, id_to_url):
     """Write {product_id: url} into the retailer_ids DB table."""
@@ -998,6 +1019,8 @@ def discover_awdit_urls(page):
                 log(f"  - {p['model_no']}")
 
     log(f"[Discovery] AWD-IT: matched {len(matched)}/{len(needs)} new products.")
+    not_found_ids = [r["product_id"] for r in needs if r["product_id"] not in matched]
+    _mark_searched("awdit_searched", not_found_ids)
     return _write_discovered_urls("AWD-IT URL", matched)
 
 
@@ -1177,6 +1200,8 @@ def discover_scan_urls(page):
     log(f"[Discovery] Scan: found {len(found_urls)}/{len(needs)} URLs.")
     if failed:
         log(f"[Discovery] Scan: unresolved LN codes: {', '.join(failed[:20])}")
+    not_found_ids = [r["product_id"] for r in needs if r["product_id"] not in found_urls]
+    _mark_searched("scan_searched", not_found_ids)
     return _write_discovered_urls("Scan URL", found_urls)
 
 
@@ -1219,6 +1244,8 @@ def discover_scan_urls_by_model(page):
             time.sleep(random.uniform(3, 6))
 
     log(f"[Discovery] Scan (model): found {len(found_urls)}/{len(needs)} URLs.")
+    not_found_ids = [r["product_id"] for r in needs if r["product_id"] not in found_urls]
+    _mark_searched("scan_searched", not_found_ids)
     return _write_discovered_urls("Scan URL", found_urls)
 
 
@@ -1324,6 +1351,8 @@ def discover_very_urls(page):
     log(f"[Discovery] Very: found {len(found_urls)}/{len(needs)} URLs.")
     if failed:
         log(f"[Discovery] Very: unresolved SKUs: {', '.join(failed[:20])}")
+    not_found_ids = [r["product_id"] for r in needs if r["product_id"] not in found_urls]
+    _mark_searched("very_searched", not_found_ids)
     return _write_discovered_urls("Very URL", found_urls)
 
 
@@ -1578,6 +1607,8 @@ def discover_box_urls(page):
     log(f"[Discovery] Box: found {len(found_urls)}/{len(needs)} URLs.")
     if failed:
         log(f"[Discovery] Box: unresolved: {', '.join(f[:30] for f in failed[:20])}")
+    not_found_ids = [r["product_id"] for r in needs if r["product_id"] not in found_urls]
+    _mark_searched("box_searched", not_found_ids)
     return _write_discovered_urls("Box URL", found_urls)
 
 
@@ -1607,6 +1638,8 @@ def discover_ccl_urls(page):
     log(f"[Discovery] CCL: found {len(found_urls)}/{len(needs)} URLs.")
     if failed:
         log(f"[Discovery] CCL: unresolved: {', '.join(f[:30] for f in failed[:20])}")
+    not_found_ids = [r["product_id"] for r in needs if r["product_id"] not in found_urls]
+    _mark_searched("ccl_searched", not_found_ids)
     return _write_discovered_urls("CCL URL", found_urls)
 
 

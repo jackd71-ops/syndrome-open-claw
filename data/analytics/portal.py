@@ -172,6 +172,18 @@ def _init_products():
             db.execute(col_sql)
         except Exception:
             pass  # column already exists
+    # Migrate: one-attempt pre-flight searched flags
+    for col_sql in [
+        "ALTER TABLE retailer_ids ADD COLUMN awdit_searched INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE retailer_ids ADD COLUMN scan_searched  INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE retailer_ids ADD COLUMN very_searched  INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE retailer_ids ADD COLUMN box_searched   INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE retailer_ids ADD COLUMN ccl_searched   INTEGER NOT NULL DEFAULT 0",
+    ]:
+        try:
+            db.execute(col_sql)
+        except Exception:
+            pass
     db.commit()
     db.close()
 
@@ -629,6 +641,7 @@ HTML = r"""<!DOCTYPE html>
         <button class="sidebar-btn" onclick="loadRetReport('back_in_stock',this)">Back in Stock</button>
         <button class="sidebar-btn" onclick="loadRetReport('never_listed',this)">Never Listed</button>
         <button class="sidebar-btn" onclick="showRetAmazonOos(this)">Amazon OOS</button>
+        <button class="sidebar-btn" onclick="showRetMissing(this)">Retailer Missing</button>
       </div>
     </div>
     <div class="sidebar-section">
@@ -744,6 +757,63 @@ HTML = r"""<!DOCTYPE html>
       </div>
       <p style="font-size:12px;color:#A19F9D;margin:-4px 0 12px">Products where Amazon direct is not selling today. Includes rows where an FBA (3rd-party) seller has the buy box — Amazon themselves are OOS regardless. FBA price shown where captured.</p>
       <div class="tbl-wrap" id="ret-aoos-tbl"><div class="spinner">Loading…</div></div>
+    </div>
+    <!-- Retailer Missing report -->
+    <div class="content-section" id="ret-missing">
+      <button class="back-btn" onclick="showRetSection('overview')">← Back to Overview</button>
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap">
+        <h3 style="margin:0">Retailer Missing Results</h3>
+        <!-- Mode toggle -->
+        <div style="display:flex;border:1px solid #C8C6C4;border-radius:2px;overflow:hidden">
+          <button id="ret-miss-mode-ret" onclick="setRetMissMode('retailer')"
+            style="padding:4px 12px;border:none;cursor:pointer;font-size:12px;background:#0078D4;color:#fff">By Retailer</button>
+          <button id="ret-miss-mode-grp" onclick="setRetMissMode('group')"
+            style="padding:4px 12px;border:none;cursor:pointer;font-size:12px;background:#fff;color:#323130">By Manufacturer</button>
+        </div>
+      </div>
+
+      <!-- By Retailer mode -->
+      <div id="ret-miss-ret-panel">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+          <select id="ret-miss-retailer" onchange="loadRetMissingByRetailer()"
+            style="padding:4px 8px;border:1px solid #C8C6C4;border-radius:2px;font-size:13px">
+            <option value="">Select retailer…</option>
+            <option value="Amazon">Amazon</option>
+            <option value="Currys">Currys</option>
+            <option value="Very">Very</option>
+            <option value="Argos">Argos</option>
+            <option value="CCL Online">CCL Online</option>
+            <option value="AWD-IT">AWD-IT</option>
+            <option value="Scan">Scan</option>
+            <option value="Overclockers">Overclockers</option>
+            <option value="Box">Box</option>
+          </select>
+          <select id="ret-miss-status-filter" onchange="filterRetMissingByRetailer()"
+            style="padding:4px 8px;border:1px solid #C8C6C4;border-radius:2px;font-size:13px">
+            <option value="all">All missing</option>
+            <option value="unsearched">Not yet searched</option>
+            <option value="searched">Confirmed not stocked</option>
+          </select>
+          <span id="ret-miss-ret-count" style="font-size:12px;color:#A19F9D"></span>
+        </div>
+        <div class="tbl-wrap" id="ret-miss-ret-tbl"></div>
+      </div>
+
+      <!-- By Manufacturer mode -->
+      <div id="ret-miss-grp-panel" style="display:none">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+          <select id="ret-miss-mfr" onchange="loadRetMissingMfrGroups()"
+            style="padding:4px 8px;border:1px solid #C8C6C4;border-radius:2px;font-size:13px">
+            <option value="">Select manufacturer…</option>
+          </select>
+          <select id="ret-miss-grp" onchange="loadRetMissingByGroup()"
+            style="padding:4px 8px;border:1px solid #C8C6C4;border-radius:2px;font-size:13px;display:none">
+            <option value="">All groups</option>
+          </select>
+          <span id="ret-miss-grp-count" style="font-size:12px;color:#A19F9D"></span>
+        </div>
+        <div class="tbl-wrap" id="ret-miss-grp-tbl"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -4440,6 +4510,179 @@ function closeRetCovSku() {
   document.getElementById('ret-cov-sku-panel').style.display = 'none';
 }
 
+// ── Retailer Missing Results ──────────────────────────────────────────────────
+let _retMissMode    = 'retailer';
+let _retMissRetRows = [];
+let _retMissMfrsLoaded = false;
+
+function showRetMissing(btn) {
+  showRetSection('missing', btn);
+  if (!_retMissMfrsLoaded) {
+    fetch('/api/catalogue/manufacturers').then(r=>r.json()).then(mfrs => {
+      const sel = document.getElementById('ret-miss-mfr');
+      (mfrs || []).forEach(m => {
+        const o = document.createElement('option');
+        o.value = m; o.textContent = m; sel.appendChild(o);
+      });
+      _retMissMfrsLoaded = true;
+    }).catch(() => {});
+  }
+}
+
+function setRetMissMode(mode) {
+  _retMissMode = mode;
+  const isRet = mode === 'retailer';
+  document.getElementById('ret-miss-ret-panel').style.display = isRet ? '' : 'none';
+  document.getElementById('ret-miss-grp-panel').style.display = isRet ? 'none' : '';
+  document.getElementById('ret-miss-mode-ret').style.background = isRet ? '#0078D4' : '#fff';
+  document.getElementById('ret-miss-mode-ret').style.color      = isRet ? '#fff'    : '#323130';
+  document.getElementById('ret-miss-mode-grp').style.background = isRet ? '#fff'    : '#0078D4';
+  document.getElementById('ret-miss-mode-grp').style.color      = isRet ? '#323130' : '#fff';
+}
+
+// ── By Retailer mode ──
+function loadRetMissingByRetailer() {
+  const retailer = document.getElementById('ret-miss-retailer').value;
+  if (!retailer) return;
+  document.getElementById('ret-miss-ret-tbl').innerHTML = '<div class="spinner">Loading…</div>';
+  document.getElementById('ret-miss-ret-count').textContent = '';
+  fetch('/api/retailer/missing/by-retailer?retailer=' + encodeURIComponent(retailer))
+    .then(r=>r.json()).then(rows => {
+      _retMissRetRows = rows;
+      filterRetMissingByRetailer();
+    });
+}
+
+function filterRetMissingByRetailer() {
+  const filter = document.getElementById('ret-miss-status-filter').value;
+  let rows = _retMissRetRows;
+  if (filter === 'unsearched') rows = rows.filter(r => !r.searched);
+  if (filter === 'searched')   rows = rows.filter(r => r.searched  === 1);
+  document.getElementById('ret-miss-ret-count').textContent = rows.length + ' product' + (rows.length!==1?'s':'');
+  renderRetMissingByRetailer(rows);
+}
+
+const _DISCOVERY_RETAILERS = ['AWD-IT','Scan','Very','Box','CCL Online'];
+
+function renderRetMissingByRetailer(rows) {
+  const retailer = document.getElementById('ret-miss-retailer').value;
+  const canReset = _DISCOVERY_RETAILERS.includes(retailer);
+  if (!rows.length) {
+    document.getElementById('ret-miss-ret-tbl').innerHTML = '<p style="color:#107C10;padding:20px">✓ All products have a ' + retailer + ' URL/ID.</p>';
+    return;
+  }
+  let html = '<table><thead><tr><th>Product</th><th>Model</th><th>Manufacturer</th><th>Group</th><th>MSRP</th><th>Status</th><th></th></tr></thead><tbody>';
+  rows.forEach(r => {
+    const statusCell = r.searched === 1
+      ? '<span style="color:#A4262C">✗ Confirmed not stocked</span>'
+      : '<span style="color:#A19F9D">○ Not yet searched</span>';
+    const resetBtn = (canReset && r.searched === 1)
+      ? `<button onclick="event.stopPropagation();resetRetSearch(${r.product_id},'${retailer.replace(/'/g,"\\'")}',this)"
+           style="background:none;border:1px solid #C8C6C4;border-radius:2px;padding:2px 7px;cursor:pointer;font-size:11px"
+           title="Reset — pre-flight will try again next batch 1">↺ Reset</button>`
+      : '';
+    html += `<tr class="clickable" onclick="_openProductEdit(${r.product_id},false)" title="Click to edit retailer IDs">
+      <td>${r.product_id}</td>
+      <td>${r.model_no}</td>
+      <td>${r.manufacturer}</td>
+      <td>${_retGrpLbl(r.product_group)}</td>
+      <td>${r.msrp ? '£'+r.msrp.toFixed(2) : '—'}</td>
+      <td>${statusCell}</td>
+      <td>${resetBtn}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  const el = document.getElementById('ret-miss-ret-tbl');
+  el.innerHTML = html;
+  makeSortableAll(el);
+}
+
+function resetRetSearch(productId, retailer, btn) {
+  btn.disabled = true;
+  btn.textContent = '…';
+  fetch('/api/retailer/missing/reset-searched', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({product_id: productId, retailer: retailer})
+  }).then(r=>r.json()).then(d => {
+    if (d.ok) {
+      btn.textContent = '✓';
+      btn.style.color = '#107C10';
+      const td = btn.closest('tr').querySelector('td:nth-child(6)');
+      if (td) td.innerHTML = '<span style="color:#A19F9D">○ Queued for next batch 1</span>';
+    } else {
+      btn.textContent = '✗'; btn.disabled = false;
+    }
+  }).catch(() => { btn.textContent = '✗'; btn.disabled = false; });
+}
+
+// ── By Manufacturer mode ──
+function loadRetMissingMfrGroups() {
+  const mfr = document.getElementById('ret-miss-mfr').value;
+  if (!mfr) return;
+  const grpSel = document.getElementById('ret-miss-grp');
+  grpSel.innerHTML = '<option value="">All groups</option>';
+  grpSel.style.display = '';
+  fetch('/api/retailer/missing/by-group?mfr=' + encodeURIComponent(mfr))
+    .then(r=>r.json()).then(rows => {
+      const groups = [...new Set(rows.map(r=>r.product_group).filter(Boolean))].sort();
+      groups.forEach(g => {
+        const o = document.createElement('option');
+        o.value = g; o.textContent = _retGrpLbl(g); grpSel.appendChild(o);
+      });
+      renderRetMissingByGroup(rows);
+    });
+}
+
+function loadRetMissingByGroup() {
+  const mfr   = document.getElementById('ret-miss-mfr').value;
+  const group = document.getElementById('ret-miss-grp').value;
+  if (!mfr) return;
+  const url = '/api/retailer/missing/by-group?mfr=' + encodeURIComponent(mfr)
+    + (group ? '&group=' + encodeURIComponent(group) : '');
+  document.getElementById('ret-miss-grp-tbl').innerHTML = '<div class="spinner">Loading…</div>';
+  fetch(url).then(r=>r.json()).then(rows => renderRetMissingByGroup(rows));
+}
+
+function renderRetMissingByGroup(rows) {
+  document.getElementById('ret-miss-grp-count').textContent = rows.length + ' product' + (rows.length!==1?'s':'');
+  if (!rows.length) {
+    document.getElementById('ret-miss-grp-tbl').innerHTML = '<p style="color:#A19F9D;padding:20px">No products found.</p>';
+    return;
+  }
+  const cols = [
+    {key:'amazon_asin',  label:'Amazon',  disc:false},
+    {key:'currys_sku',   label:'Currys',  disc:false},
+    {key:'argos_sku',    label:'Argos',   disc:false},
+    {key:'scan_url',     label:'Scan',    disc:true,  sc:'scan_searched'},
+    {key:'awdit_url',    label:'AWD-IT',  disc:true,  sc:'awdit_searched'},
+    {key:'box_url',      label:'Box',     disc:true,  sc:'box_searched'},
+    {key:'ccl_url',      label:'CCL',     disc:true,  sc:'ccl_searched'},
+    {key:'very_url',     label:'Very',    disc:true,  sc:'very_searched'},
+    {key:'ocuk_code',    label:'OCUK',    disc:false},
+  ];
+  let html = '<table><thead><tr><th>Product</th><th>Model</th><th>Group</th><th>MSRP</th>'
+    + cols.map(c=>'<th>'+c.label+'</th>').join('') + '</tr></thead><tbody>';
+  rows.forEach(r => {
+    const cells = cols.map(c => {
+      const hasVal = r[c.key] && r[c.key] !== '';
+      if (hasVal) return '<span style="color:#107C10" title="'+r[c.key]+'">✓</span>';
+      if (c.disc && r[c.sc] === 1) return '<span style="color:#A4262C" title="Searched — not stocked">✗</span>';
+      return '<span style="color:#C8C6C4">—</span>';
+    }).join('</td><td>');
+    html += `<tr class="clickable" onclick="_openProductEdit(${r.product_id},false)" title="Click to edit retailer IDs">
+      <td>${r.product_id}</td><td>${r.model_no}</td>
+      <td>${_retGrpLbl(r.product_group)}</td>
+      <td>${r.msrp ? '£'+r.msrp.toFixed(2) : '—'}</td>
+      <td>${cells}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  const el = document.getElementById('ret-miss-grp-tbl');
+  el.innerHTML = html;
+  makeSortableAll(el);
+}
+
 // ── Amazon OOS report ─────────────────────────────────────────────────────────
 let _aaoosMfrsLoaded = false;
 
@@ -6272,6 +6515,90 @@ def retailer_purge():
     db.commit()
     db.close()
     return jsonify({"deleted_rows": deleted, "product_id": product_id, "retailer": retailer})
+
+
+# ── Retailer Missing Results ──────────────────────────────────────────────────
+DISCOVERY_SEARCHED_COL = {
+    "AWD-IT":    "awdit_searched",
+    "Scan":      "scan_searched",
+    "Very":      "very_searched",
+    "Box":       "box_searched",
+    "CCL Online":"ccl_searched",
+}
+
+
+@app.route("/api/retailer/missing/by-retailer")
+def retailer_missing_by_retailer():
+    retailer = request.args.get("retailer", "").strip()
+    if not retailer:
+        return jsonify([])
+    ret_entry = next(((c, u) for n, c, u in RETAILER_COVERAGE_MAP if n == retailer), None)
+    if not ret_entry:
+        return jsonify([])
+    col, _ = ret_entry
+    searched_col = DISCOVERY_SEARCHED_COL.get(retailer)
+    searched_sel = f"ri.{searched_col}" if searched_col else "NULL"
+    rows = qry(
+        f"""SELECT p.product_id, p.model_no, p.manufacturer, p.product_group, p.msrp,
+               {searched_sel} AS searched
+           FROM products p
+           LEFT JOIN retailer_ids ri ON ri.product_id = p.product_id
+           WHERE p.eol = 0
+             AND (ri.{col} IS NULL OR ri.{col} = '')
+           ORDER BY p.manufacturer, p.model_no"""
+    )
+    return jsonify(rows)
+
+
+@app.route("/api/retailer/missing/by-group")
+def retailer_missing_by_group():
+    mfr   = request.args.get("mfr",   "").strip()
+    group = request.args.get("group", "").strip()
+    if not mfr:
+        return jsonify([])
+    params = [mfr]
+    group_clause = ""
+    if group:
+        group_clause = "AND p.product_group = ?"
+        params.append(group)
+    rows = qry(
+        f"""SELECT p.product_id, p.model_no, p.manufacturer, p.product_group, p.msrp,
+               ri.amazon_asin, ri.currys_sku, ri.argos_sku, ri.very_url,
+               ri.scan_url,    ri.awdit_url,  ri.ccl_url,   ri.box_url,
+               ri.ocuk_code,
+               ri.awdit_searched, ri.scan_searched, ri.very_searched,
+               ri.box_searched,   ri.ccl_searched
+           FROM products p
+           LEFT JOIN retailer_ids ri ON ri.product_id = p.product_id
+           WHERE p.eol = 0 AND p.manufacturer = ?
+             {group_clause}
+           ORDER BY p.product_group, p.model_no""",
+        params
+    )
+    return jsonify(rows)
+
+
+@app.route("/api/retailer/missing/reset-searched", methods=["POST"])
+def retailer_missing_reset_searched():
+    data     = request.get_json() or {}
+    pid      = data.get("product_id")
+    retailer = data.get("retailer", "").strip()
+    if not pid or not retailer:
+        return jsonify({"ok": False, "error": "Missing product_id or retailer"}), 400
+    searched_col = DISCOVERY_SEARCHED_COL.get(retailer)
+    if not searched_col:
+        return jsonify({"ok": False, "error": f"No discovery for retailer {retailer}"}), 400
+    db = get_db()
+    db.execute(f"UPDATE retailer_ids SET {searched_col}=0 WHERE product_id=?", (int(pid),))
+    db.commit()
+    db.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/catalogue/manufacturers")
+def catalogue_manufacturers():
+    rows = qry("SELECT DISTINCT manufacturer FROM products WHERE eol=0 AND manufacturer IS NOT NULL ORDER BY manufacturer")
+    return jsonify([r["manufacturer"] for r in rows])
 
 
 @app.route("/api/retailer/report/<name>")
