@@ -778,6 +778,7 @@ HTML = r"""<!DOCTYPE html>
           <select id="ret-miss-retailer" onchange="loadRetMissingByRetailer()"
             style="padding:4px 8px;border:1px solid #C8C6C4;border-radius:2px;font-size:13px">
             <option value="">Select retailer…</option>
+            <option value="Amazon">Amazon</option>
             <option value="Scan">Scan</option>
             <option value="AWD-IT">AWD-IT</option>
             <option value="Box">Box</option>
@@ -4540,6 +4541,10 @@ function setRetMissMode(mode) {
 function loadRetMissingByRetailer() {
   const retailer = document.getElementById('ret-miss-retailer').value;
   if (!retailer) return;
+  // Status filter only applies to discovery retailers (has "searched" concept)
+  const filterEl = document.getElementById('ret-miss-status-filter');
+  filterEl.style.display = _DISCOVERY_RETAILERS.includes(retailer) ? '' : 'none';
+  filterEl.value = 'all';
   document.getElementById('ret-miss-ret-tbl').innerHTML = '<div class="spinner">Loading…</div>';
   document.getElementById('ret-miss-ret-count').textContent = '';
   fetch('/api/retailer/missing/by-retailer?retailer=' + encodeURIComponent(retailer))
@@ -4561,22 +4566,29 @@ function filterRetMissingByRetailer() {
 const _DISCOVERY_RETAILERS = ['AWD-IT','Scan','Very','Box','CCL Online'];
 
 function renderRetMissingByRetailer(rows) {
-  const retailer = document.getElementById('ret-miss-retailer').value;
-  const canReset = _DISCOVERY_RETAILERS.includes(retailer);
+  const retailer   = document.getElementById('ret-miss-retailer').value;
+  const isDisc     = _DISCOVERY_RETAILERS.includes(retailer);
+  const emptyMsg   = isDisc
+    ? '✓ All products have a ' + retailer + ' URL.'
+    : '✓ All products with an ASIN/ID scraped successfully on the latest date.';
   if (!rows.length) {
-    document.getElementById('ret-miss-ret-tbl').innerHTML = '<p style="color:#107C10;padding:20px">✓ All products have a ' + retailer + ' URL/ID.</p>';
+    document.getElementById('ret-miss-ret-tbl').innerHTML = '<p style="color:#107C10;padding:20px">' + emptyMsg + '</p>';
     return;
   }
   let html = '<table><thead><tr><th>Product</th><th>Model</th><th>Manufacturer</th><th>Group</th><th>MSRP</th><th>Status</th><th></th></tr></thead><tbody>';
   rows.forEach(r => {
-    const statusCell = r.searched === 1
-      ? '<span style="color:#A4262C">✗ Confirmed not stocked</span>'
-      : '<span style="color:#A19F9D">○ Not yet searched</span>';
-    const resetBtn = (canReset && r.searched === 1)
-      ? `<button onclick="event.stopPropagation();resetRetSearch(${r.product_id},'${retailer.replace(/'/g,"\\'")}',this)"
+    let statusCell, resetBtn = '';
+    if (r.scrape_missing) {
+      // Non-discovery retailer: has ID but scraper got no result on latest date
+      statusCell = '<span style="color:#D29200">⚠ Has ASIN — no scrape result on latest date</span>';
+    } else if (r.searched === 1) {
+      statusCell = '<span style="color:#A4262C">✗ Confirmed not stocked</span>';
+      resetBtn   = `<button onclick="event.stopPropagation();resetRetSearch(${r.product_id},'${retailer.replace(/'/g,"\\'")}',this)"
            style="background:none;border:1px solid #C8C6C4;border-radius:2px;padding:2px 7px;cursor:pointer;font-size:11px"
-           title="Reset — pre-flight will try again next batch 1">↺ Reset</button>`
-      : '';
+           title="Reset — pre-flight will try again next batch 1">↺ Reset</button>`;
+    } else {
+      statusCell = '<span style="color:#A19F9D">○ Not yet searched</span>';
+    }
     html += `<tr class="clickable" onclick="_openProductEdit(${r.product_id},false)" title="Click to edit retailer IDs">
       <td>${r.product_id}</td>
       <td>${r.model_no}</td>
@@ -6528,24 +6540,46 @@ def retailer_missing_by_retailer():
     retailer = request.args.get("retailer", "").strip()
     if not retailer:
         return jsonify([])
-    # Only discovery retailers are meaningful here — non-discovery retailers
-    # (Amazon, Currys, Argos, Overclockers) have manually-set IDs; no ID ≠ missing
+
     searched_col = DISCOVERY_SEARCHED_COL.get(retailer)
-    if not searched_col:
-        return jsonify({"error": "Not a discovery retailer"}), 400
-    ret_entry = next(((c, u) for n, c, u in RETAILER_COVERAGE_MAP if n == retailer), None)
+    ret_entry    = next(((c, u) for n, c, u in RETAILER_COVERAGE_MAP if n == retailer), None)
     if not ret_entry:
         return jsonify([])
     col, _ = ret_entry
-    rows = qry(
-        f"""SELECT p.product_id, p.model_no, p.manufacturer, p.product_group, p.msrp,
-               ri.{searched_col} AS searched
-           FROM products p
-           LEFT JOIN retailer_ids ri ON ri.product_id = p.product_id
-           WHERE p.eol = 0
-             AND (ri.{col} IS NULL OR ri.{col} = '')
-           ORDER BY p.manufacturer, p.model_no"""
-    )
+
+    if searched_col:
+        # Discovery retailer — products with no URL yet (never searched or searched+not found)
+        rows = qry(
+            f"""SELECT p.product_id, p.model_no, p.manufacturer, p.product_group, p.msrp,
+                   ri.{searched_col} AS searched,
+                   NULL             AS scrape_missing
+               FROM products p
+               LEFT JOIN retailer_ids ri ON ri.product_id = p.product_id
+               WHERE p.eol = 0
+                 AND (ri.{col} IS NULL OR ri.{col} = '')
+               ORDER BY p.manufacturer, p.model_no"""
+        )
+    else:
+        # Non-discovery retailer (e.g. Amazon) — only show products that HAVE an ID
+        # but produced no row in retailer_prices on the latest date (scrape failure)
+        latest = latest_date("retailer_prices")
+        if not latest:
+            return jsonify([])
+        rows = qry(
+            f"""SELECT p.product_id, p.model_no, p.manufacturer, p.product_group, p.msrp,
+                   NULL AS searched,
+                   1    AS scrape_missing
+               FROM products p
+               JOIN retailer_ids ri ON ri.product_id = p.product_id
+               WHERE p.eol = 0
+                 AND ri.{col} IS NOT NULL AND ri.{col} != ''
+                 AND p.product_id NOT IN (
+                     SELECT product_id FROM retailer_prices
+                     WHERE date = ? AND retailer = ?
+                 )
+               ORDER BY p.manufacturer, p.model_no""",
+            (latest, retailer)
+        )
     return jsonify(rows)
 
 
