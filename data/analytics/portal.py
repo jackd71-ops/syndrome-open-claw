@@ -74,6 +74,20 @@ def latest_date_for_group(group_filter):
             return date
     return counts[0][0]  # fallback: most recent regardless
 
+# Maps retailer name → (retailer_ids column, url builder)
+# Used by the coverage report to compute linked counts and build SKU links
+RETAILER_COVERAGE_MAP = [
+    ("Amazon",       "amazon_asin",  lambda v: f"https://www.amazon.co.uk/dp/{v}"),
+    ("Currys",       "currys_sku",   lambda v: f"https://www.currys.co.uk/search?q={v}"),
+    ("Very",         "very_url",     lambda v: v),
+    ("Argos",        "argos_sku",    lambda v: f"https://www.argos.co.uk/product/{str(v).replace(' ','%20')}/"),
+    ("CCL Online",   "ccl_url",      lambda v: v),
+    ("AWD-IT",       "awdit_url",    lambda v: v),
+    ("Scan",         "scan_url",     lambda v: v),
+    ("Overclockers", "ocuk_code",    lambda v: f"https://www.overclockers.co.uk/?query={v}"),
+    ("Box",          "box_url",      lambda v: v),
+]
+
 # All scrape groups — (manufacturer, product_group, label)
 # manufacturer=None means no manufacturer filter (e.g. Server/Pro)
 SCRAPE_GROUPS = [
@@ -603,6 +617,7 @@ HTML = r"""<!DOCTYPE html>
       <div class="sidebar-items">
         <button class="sidebar-btn active" id="ret-btn-overview" onclick="showRetSection('overview',this)">Daily Overview</button>
         <button class="sidebar-btn" onclick="showRetSection('search',this)">Search SKUs</button>
+        <button class="sidebar-btn" onclick="showRetCoverage(this)">Scraper Coverage</button>
       </div>
     </div>
     <div class="sidebar-section">
@@ -679,6 +694,42 @@ HTML = r"""<!DOCTYPE html>
     <div class="content-section" id="ret-report">
       <button class="back-btn" onclick="showRetSection('overview')">← Back to Overview</button>
       <div id="ret-report-content"><div class="spinner">Loading…</div></div>
+    </div>
+    <!-- Scraper Coverage report -->
+    <div class="content-section" id="ret-coverage">
+      <button class="back-btn" onclick="showRetSection('overview')">← Back to Overview</button>
+      <div class="section-title" style="margin-bottom:12px">Scraper Coverage</div>
+      <!-- Retailer buttons rendered here -->
+      <div id="ret-cov-retailers" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px"></div>
+      <!-- Manufacturer drill -->
+      <div id="ret-cov-mfr-panel" style="display:none;margin-top:4px">
+        <div class="drill-header">
+          <span id="ret-cov-mfr-title" class="section-title" style="margin:0"></span>
+          <button class="drill-close" onclick="closeRetCovMfr()">✕ Close</button>
+        </div>
+        <div class="tbl-wrap" id="ret-cov-mfr-tbl"></div>
+      </div>
+      <!-- Group drill -->
+      <div id="ret-cov-grp-panel" style="display:none;margin-top:4px">
+        <div class="drill-header">
+          <span id="ret-cov-grp-title" class="section-title" style="margin:0"></span>
+          <button class="drill-close" onclick="closeRetCovGrp()">✕ Close</button>
+        </div>
+        <div class="tbl-wrap" id="ret-cov-grp-tbl"></div>
+      </div>
+      <!-- SKU drill -->
+      <div id="ret-cov-sku-panel" style="display:none;margin-top:4px">
+        <div class="drill-header">
+          <span id="ret-cov-sku-title" class="section-title" style="margin:0"></span>
+          <div style="display:flex;align-items:center;gap:12px">
+            <label style="font-size:12px;cursor:pointer">
+              <input type="checkbox" id="ret-cov-sku-filter" onchange="filterRetCovSkus()"> Unscraped only
+            </label>
+            <button class="drill-close" onclick="closeRetCovSku()">✕ Close</button>
+          </div>
+        </div>
+        <div class="tbl-wrap" id="ret-cov-sku-tbl"></div>
+      </div>
     </div>
     <!-- Amazon OOS report -->
     <div class="content-section" id="ret-amazon-oos">
@@ -4225,6 +4276,170 @@ function closeRetDailySkuDrill() {
   document.querySelectorAll('#ret-daily-group-tbl tr.row-selected').forEach(r => r.classList.remove('row-selected'));
 }
 
+// ── Scraper Coverage report ───────────────────────────────────────────────────
+let _covRetailer = null;
+let _covMfr      = null;
+let _covGroup    = null;
+
+function showRetCoverage(btn) {
+  showRetSection('coverage', btn);
+  loadRetCovRetailers();
+}
+
+function loadRetCovRetailers() {
+  const el = document.getElementById('ret-cov-retailers');
+  el.innerHTML = '<div class="spinner">Loading…</div>';
+  fetch('/api/retailer/coverage').then(r=>r.json()).then(rows => {
+    if (!rows.length) { el.innerHTML = '<p style="color:#A19F9D">No data</p>'; return; }
+    el.innerHTML = '';
+    rows.forEach(r => {
+      const pct  = r.linked ? Math.round(r.scraped / r.linked * 100) : 0;
+      const col  = pct >= 90 ? '#107C10' : pct >= 60 ? '#D29200' : '#A4262C';
+      const btn  = document.createElement('button');
+      btn.style.cssText = 'padding:10px 16px;border:1px solid #C8C6C4;border-radius:4px;cursor:pointer;background:#fff;text-align:left;min-width:130px';
+      btn.innerHTML = `<div style="font-weight:600;font-size:13px">${r.retailer}</div>
+        <div style="font-size:11px;color:#605E5C;margin-top:2px">${r.scraped}/${r.linked} SKUs</div>
+        <div style="font-size:12px;color:${col};font-weight:600">${pct}%</div>`;
+      btn.onclick = () => {
+        document.querySelectorAll('#ret-cov-retailers button').forEach(b => b.style.background='#fff');
+        btn.style.background = '#EFF6FC';
+        loadRetCovMfr(r.retailer);
+      };
+      el.appendChild(btn);
+    });
+    if (_covRetailer) loadRetCovMfr(_covRetailer);
+  });
+}
+
+function loadRetCovMfr(retailer) {
+  _covRetailer = retailer;
+  _covMfr = null; _covGroup = null;
+  document.getElementById('ret-cov-mfr-panel').style.display = 'block';
+  document.getElementById('ret-cov-grp-panel').style.display = 'none';
+  document.getElementById('ret-cov-sku-panel').style.display = 'none';
+  document.getElementById('ret-cov-mfr-title').textContent   = retailer + ' — by Manufacturer';
+  document.getElementById('ret-cov-mfr-tbl').innerHTML       = '<div class="spinner">Loading…</div>';
+  fetch('/api/retailer/coverage/manufacturers?retailer=' + encodeURIComponent(retailer))
+    .then(r=>r.json()).then(rows => {
+      if (!rows.length) { document.getElementById('ret-cov-mfr-tbl').innerHTML = '<p style="color:#A19F9D;padding:20px">No data</p>'; return; }
+      let html = '<table><thead><tr><th>Manufacturer</th><th>Linked</th><th>Scraped Today</th><th>Coverage</th></tr></thead><tbody>';
+      rows.forEach(r => {
+        const pct = r.linked ? Math.round(r.scraped/r.linked*100) : 0;
+        const col = pct>=90?'#107C10':pct>=60?'#D29200':'#A4262C';
+        html += `<tr class="clickable" onclick="loadRetCovGrp('${retailer.replace(/'/g,"\\'")}','${r.manufacturer.replace(/'/g,"\\'")}')">
+          <td>${r.manufacturer}</td><td>${r.linked}</td>
+          <td>${r.scraped}</td>
+          <td><span style="color:${col};font-weight:600">${pct}%</span> <span style="color:#A19F9D;font-size:11px">(${r.scraped}/${r.linked})</span></td>
+        </tr>`;
+      });
+      html += '</tbody></table>';
+      const el = document.getElementById('ret-cov-mfr-tbl');
+      el.innerHTML = html;
+      makeSortableAll(el);
+      if (_covMfr) loadRetCovGrp(retailer, _covMfr);
+    });
+}
+
+function loadRetCovGrp(retailer, mfr) {
+  _covMfr = mfr;
+  _covGroup = null;
+  document.getElementById('ret-cov-grp-panel').style.display = 'block';
+  document.getElementById('ret-cov-sku-panel').style.display = 'none';
+  document.getElementById('ret-cov-grp-title').textContent   = retailer + ' — ' + mfr + ' — Product Groups';
+  document.getElementById('ret-cov-grp-tbl').innerHTML       = '<div class="spinner">Loading…</div>';
+  fetch('/api/retailer/coverage/groups?retailer=' + encodeURIComponent(retailer) + '&mfr=' + encodeURIComponent(mfr))
+    .then(r=>r.json()).then(rows => {
+      if (!rows.length) { document.getElementById('ret-cov-grp-tbl').innerHTML = '<p style="color:#A19F9D;padding:20px">No data</p>'; return; }
+      let html = '<table><thead><tr><th>Product Group</th><th>Linked</th><th>Scraped Today</th><th>Coverage</th></tr></thead><tbody>';
+      rows.forEach(r => {
+        const pct  = r.linked ? Math.round(r.scraped/r.linked*100) : 0;
+        const col  = pct>=90?'#107C10':pct>=60?'#D29200':'#A4262C';
+        const lbl  = _retGrpLbl(r.product_group);
+        html += `<tr class="clickable" onclick="loadRetCovSkus('${retailer.replace(/'/g,"\\'")}','${mfr.replace(/'/g,"\\'")}','${r.product_group}')">
+          <td>${lbl}</td><td>${r.linked}</td>
+          <td>${r.scraped}</td>
+          <td><span style="color:${col};font-weight:600">${pct}%</span> <span style="color:#A19F9D;font-size:11px">(${r.scraped}/${r.linked})</span></td>
+        </tr>`;
+      });
+      html += '</tbody></table>';
+      const el = document.getElementById('ret-cov-grp-tbl');
+      el.innerHTML = html;
+      makeSortableAll(el);
+      if (_covGroup) loadRetCovSkus(retailer, mfr, _covGroup);
+    });
+}
+
+let _covSkuRows = [];
+
+function loadRetCovSkus(retailer, mfr, group) {
+  _covGroup = group;
+  document.getElementById('ret-cov-sku-panel').style.display = 'block';
+  document.getElementById('ret-cov-sku-title').textContent   = retailer + ' — ' + mfr + ' ' + _retGrpLbl(group) + ' — SKUs';
+  document.getElementById('ret-cov-sku-filter').checked = false;
+  document.getElementById('ret-cov-sku-tbl').innerHTML = '<div class="spinner">Loading…</div>';
+  fetch('/api/retailer/coverage/skus?retailer=' + encodeURIComponent(retailer) + '&mfr=' + encodeURIComponent(mfr) + '&group=' + encodeURIComponent(group))
+    .then(r=>r.json()).then(rows => {
+      _covSkuRows = rows;
+      renderRetCovSkus(rows);
+    });
+}
+
+function renderRetCovSkus(rows) {
+  if (!rows.length) {
+    document.getElementById('ret-cov-sku-tbl').innerHTML = '<p style="color:#A19F9D;padding:20px">No SKUs</p>';
+    return;
+  }
+  let html = '<table><thead><tr><th>Product</th><th>Model</th><th>Description</th><th>MSRP</th><th>Status</th><th>Price</th><th>Link</th></tr></thead><tbody>';
+  rows.forEach(r => {
+    const scraped   = r.scraped_today === 1;
+    const rowBg     = scraped ? '' : 'background:#FFF4F4';
+    const statusCell = scraped
+      ? '<span style="color:#107C10">✓ Scraped</span>'
+      : '<span style="color:#A4262C;font-weight:600">✗ Not scraped</span>';
+    const priceCell  = r.price != null ? '£'+r.price.toFixed(2) : (scraped ? '<span style="color:#A19F9D">OOS</span>' : '—');
+    const linkCell   = r.url
+      ? `<button onclick="event.stopPropagation();window.open('${r.url.replace(/'/g,"\\'")}','_blank')"
+           style="background:none;border:1px solid #C8C6C4;border-radius:2px;padding:2px 7px;cursor:pointer;font-size:11px;color:#0078D4"
+           title="Open ${_covRetailer} listing">🔗 Open</button>`
+      : '<span style="color:#A19F9D">—</span>';
+    html += `<tr style="${rowBg};cursor:pointer" onclick="loadRetSku(${r.product_id},'coverage')">
+      <td>${r.product_id}</td>
+      <td>${r.model_no}</td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.description||''}">${r.description||'—'}</td>
+      <td>${r.msrp ? '£'+r.msrp.toFixed(2) : '—'}</td>
+      <td>${statusCell}</td>
+      <td>${priceCell}</td>
+      <td>${linkCell}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  const el = document.getElementById('ret-cov-sku-tbl');
+  el.innerHTML = html;
+  makeSortableAll(el);
+}
+
+function filterRetCovSkus() {
+  const onlyUnscraped = document.getElementById('ret-cov-sku-filter').checked;
+  const filtered = onlyUnscraped ? _covSkuRows.filter(r => r.scraped_today !== 1) : _covSkuRows;
+  renderRetCovSkus(filtered);
+}
+
+function closeRetCovMfr() {
+  _covRetailer = null; _covMfr = null; _covGroup = null;
+  document.getElementById('ret-cov-mfr-panel').style.display = 'none';
+  document.getElementById('ret-cov-grp-panel').style.display = 'none';
+  document.getElementById('ret-cov-sku-panel').style.display = 'none';
+}
+function closeRetCovGrp() {
+  _covMfr = null; _covGroup = null;
+  document.getElementById('ret-cov-grp-panel').style.display = 'none';
+  document.getElementById('ret-cov-sku-panel').style.display = 'none';
+}
+function closeRetCovSku() {
+  _covGroup = null;
+  document.getElementById('ret-cov-sku-panel').style.display = 'none';
+}
+
 // ── Amazon OOS report ─────────────────────────────────────────────────────────
 let _aaoosMfrsLoaded = false;
 
@@ -5672,6 +5887,103 @@ def retailer_amazon_oos():
         params
     )
     return jsonify({"date": latest, "rows": rows})
+
+
+@app.route("/api/retailer/coverage")
+def retailer_coverage():
+    latest = latest_date("retailer_prices")
+    db = get_db()
+    result = []
+    for name, col, url_fn in RETAILER_COVERAGE_MAP:
+        linked  = db.execute(f"SELECT COUNT(*) FROM retailer_ids ri JOIN products p ON p.product_id=ri.product_id WHERE ri.{col} IS NOT NULL AND p.eol=0").fetchone()[0]
+        scraped = db.execute("SELECT COUNT(*) FROM retailer_prices WHERE date=? AND retailer=?", (latest, name)).fetchone()[0] if latest else 0
+        result.append({"retailer": name, "linked": linked, "scraped": scraped})
+    db.close()
+    return jsonify(result)
+
+
+@app.route("/api/retailer/coverage/manufacturers")
+def retailer_coverage_manufacturers():
+    retailer = request.args.get("retailer", "").strip()
+    if not retailer:
+        return jsonify([])
+    col_entry = next((c for n, c, u in RETAILER_COVERAGE_MAP if n == retailer), None)
+    if not col_entry:
+        return jsonify([])
+    latest = latest_date("retailer_prices")
+    rows = qry(
+        f"""SELECT p.manufacturer,
+               COUNT(ri.product_id) AS linked,
+               COUNT(rp.product_id) AS scraped
+           FROM retailer_ids ri
+           JOIN products p ON p.product_id = ri.product_id
+           LEFT JOIN retailer_prices rp
+             ON rp.product_id = ri.product_id AND rp.date = ? AND rp.retailer = ?
+           WHERE ri.{col_entry} IS NOT NULL AND p.eol = 0
+           GROUP BY p.manufacturer
+           ORDER BY p.manufacturer""",
+        (latest or "9999-99-99", retailer)
+    )
+    return jsonify(rows)
+
+
+@app.route("/api/retailer/coverage/groups")
+def retailer_coverage_groups():
+    retailer = request.args.get("retailer", "").strip()
+    mfr      = request.args.get("mfr",      "").strip()
+    if not retailer or not mfr:
+        return jsonify([])
+    col_entry = next((c for n, c, u in RETAILER_COVERAGE_MAP if n == retailer), None)
+    if not col_entry:
+        return jsonify([])
+    latest = latest_date("retailer_prices")
+    rows = qry(
+        f"""SELECT p.product_group,
+               COUNT(ri.product_id) AS linked,
+               COUNT(rp.product_id) AS scraped
+           FROM retailer_ids ri
+           JOIN products p ON p.product_id = ri.product_id
+           LEFT JOIN retailer_prices rp
+             ON rp.product_id = ri.product_id AND rp.date = ? AND rp.retailer = ?
+           WHERE ri.{col_entry} IS NOT NULL AND p.eol = 0 AND p.manufacturer = ?
+           GROUP BY p.product_group
+           ORDER BY p.product_group""",
+        (latest or "9999-99-99", retailer, mfr)
+    )
+    return jsonify(rows)
+
+
+@app.route("/api/retailer/coverage/skus")
+def retailer_coverage_skus():
+    retailer = request.args.get("retailer", "").strip()
+    mfr      = request.args.get("mfr",      "").strip()
+    group    = request.args.get("group",    "").strip()
+    if not retailer or not mfr or not group:
+        return jsonify([])
+    ret_entry = next(((c, u) for n, c, u in RETAILER_COVERAGE_MAP if n == retailer), None)
+    if not ret_entry:
+        return jsonify([])
+    col, url_fn = ret_entry
+    latest = latest_date("retailer_prices")
+    rows = qry(
+        f"""SELECT p.product_id, p.model_no, p.description, p.msrp,
+               ri.{col} AS retailer_id,
+               CASE WHEN rp.product_id IS NOT NULL THEN 1 ELSE 0 END AS scraped_today,
+               rp.price
+           FROM retailer_ids ri
+           JOIN products p ON p.product_id = ri.product_id
+           LEFT JOIN retailer_prices rp
+             ON rp.product_id = ri.product_id AND rp.date = ? AND rp.retailer = ?
+           WHERE ri.{col} IS NOT NULL AND p.eol = 0
+             AND p.manufacturer = ? AND p.product_group = ?
+           ORDER BY p.model_no""",
+        (latest or "9999-99-99", retailer, mfr, group)
+    )
+    # Build URL for each SKU
+    for row in rows:
+        rid = row.get("retailer_id")
+        row["url"] = url_fn(rid) if rid else None
+    return jsonify(rows)
 
 
 @app.route("/api/retailer/search")
