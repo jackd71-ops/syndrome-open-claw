@@ -778,15 +778,11 @@ HTML = r"""<!DOCTYPE html>
           <select id="ret-miss-retailer" onchange="loadRetMissingByRetailer()"
             style="padding:4px 8px;border:1px solid #C8C6C4;border-radius:2px;font-size:13px">
             <option value="">Select retailer…</option>
-            <option value="Amazon">Amazon</option>
-            <option value="Currys">Currys</option>
-            <option value="Very">Very</option>
-            <option value="Argos">Argos</option>
-            <option value="CCL Online">CCL Online</option>
-            <option value="AWD-IT">AWD-IT</option>
             <option value="Scan">Scan</option>
-            <option value="Overclockers">Overclockers</option>
+            <option value="AWD-IT">AWD-IT</option>
             <option value="Box">Box</option>
+            <option value="CCL Online">CCL Online</option>
+            <option value="Very">Very</option>
           </select>
           <select id="ret-miss-status-filter" onchange="filterRetMissingByRetailer()"
             style="padding:4px 8px;border:1px solid #C8C6C4;border-radius:2px;font-size:13px">
@@ -6532,15 +6528,18 @@ def retailer_missing_by_retailer():
     retailer = request.args.get("retailer", "").strip()
     if not retailer:
         return jsonify([])
+    # Only discovery retailers are meaningful here — non-discovery retailers
+    # (Amazon, Currys, Argos, Overclockers) have manually-set IDs; no ID ≠ missing
+    searched_col = DISCOVERY_SEARCHED_COL.get(retailer)
+    if not searched_col:
+        return jsonify({"error": "Not a discovery retailer"}), 400
     ret_entry = next(((c, u) for n, c, u in RETAILER_COVERAGE_MAP if n == retailer), None)
     if not ret_entry:
         return jsonify([])
     col, _ = ret_entry
-    searched_col = DISCOVERY_SEARCHED_COL.get(retailer)
-    searched_sel = f"ri.{searched_col}" if searched_col else "NULL"
     rows = qry(
         f"""SELECT p.product_id, p.model_no, p.manufacturer, p.product_group, p.msrp,
-               {searched_sel} AS searched
+               ri.{searched_col} AS searched
            FROM products p
            LEFT JOIN retailer_ids ri ON ri.product_id = p.product_id
            WHERE p.eol = 0
