@@ -4580,7 +4580,7 @@ function renderRetMissingByRetailer(rows) {
     let statusCell, resetBtn = '';
     if (r.scrape_missing) {
       // Non-discovery retailer: has ID but scraper got no result on latest date
-      statusCell = '<span style="color:#D29200">⚠ Has ASIN — no scrape result on latest date</span>';
+      statusCell = '<span style="color:#D29200">⚠ Has ASIN — no scrape result in last 48 hrs</span>';
     } else if (r.searched === 1) {
       statusCell = '<span style="color:#A4262C">✗ Confirmed not stocked</span>';
       resetBtn   = `<button onclick="event.stopPropagation();resetRetSearch(${r.product_id},'${retailer.replace(/'/g,"\\'")}',this)"
@@ -6561,10 +6561,12 @@ def retailer_missing_by_retailer():
         )
     else:
         # Non-discovery retailer (e.g. Amazon) — only show products that HAVE an ID
-        # but produced no row in retailer_prices on the latest date (scrape failure)
-        latest = latest_date("retailer_prices")
-        if not latest:
-            return jsonify([])
+        # but have not appeared in retailer_prices at all within the last 48 hours.
+        # A 48-hour window is used because scraping all 3 batches takes the full day;
+        # a single-date check would flag products that simply haven't been reached yet.
+        import zoneinfo
+        cutoff = (datetime.now(zoneinfo.ZoneInfo("Europe/London")).date()
+                  - timedelta(days=2)).isoformat()
         rows = qry(
             f"""SELECT p.product_id, p.model_no, p.manufacturer, p.product_group, p.msrp,
                    NULL AS searched,
@@ -6575,10 +6577,10 @@ def retailer_missing_by_retailer():
                  AND ri.{col} IS NOT NULL AND ri.{col} != ''
                  AND p.product_id NOT IN (
                      SELECT product_id FROM retailer_prices
-                     WHERE date = ? AND retailer = ?
+                     WHERE date >= ? AND retailer = ?
                  )
                ORDER BY p.manufacturer, p.model_no""",
-            (latest, retailer)
+            (cutoff, retailer)
         )
     return jsonify(rows)
 
