@@ -63,16 +63,23 @@ try:
         time.sleep(8)  # Angular client-side price hydration delay
 
         # Extract price via text node walker — price is in a <p> with text-[24px] class
-        price_text = page.evaluate("""() => {
+        result = page.evaluate("""() => {
+            // OOS check: no Add to Basket button, or "currently unavailable" text
+            const btns = [...document.querySelectorAll('button')];
+            const hasAddToBasket = btns.some(b => /add to basket|add to cart/i.test(b.textContent));
+            const isUnavailable  = document.body.innerText.includes('currently unavailable');
+            if (!hasAddToBasket || isUnavailable) {
+                return {oos: true, price: null};
+            }
+
             const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
             let node;
             while (node = walker.nextNode()) {
                 const t = node.textContent.trim();
                 if (/^£\\s*[1-9][\\d,]*\\.\\d{2}$/.test(t) && node.parentElement) {
                     const cls = (node.parentElement.className || '').toString();
-                    // Prefer the main product price (text-[24px] or text-[30px] sizing)
                     if (cls.includes('text-[24px]') || cls.includes('text-[30px]')) {
-                        return t;
+                        return {oos: false, price: t};
                     }
                 }
             }
@@ -81,14 +88,17 @@ try:
             while (node = walker2.nextNode()) {
                 const t = node.textContent.trim();
                 if (/^£\\s*[1-9][\\d,]*\\.\\d{2}$/.test(t)) {
-                    return t;
+                    return {oos: false, price: t};
                 }
             }
-            return null;
+            return {oos: false, price: null};
         }""")
 
-        price = parse_price(price_text) if price_text else None
-        print(price if price is not None else "NOT_FOUND")
+        if result and result.get('oos'):
+            print("NOT_FOUND")
+        else:
+            price = parse_price(result.get('price')) if result else None
+            print(price if price is not None else "NOT_FOUND")
         browser.close()
 
 except Exception as e:

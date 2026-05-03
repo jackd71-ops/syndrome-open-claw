@@ -630,6 +630,7 @@ HTML = r"""<!DOCTYPE html>
         <button class="sidebar-btn active" id="ret-btn-overview" onclick="showRetSection('overview',this)">Daily Overview</button>
         <button class="sidebar-btn" onclick="showRetSection('search',this)">Search SKUs</button>
         <button class="sidebar-btn" onclick="showRetCoverage(this)">Scraper Coverage</button>
+        <button class="sidebar-btn" onclick="showScraperHealth(this)">Scraper Health</button>
       </div>
     </div>
     <div class="sidebar-section">
@@ -743,6 +744,12 @@ HTML = r"""<!DOCTYPE html>
         </div>
         <div class="tbl-wrap" id="ret-cov-sku-tbl"></div>
       </div>
+    </div>
+    <!-- Scraper Health -->
+    <div class="content-section" id="ret-scraper-health">
+      <button class="back-btn" onclick="showRetSection('overview')">← Back to Overview</button>
+      <div class="section-title" style="margin-bottom:16px">Scraper Health</div>
+      <div id="scraper-health-content"><div class="spinner">Loading…</div></div>
     </div>
     <!-- Amazon OOS report -->
     <div class="content-section" id="ret-amazon-oos">
@@ -4343,6 +4350,94 @@ function closeRetDailySkuDrill() {
   document.querySelectorAll('#ret-daily-group-tbl tr.row-selected').forEach(r => r.classList.remove('row-selected'));
 }
 
+// ── Scraper Health report ─────────────────────────────────────────────────────
+function showScraperHealth(btn) {
+  showRetSection('scraper-health', btn);
+  const el = document.getElementById('scraper-health-content');
+  el.innerHTML = '<div class="spinner">Loading…</div>';
+  fetch('/api/scraper/health').then(r => r.json()).then(data => {
+    const fmtTime = t => t || '—';
+    const badge = (status) => {
+      if (status === 'complete') return '<span style="color:#107C10;font-weight:600">✅ Complete</span>';
+      if (status === 'running')  return '<span style="color:#0078D4;font-weight:600">🔄 Running</span>';
+      return '<span style="color:#A19F9D">⏳ Pending</span>';
+    };
+    const blockSummary = (blocked) => {
+      const entries = Object.entries(blocked || {});
+      if (!entries.length) return '<span style="color:#107C10">No blocks</span>';
+      return entries.map(([k,v]) => `<span style="color:#A4262C">${k} ×${v}</span>`).join(' &nbsp; ');
+    };
+
+    let html = `<div style="color:#605E5C;font-size:12px;margin-bottom:16px">Today — ${data.date}</div>`;
+
+    // Amazon section
+    html += `<div style="font-weight:600;font-size:13px;margin-bottom:10px;color:#201F1E">Amazon</div>`;
+    html += `<table style="border-collapse:collapse;width:100%;margin-bottom:20px"><thead>
+      <tr style="background:#F3F2F1;font-size:12px;color:#605E5C">
+        <th style="padding:6px 10px;text-align:left">Slot</th>
+        <th style="padding:6px 10px;text-align:left">Status</th>
+        <th style="padding:6px 10px;text-align:left">Started</th>
+        <th style="padding:6px 10px;text-align:left">Finished</th>
+        <th style="padding:6px 10px;text-align:right">Products</th>
+        <th style="padding:6px 10px;text-align:right">Found</th>
+        <th style="padding:6px 10px;text-align:right">FBA</th>
+        <th style="padding:6px 10px;text-align:right">OOS</th>
+        <th style="padding:6px 10px;text-align:right">Errors</th>
+      </tr></thead><tbody>`;
+    for (const [slot, label] of [['am','AM (10:00)'],['pm','PM (15:00)']]) {
+      const r = data.amazon[slot] || {status:'pending'};
+      const errCol = r.errors > 0 ? 'color:#A4262C;font-weight:600' : 'color:#A19F9D';
+      html += `<tr style="border-bottom:1px solid #F3F2F1;font-size:12px">
+        <td style="padding:8px 10px;font-weight:600">${label}</td>
+        <td style="padding:8px 10px">${badge(r.status)}</td>
+        <td style="padding:8px 10px;color:#605E5C">${fmtTime(r.started)}</td>
+        <td style="padding:8px 10px;color:#605E5C">${fmtTime(r.finished)}</td>
+        <td style="padding:8px 10px;text-align:right">${r.products ?? '—'}</td>
+        <td style="padding:8px 10px;text-align:right">${r.found ?? '—'}</td>
+        <td style="padding:8px 10px;text-align:right;color:#D29200">${r.fba ?? '—'}</td>
+        <td style="padding:8px 10px;text-align:right">${r.oos ?? '—'}</td>
+        <td style="padding:8px 10px;text-align:right;${errCol}">${r.errors ?? '—'}</td>
+      </tr>`;
+    }
+    html += `</tbody></table>`;
+
+    // Retailer section
+    const schedules = {1:'Batch 1 (16:00)', 2:'Batch 2 (17:30)', 3:'Batch 3 (19:00)'};
+    html += `<div style="font-weight:600;font-size:13px;margin-bottom:10px;color:#201F1E">Retailer</div>`;
+    html += `<table style="border-collapse:collapse;width:100%"><thead>
+      <tr style="background:#F3F2F1;font-size:12px;color:#605E5C">
+        <th style="padding:6px 10px;text-align:left">Batch</th>
+        <th style="padding:6px 10px;text-align:left">Status</th>
+        <th style="padding:6px 10px;text-align:left">Started</th>
+        <th style="padding:6px 10px;text-align:left">Finished</th>
+        <th style="padding:6px 10px;text-align:right">Products</th>
+        <th style="padding:6px 10px;text-align:right">Found</th>
+        <th style="padding:6px 10px;text-align:right">Not found</th>
+        <th style="padding:6px 10px;text-align:left">Blocked</th>
+        <th style="padding:6px 10px;text-align:right">Errors</th>
+      </tr></thead><tbody>`;
+    (data.retailer || []).forEach(r => {
+      const errCol = r.errors > 0 ? 'color:#A4262C;font-weight:600' : 'color:#A19F9D';
+      html += `<tr style="border-bottom:1px solid #F3F2F1;font-size:12px">
+        <td style="padding:8px 10px;font-weight:600">${schedules[r.batch] || 'Batch '+r.batch}</td>
+        <td style="padding:8px 10px">${badge(r.status)}</td>
+        <td style="padding:8px 10px;color:#605E5C">${fmtTime(r.started)}</td>
+        <td style="padding:8px 10px;color:#605E5C">${fmtTime(r.finished)}</td>
+        <td style="padding:8px 10px;text-align:right">${r.products ?? '—'}</td>
+        <td style="padding:8px 10px;text-align:right">${r.found ?? '—'}</td>
+        <td style="padding:8px 10px;text-align:right">${r.not_found ?? '—'}</td>
+        <td style="padding:8px 10px">${blockSummary(r.blocked)}</td>
+        <td style="padding:8px 10px;text-align:right;${errCol}">${r.errors ?? '—'}</td>
+      </tr>`;
+    });
+    html += `</tbody></table>`;
+
+    el.innerHTML = html;
+  }).catch(() => {
+    el.innerHTML = '<p style="color:#A4262C">Failed to load scraper health data.</p>';
+  });
+}
+
 // ── Scraper Coverage report ───────────────────────────────────────────────────
 let _covRetailer = null;
 let _covMfr      = null;
@@ -4364,8 +4459,12 @@ function loadRetCovRetailers() {
       const col  = pct >= 90 ? '#107C10' : pct >= 60 ? '#D29200' : '#A4262C';
       const btn  = document.createElement('button');
       btn.style.cssText = 'padding:10px 16px;border:1px solid #C8C6C4;border-radius:4px;cursor:pointer;background:#fff;text-align:left;min-width:130px';
+      const extra48 = (r.scraped_48h !== null && r.scraped_48h !== undefined && r.scraped_48h !== r.scraped)
+        ? `<div style="font-size:11px;color:#A19F9D;margin-top:1px">${r.scraped_48h}/${r.linked} in 48h</div>`
+        : '';
       btn.innerHTML = `<div style="font-weight:600;font-size:13px">${r.retailer}</div>
-        <div style="font-size:11px;color:#605E5C;margin-top:2px">${r.scraped}/${r.linked} SKUs</div>
+        <div style="font-size:11px;color:#605E5C;margin-top:2px">${r.scraped}/${r.linked} today</div>
+        ${extra48}
         <div style="font-size:12px;color:${col};font-weight:600">${pct}%</div>`;
       btn.onclick = () => {
         document.querySelectorAll('#ret-cov-retailers button').forEach(b => b.style.background='#fff');
@@ -6140,15 +6239,119 @@ def retailer_amazon_oos():
     return jsonify({"date": latest, "rows": rows})
 
 
+@app.route("/api/scraper/health")
+def scraper_health():
+    import re, zoneinfo
+    now_uk   = datetime.now(zoneinfo.ZoneInfo("Europe/London"))
+    today    = now_uk.date().isoformat()                      # 2026-05-02
+    today_dm = now_uk.date().strftime("%d-%m-%Y")             # 02-05-2026
+
+    result = {"date": today, "amazon": {}, "retailer": []}
+
+    # ── Amazon (amazon_cron.log) ──────────────────────────────────────────────
+    amz_log = "/opt/stic-scraper/logs/amazon_cron.log"
+    try:
+        with open(amz_log) as f:
+            amz_lines = f.readlines()
+        # Find start indices in full file for each slot today
+        for slot in ("AM", "PM"):
+            marker = f"AMAZON SCRAPER — {today_dm} [{slot}]"
+            start_i = next((i for i, l in enumerate(amz_lines) if marker in l), None)
+            if start_i is None:
+                result["amazon"][slot.lower()] = {"status": "pending"}
+                continue
+            # Collect lines until next AMAZON SCRAPER marker or EOF
+            end_i = next((i for i in range(start_i + 1, len(amz_lines))
+                          if "AMAZON SCRAPER —" in amz_lines[i]), len(amz_lines))
+            chunk = amz_lines[start_i:end_i]
+            started  = chunk[0][12:20]
+            complete = next((l for l in chunk if f"Amazon [{slot}] complete" in l), None)
+            errors   = sum(1 for l in chunk if "[Amazon] ERROR:" in l)
+            if complete:
+                m = re.search(
+                    r"Products=(\d+), Found=(\d+) \(FBA=(\d+)\), OOS=(\d+), Used=(\d+), Errors=(\d+)",
+                    complete)
+                run = {"status": "complete", "started": started,
+                       "finished": complete[12:20], "errors": errors}
+                if m:
+                    run.update({"products": int(m.group(1)), "found": int(m.group(2)),
+                                "fba": int(m.group(3)), "oos": int(m.group(4)),
+                                "used": int(m.group(5))})
+            else:
+                run = {"status": "running", "started": started, "errors": errors}
+            result["amazon"][slot.lower()] = run
+    except FileNotFoundError:
+        result["amazon"] = {"am": {"status": "pending"}, "pm": {"status": "pending"}}
+
+    # ── Retailer (separate log per batch: retailer_batch1/2/3.log) ───────────
+    batches = []
+    for batch_num in range(1, 4):
+        log_path = f"/opt/stic-scraper/logs/retailer_batch{batch_num}.log"
+        try:
+            with open(log_path) as f:
+                all_lines = f.readlines()
+            # Find today's start marker in this batch's log
+            marker = f"RETAILER SCRAPER — {today_dm} [BATCH {batch_num}]"
+            start_i = next((i for i, l in enumerate(all_lines) if marker in l), None)
+            if start_i is None:
+                batches.append({"batch": batch_num, "status": "pending"})
+                continue
+            chunk = all_lines[start_i:]
+            started  = chunk[0][12:20]
+            complete = next((l for l in chunk if "Batch complete." in l), None)
+            # Count blocked/consent events per retailer
+            blocked = {}
+            for l in chunk:
+                m = re.search(r'\[(\w[\w\s]*):(?:Google|DDG)\] blocked', l)
+                if m:
+                    r_name = m.group(1).strip()
+                    blocked[r_name] = blocked.get(r_name, 0) + 1
+            errors = sum(1 for l in chunk if "ERROR" in l and "blocked" not in l.lower())
+            if complete:
+                m = re.search(
+                    r"Products=(\d+), Found=(\d+), Not stocked=(\d+), Not found=(\d+)",
+                    complete)
+                fin_line = next((l for l in reversed(chunk)
+                                 if l.startswith("[" + today)), None)
+                finished = fin_line[12:20] if fin_line else "?"
+                run = {"batch": batch_num, "status": "complete", "started": started,
+                       "finished": finished, "errors": errors, "blocked": blocked}
+                if m:
+                    run.update({"products": int(m.group(1)), "found": int(m.group(2)),
+                                "not_stocked": int(m.group(3)), "not_found": int(m.group(4))})
+            else:
+                run = {"batch": batch_num, "status": "running", "started": started,
+                       "errors": errors, "blocked": blocked}
+            batches.append(run)
+        except FileNotFoundError:
+            batches.append({"batch": batch_num, "status": "pending"})
+    result["retailer"] = batches
+
+    return jsonify(result)
+
+
 @app.route("/api/retailer/coverage")
 def retailer_coverage():
+    import zoneinfo
     latest = latest_date("retailer_prices")
+    cutoff_48h = (datetime.now(zoneinfo.ZoneInfo("Europe/London")).date() - timedelta(days=2)).isoformat()
     db = get_db()
     result = []
     for name, col, url_fn in RETAILER_COVERAGE_MAP:
         linked  = db.execute(f"SELECT COUNT(*) FROM retailer_ids ri JOIN products p ON p.product_id=ri.product_id WHERE ri.{col} IS NOT NULL AND p.eol=0").fetchone()[0]
         scraped = db.execute("SELECT COUNT(*) FROM retailer_prices WHERE date=? AND retailer=?", (latest, name)).fetchone()[0] if latest else 0
-        result.append({"retailer": name, "linked": linked, "scraped": scraped})
+        scraped_48h = None
+        if name not in DISCOVERY_SEARCHED_COL:
+            scraped_48h = db.execute(
+                f"""SELECT COUNT(DISTINCT rp.product_id)
+                    FROM retailer_prices rp
+                    JOIN retailer_ids ri ON ri.product_id = rp.product_id
+                    JOIN products p ON p.product_id = rp.product_id
+                    WHERE rp.date >= ? AND rp.retailer = ?
+                      AND ri.{col} IS NOT NULL AND p.eol = 0""",
+                (cutoff_48h, name)
+            ).fetchone()[0]
+        result.append({"retailer": name, "linked": linked, "scraped": scraped, "scraped_48h": scraped_48h})
     db.close()
     return jsonify(result)
 

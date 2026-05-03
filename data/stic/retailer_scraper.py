@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
 Retailer price scraper for OpenClaw.
-Uses direct product IDs (ASINs / Currys SKUs) from the retailer_ids DB table
+Uses direct product IDs (Currys SKUs / retailer URLs) from the retailer_ids DB table
 for guaranteed accuracy; falls back to model-number search where no ID exists.
 All product data is sourced from the products + retailer_ids DB tables (no Excel).
 
-Retailer status (2026-04):
-  ✅ Amazon UK    — dp/{ASIN} direct page (homepage warm-up for cookies)
+NOTE: Amazon UK is scraped by the standalone amazon_scraper.py (runs independently,
+twice daily). It is NOT included in this scraper.
+
+Retailer status (2026-05):
   ✅ Currys       — search by SKU → direct product redirect
   ✅ Overclockers — OCUK code search via camoufox (ocuk_code in retailer_ids)
   ❌ Argos        — 403 on all URLs (Akamai)
@@ -129,8 +131,8 @@ GOOGLE_DELAY_MAX = 12
 # ── Retailer definitions ───────────────────────────────────────────────────────
 # id_col : column name in Retailer_IDs sheet (None = search-only, no IDs)
 # blocked: skip entirely, write "—"
+# NOTE: Amazon UK is handled by amazon_scraper.py — not listed here.
 RETAILERS = [
-    {"name": "Amazon UK",    "id_col": "amazon_asin", "blocked": False},
     {"name": "Currys",       "id_col": "currys_sku",  "blocked": False},
     {"name": "Argos",        "id_col": "argos_sku",   "blocked": False},
     {"name": "Scan",         "id_col": "scan_url",    "blocked": False},
@@ -247,106 +249,8 @@ def parse_price(text):
             pass
     return None
 
-# ── Amazon scraper (direct dp/ page) ─────────────────────────────────────────
-amazon_warmed_up = False
-
-def warm_up_amazon(page):
-    global amazon_warmed_up
-    if amazon_warmed_up:
-        return
-    log("  [Amazon] Warming up cookies via homepage...")
-    page.goto("https://www.amazon.co.uk", wait_until="domcontentloaded", timeout=20000)
-    time.sleep(4)
-    amazon_warmed_up = True
-
-def scrape_amazon(page, asin):
-    warm_up_amazon(page)
-    url = f"https://www.amazon.co.uk/dp/{asin}"
-    page.goto(url, wait_until="domcontentloaded", timeout=25000)
-    time.sleep(random.uniform(4, 7))
-
-    # Use JS to detect condition (used vs new) and seller type in one pass
-    result = page.evaluate("""() => {
-        // ── Used/condition detection ─────────────────────────────────────────
-        // Amazon shows condition text ("Used: Like New", "Condition: Used" etc.)
-        // in several possible locations when no new stock is available.
-        const conditionSelectors = [
-            '#apex_desktop_qualityTierMessage',
-            '#apex_desktop_itemInformation',
-            '.a-section.a-spacing-none .a-color-secondary',
-            '#buyNewSection',
-            '#usedBuySection',
-            '.olp-used-price',
-            '#apex_offerDisplay_desktop .a-color-secondary',
-        ];
-        const usedPattern = /\\bused\\b|like new|very good|\\bgood\\b|acceptable|refurbished/i;
-        for (const sel of conditionSelectors) {
-            const el = document.querySelector(sel);
-            if (el && usedPattern.test(el.textContent)) {
-                return {price: null, seller_type: 'USED'};
-            }
-        }
-
-        // Also check: if the "add to basket" button says "Add used to Cart"
-        const basketBtn = document.querySelector('#add-to-cart-button, #submit\\.buy-now');
-        if (basketBtn && /used/i.test(basketBtn.textContent)) {
-            return {price: null, seller_type: 'USED'};
-        }
-
-        // ── Seller type detection (FBA vs Amazon direct) ─────────────────────
-        let seller_type = null;
-        const merchantSelectors = [
-            '#merchant-info',
-            '#tabular-buybox-truncate-0',
-            '#sellerProfileTriggerId',
-            '#SSOFpopoverLink',
-            '.tabular-buybox-text',
-        ];
-        for (const sel of merchantSelectors) {
-            const el = document.querySelector(sel);
-            if (el) {
-                const text = el.textContent.toLowerCase();
-                // FBA: sold by 3rd party, fulfilled/dispatched by Amazon
-                if ((text.includes('fulfilled by amazon') || text.includes('dispatched from and sold by amazon'))
-                    && !text.includes('amazon.co.uk') && text.includes('sold by')) {
-                    seller_type = 'FBA';
-                    break;
-                }
-                break;  // only check first match
-            }
-        }
-
-        // ── Price extraction ─────────────────────────────────────────────────
-        const priceSelectors = [
-            '#corePrice_feature_div .a-price .a-offscreen',
-            '.a-price .a-offscreen',
-            '#apex_offerDisplay_desktop .a-price .a-offscreen',
-        ];
-        for (const sel of priceSelectors) {
-            const el = document.querySelector(sel);
-            if (el && el.textContent.trim()) {
-                return {price: el.textContent.trim(), seller_type: seller_type};
-            }
-        }
-        return {price: null, seller_type: null};
-    }""")
-
-    if not result or not isinstance(result, dict):
-        return None, None
-
-    seller_type = result.get('seller_type')
-
-    # If detected as used, return with no price
-    if seller_type == 'USED':
-        return None, 'USED'
-
-    raw_price = result.get('price')
-    if raw_price:
-        p = parse_price(raw_price)
-        if p:
-            return p, seller_type
-
-    return None, None
+# NOTE: Amazon scraper functions (scrape_amazon, warm_up_amazon) live in
+# amazon_scraper.py — see that file for Amazon-specific timing and fingerprinting.
 
 # ── Currys scraper (search by SKU → product page redirect) ───────────────────
 def scrape_currys(page, sku):
@@ -539,12 +443,7 @@ def scrape_product(page, product, retailer, id_codes):
         return None, "NOT_STOCKED", None
 
     try:
-        amz_seller_type = None
-        if name == "Amazon UK":
-            price, amz_seller_type = scrape_amazon(page, code)
-            if amz_seller_type == 'USED':
-                return None, "OUT_OF_STOCK", 'USED'
-        elif name == "Currys":
+        if name == "Currys":
             price = scrape_currys(page, code)
         elif name == "Argos":
             price = scrape_argos(code)
@@ -555,7 +454,7 @@ def scrape_product(page, product, retailer, id_codes):
         else:
             return None, "NOT_FOUND", None
 
-        return (price, None, amz_seller_type) if price else (None, "NOT_FOUND", None)
+        return (price, None, None) if price else (None, "NOT_FOUND", None)
 
     except PlaywrightTimeout:
         return None, "TIMEOUT", None
@@ -579,7 +478,6 @@ def send_telegram(message):
 
 # ── SQLite DB write ───────────────────────────────────────────────────────────
 _RETAILER_DB_NAME = {
-    "Amazon UK":    "Amazon",
     "Currys":       "Currys",
     "Argos":        "Argos",
     "Scan":         "Scan",
@@ -2051,6 +1949,7 @@ if __name__ == "__main__":
         run(offset=0, limit=20, date_str=date_str, notify=False)
 
       elif args.batch in (1, 2, 3):
+        log(f"RETAILER SCRAPER — {date_str} [BATCH {args.batch}]")
         total  = count_products()
         ranges = batch_ranges(total)
         log(f"DB: {total} active products — batch ranges (offset, limit): {ranges}")
