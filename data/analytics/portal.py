@@ -4370,6 +4370,52 @@ function showScraperHealth(btn) {
 
     let html = `<div style="color:#605E5C;font-size:12px;margin-bottom:16px">Today — ${data.date}</div>`;
 
+    // STIC section
+    html += `<div style="font-weight:600;font-size:13px;margin-bottom:10px;color:#201F1E">STIC</div>`;
+    html += `<table style="border-collapse:collapse;width:100%;margin-bottom:6px"><thead>
+      <tr style="background:#F3F2F1;font-size:12px;color:#605E5C">
+        <th style="padding:6px 10px;text-align:left">Session</th>
+        <th style="padding:6px 10px;text-align:left">Status</th>
+        <th style="padding:6px 10px;text-align:left">Started</th>
+        <th style="padding:6px 10px;text-align:left">Finished</th>
+        <th style="padding:6px 10px;text-align:right">Groups</th>
+        <th style="padding:6px 10px;text-align:right">Products</th>
+        <th style="padding:6px 10px;text-align:right">Errors</th>
+      </tr></thead><tbody>`;
+    (data.stic || []).forEach(s => {
+      const errCol = s.errors > 0 ? 'color:#A4262C;font-weight:600' : 'color:#A19F9D';
+      const grpStr = s.groups_total ? `${s.groups_done ?? '—'}/${s.groups_total}` : '—';
+      html += `<tr style="border-bottom:1px solid #F3F2F1;font-size:12px">
+        <td style="padding:8px 10px;font-weight:600">${s.label}</td>
+        <td style="padding:8px 10px">${badge(s.status)}</td>
+        <td style="padding:8px 10px;color:#605E5C">${fmtTime(s.started)}</td>
+        <td style="padding:8px 10px;color:#605E5C">${fmtTime(s.finished)}</td>
+        <td style="padding:8px 10px;text-align:right">${grpStr}</td>
+        <td style="padding:8px 10px;text-align:right">${s.products_done ?? '—'}</td>
+        <td style="padding:8px 10px;text-align:right;${errCol}">${s.errors ?? '—'}</td>
+      </tr>`;
+    });
+    html += `</tbody></table>`;
+    // Per-group breakdown for any session with group data
+    (data.stic || []).filter(s => s.groups && s.groups.length).forEach(s => {
+      html += `<div style="font-size:11px;color:#605E5C;margin:4px 0 2px 2px">${s.label} — groups</div>`;
+      html += `<table style="border-collapse:collapse;width:100%;margin-bottom:16px;font-size:11px"><thead>
+        <tr style="background:#FAF9F8;color:#605E5C">
+          <th style="padding:4px 10px;text-align:left">Group</th>
+          <th style="padding:4px 10px;text-align:right">Scraped</th>
+          <th style="padding:4px 10px;text-align:right">Failed</th>
+        </tr></thead><tbody>`;
+      s.groups.forEach(g => {
+        const failCol = g.failed > 0 ? 'color:#A4262C' : 'color:#A19F9D';
+        html += `<tr style="border-bottom:1px solid #FAF9F8">
+          <td style="padding:3px 10px">${g.label}</td>
+          <td style="padding:3px 10px;text-align:right;color:#107C10">${g.scraped}</td>
+          <td style="padding:3px 10px;text-align:right;${failCol}">${g.failed}</td>
+        </tr>`;
+      });
+      html += `</tbody></table>`;
+    });
+
     // Amazon section
     html += `<div style="font-weight:600;font-size:13px;margin-bottom:10px;color:#201F1E">Amazon</div>`;
     html += `<table style="border-collapse:collapse;width:100%;margin-bottom:20px"><thead>
@@ -4402,11 +4448,10 @@ function showScraperHealth(btn) {
     html += `</tbody></table>`;
 
     // Retailer section
-    const schedules = {1:'Batch 1 (16:00)', 2:'Batch 2 (17:30)', 3:'Batch 3 (19:00)'};
-    html += `<div style="font-weight:600;font-size:13px;margin-bottom:10px;color:#201F1E">Retailer</div>`;
+    html += `<div style="font-weight:600;font-size:13px;margin-bottom:10px;color:#201F1E">Retailer (09:30)</div>`;
     html += `<table style="border-collapse:collapse;width:100%"><thead>
       <tr style="background:#F3F2F1;font-size:12px;color:#605E5C">
-        <th style="padding:6px 10px;text-align:left">Batch</th>
+        <th style="padding:6px 10px;text-align:left">Retailer</th>
         <th style="padding:6px 10px;text-align:left">Status</th>
         <th style="padding:6px 10px;text-align:left">Started</th>
         <th style="padding:6px 10px;text-align:left">Finished</th>
@@ -4419,7 +4464,7 @@ function showScraperHealth(btn) {
     (data.retailer || []).forEach(r => {
       const errCol = r.errors > 0 ? 'color:#A4262C;font-weight:600' : 'color:#A19F9D';
       html += `<tr style="border-bottom:1px solid #F3F2F1;font-size:12px">
-        <td style="padding:8px 10px;font-weight:600">${schedules[r.batch] || 'Batch '+r.batch}</td>
+        <td style="padding:8px 10px;font-weight:600">${r.retailer}</td>
         <td style="padding:8px 10px">${badge(r.status)}</td>
         <td style="padding:8px 10px;color:#605E5C">${fmtTime(r.started)}</td>
         <td style="padding:8px 10px;color:#605E5C">${fmtTime(r.finished)}</td>
@@ -6246,7 +6291,56 @@ def scraper_health():
     today    = now_uk.date().isoformat()                      # 2026-05-02
     today_dm = now_uk.date().strftime("%d-%m-%Y")             # 02-05-2026
 
-    result = {"date": today, "amazon": {}, "retailer": []}
+    result = {"date": today, "stic": [], "amazon": {}, "retailer": []}
+
+    # ── STIC (stic_cron.log) ──────────────────────────────────────────────────
+    stic_log = "/opt/stic-scraper/logs/stic_cron.log"
+    try:
+        with open(stic_log) as f:
+            stic_lines = f.readlines()
+        # Find start of each run today — both AM and PM use "Morning run:"
+        session_starts = [i for i, l in enumerate(stic_lines)
+                          if "Morning run:" in l and l.startswith(f"[{today}")]
+        stic_sessions = []
+        slot_defs = [("AM", "Full (06:30)"), ("PM", "Full (12:30)")]
+        for sess_idx, (slot, label) in enumerate(slot_defs):
+            if sess_idx >= len(session_starts):
+                stic_sessions.append({"slot": slot, "label": label, "status": "pending", "groups": []})
+                continue
+            start_i = session_starts[sess_idx]
+            end_i = session_starts[sess_idx + 1] if sess_idx + 1 < len(session_starts) else len(stic_lines)
+            chunk = stic_lines[start_i:end_i]
+            started = chunk[0][12:20]
+            m_grp_total = re.search(r'Morning run: (\d+) groups', chunk[0])
+            groups_total = int(m_grp_total.group(1)) if m_grp_total else 0
+            groups = []
+            for l in chunk:
+                mg = re.search(r'\[GROUP\] (.+?) complete — (\d+) scraped, (\d+) failed\.', l)
+                if mg:
+                    groups.append({"label": mg.group(1), "scraped": int(mg.group(2)), "failed": int(mg.group(3))})
+            all_done = next((l for l in chunk if "All groups complete." in l), None)
+            m_total = re.search(r'Total done today: (\d+)', all_done) if all_done else None
+            products_done = int(m_total.group(1)) if m_total else None
+            errors = sum(1 for l in chunk if "ERROR" in l)
+            if all_done:
+                fin_line = next((l for l in reversed(chunk) if l.startswith(f"[{today}")), None)
+                finished = fin_line[12:20] if fin_line else "?"
+                sess = {"slot": slot, "label": label, "status": "complete",
+                        "started": started, "finished": finished,
+                        "groups_total": groups_total, "groups_done": len(groups),
+                        "products_done": products_done, "errors": errors, "groups": groups}
+            else:
+                sess = {"slot": slot, "label": label, "status": "running",
+                        "started": started,
+                        "groups_total": groups_total, "groups_done": len(groups),
+                        "products_done": products_done, "errors": errors, "groups": groups}
+            stic_sessions.append(sess)
+        result["stic"] = stic_sessions
+    except FileNotFoundError:
+        result["stic"] = [
+            {"slot": "AM", "label": "Full (06:30)", "status": "pending", "groups": []},
+            {"slot": "PM", "label": "Full (12:30)", "status": "pending", "groups": []},
+        ]
 
     # ── Amazon (amazon_cron.log) ──────────────────────────────────────────────
     amz_log = "/opt/stic-scraper/logs/amazon_cron.log"
@@ -6283,29 +6377,37 @@ def scraper_health():
     except FileNotFoundError:
         result["amazon"] = {"am": {"status": "pending"}, "pm": {"status": "pending"}}
 
-    # ── Retailer (separate log per batch: retailer_batch1/2/3.log) ───────────
-    batches = []
-    for batch_num in range(1, 4):
-        log_path = f"/opt/stic-scraper/logs/retailer_batch{batch_num}.log"
+    # ── Retailer (8 parallel sessions, one per retailer, all start 09:30) ──────
+    RETAILER_LOG_MAP = [
+        ("Currys",       "retailer_currys.log",  "CURRYS"),
+        ("Scan",         "retailer_scan.log",     "SCAN"),
+        ("Overclockers", "retailer_ocuk.log",     "OVERCLOCKERS"),
+        ("Box",          "retailer_box.log",      "BOX"),
+        ("CCL Online",   "retailer_ccl.log",      "CCL ONLINE"),
+        ("AWD-IT",       "retailer_awdit.log",    "AWD-IT"),
+        ("Very",         "retailer_very.log",     "VERY"),
+        ("Argos",        "retailer_argos.log",    "ARGOS"),
+    ]
+    sessions = []
+    for r_name, log_file, r_upper in RETAILER_LOG_MAP:
+        log_path = f"/opt/stic-scraper/logs/{log_file}"
         try:
             with open(log_path) as f:
                 all_lines = f.readlines()
-            # Find today's start marker in this batch's log
-            marker = f"RETAILER SCRAPER — {today_dm} [BATCH {batch_num}]"
+            marker = f"RETAILER SCRAPER — {today_dm} [{r_upper}]"
             start_i = next((i for i, l in enumerate(all_lines) if marker in l), None)
             if start_i is None:
-                batches.append({"batch": batch_num, "status": "pending"})
+                sessions.append({"retailer": r_name, "status": "pending"})
                 continue
             chunk = all_lines[start_i:]
             started  = chunk[0][12:20]
             complete = next((l for l in chunk if "Batch complete." in l), None)
-            # Count blocked/consent events per retailer
             blocked = {}
             for l in chunk:
                 m = re.search(r'\[(\w[\w\s]*):(?:Google|DDG)\] blocked', l)
                 if m:
-                    r_name = m.group(1).strip()
-                    blocked[r_name] = blocked.get(r_name, 0) + 1
+                    r_nm = m.group(1).strip()
+                    blocked[r_nm] = blocked.get(r_nm, 0) + 1
             errors = sum(1 for l in chunk if "ERROR" in l and "blocked" not in l.lower())
             if complete:
                 m = re.search(
@@ -6314,18 +6416,18 @@ def scraper_health():
                 fin_line = next((l for l in reversed(chunk)
                                  if l.startswith("[" + today)), None)
                 finished = fin_line[12:20] if fin_line else "?"
-                run = {"batch": batch_num, "status": "complete", "started": started,
+                run = {"retailer": r_name, "status": "complete", "started": started,
                        "finished": finished, "errors": errors, "blocked": blocked}
                 if m:
                     run.update({"products": int(m.group(1)), "found": int(m.group(2)),
                                 "not_stocked": int(m.group(3)), "not_found": int(m.group(4))})
             else:
-                run = {"batch": batch_num, "status": "running", "started": started,
+                run = {"retailer": r_name, "status": "running", "started": started,
                        "errors": errors, "blocked": blocked}
-            batches.append(run)
+            sessions.append(run)
         except FileNotFoundError:
-            batches.append({"batch": batch_num, "status": "pending"})
-    result["retailer"] = batches
+            sessions.append({"retailer": r_name, "status": "pending"})
+    result["retailer"] = sessions
 
     return jsonify(result)
 

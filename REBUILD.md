@@ -152,6 +152,8 @@ docker ps | grep openclaw
 
 ## 9. Portal Systemd Service
 
+**Important:** The sales portal (`portal.py`) runs as a **host systemd service**, NOT inside the OpenClaw Docker container. The Docker container runs the Kevin AI agent only. They are completely separate processes.
+
 ```bash
 cat > /etc/systemd/system/openclaw-portal.service << 'EOF'
 [Unit]
@@ -160,8 +162,8 @@ After=network.target
 
 [Service]
 User=adminclaude
-WorkingDirectory=/opt/openclaw/data/analytics
-ExecStart=/usr/bin/python3 /opt/openclaw/data/analytics/portal.py
+WorkingDirectory=/opt/stic-scraper/analytics
+ExecStart=/usr/bin/python3 /opt/stic-scraper/analytics/portal.py
 Restart=always
 RestartSec=10
 
@@ -178,6 +180,16 @@ systemctl status openclaw-portal
 curl -s http://localhost:8090/api/stic/kpi | head -c 100
 ```
 
+### Service Architecture — Restart Procedures
+
+| Component | What it is | How to restart |
+|---|---|---|
+| `openclaw` Docker container | Kevin AI agent (Node.js) | `bash /opt/openclaw/scripts/safe-restart.sh` |
+| `openclaw-portal` systemd service | Sales portal Flask app (Python) | `sudo systemctl restart openclaw-portal` |
+| Scraper processes | Cron-scheduled Python scripts | Re-run the cron command manually, or wait for next schedule |
+
+**Never use `safe-restart.sh` to restart the portal** — it only affects the Docker container and will not pick up portal.py changes. Always use `systemctl restart openclaw-portal` after editing `portal.py`.
+
 ---
 
 ## 10. Cron Jobs
@@ -191,23 +203,33 @@ crontab -e
 Add:
 
 ```
-0 3 * * * /opt/openclaw/scripts/backup.sh
-# STIC scraper - morning full run all groups (fires 8:25am, adds 0-10min random delay Mon-Fri)
-25 8 * * 1-5 TZ=Europe/London python3 /opt/openclaw/data/stic/stic_scraper.py --runall >> /opt/openclaw/logs/stic_cron.log 2>&1
-# STIC scraper - afternoon GPU-only run (fires 1:55pm, adds 0-10min random delay Mon-Fri)
-55 13 * * 1-5 TZ=Europe/London python3 /opt/openclaw/data/stic/stic_scraper.py --gpus >> /opt/openclaw/logs/stic_cron.log 2>&1
-# Travel watchlist check - twice daily
+# ── OpenClaw / Backup ─────────────────────────────────────────────────────────
+0 3 * * *   /opt/openclaw/scripts/backup.sh
+0 2 * * *   /opt/openclaw/scripts/git-sync.sh >> /opt/openclaw/logs/git-sync.log 2>&1
 0 8,18 * * * /usr/bin/python3 /opt/openclaw/data/travel/check_watchlist.py >> /opt/openclaw/logs/travel.log 2>&1
-# Retailer tracker - batch 1 (7:00pm UK daily)
-0 19 * * * TZ=Europe/London /usr/bin/python3 /opt/openclaw/data/stic/retailer_scraper.py --batch 1 >> /opt/openclaw/logs/retailer_cron.log 2>&1
-# Retailer tracker - batch 2 (8:30pm UK daily)
-30 20 * * * TZ=Europe/London /usr/bin/python3 /opt/openclaw/data/stic/retailer_scraper.py --batch 2 >> /opt/openclaw/logs/retailer_cron.log 2>&1
-# Retailer tracker - batch 3 (10:00pm UK daily + Telegram notification)
-0 22 * * * TZ=Europe/London /usr/bin/python3 /opt/openclaw/data/stic/retailer_scraper.py --batch 3 >> /opt/openclaw/logs/retailer_cron.log 2>&1
-# Nightly git sync of source files to GitHub (2am)
-0 2 * * * /opt/openclaw/scripts/git-sync.sh >> /opt/openclaw/logs/git-sync.log 2>&1
-# STIC template sync: DISABLED - products table now managed via portal Import/Export tools
-# 0 0 * * * TZ=Europe/London python3 /opt/openclaw/scripts/sync_template.py >> /opt/openclaw/logs/sync_template.log 2>&1
+
+# ── STIC scraper ──────────────────────────────────────────────────────────────
+# Morning: full run all groups (Mon-Fri 06:30 UK)
+30 6 * * 1-5 TZ=Europe/London python3 /opt/stic-scraper/scraper/stic_scraper.py --runall >> /opt/stic-scraper/logs/stic_cron.log 2>&1
+# Afternoon: full run all groups again with --force (Mon-Fri 12:30 UK)
+30 12 * * 1-5 TZ=Europe/London python3 /opt/stic-scraper/scraper/stic_scraper.py --runall >> /opt/stic-scraper/logs/stic_cron.log 2>&1
+
+# ── Amazon scraper ────────────────────────────────────────────────────────────
+0 8  * * * TZ=Europe/London /usr/bin/python3 /opt/stic-scraper/scraper/amazon_scraper.py --slot am >> /opt/stic-scraper/logs/amazon_cron.log 2>&1
+0 13 * * * TZ=Europe/London /usr/bin/python3 /opt/stic-scraper/scraper/amazon_scraper.py --slot pm >> /opt/stic-scraper/logs/amazon_cron.log 2>&1
+
+# ── Retailer scraper — URL discovery (nightly 01:00, fast after first run) ───
+0 1 * * * TZ=Europe/London /usr/bin/python3 /opt/stic-scraper/scraper/retailer_scraper.py --discover >> /opt/stic-scraper/logs/retailer_discovery.log 2>&1
+
+# ── Retailer scraper — 8 parallel sessions, one per retailer (09:30 daily) ───
+30 9 * * * TZ=Europe/London /usr/bin/python3 /opt/stic-scraper/scraper/retailer_scraper.py --retailer Currys      >> /opt/stic-scraper/logs/retailer_currys.log 2>&1
+30 9 * * * TZ=Europe/London /usr/bin/python3 /opt/stic-scraper/scraper/retailer_scraper.py --retailer Scan        >> /opt/stic-scraper/logs/retailer_scan.log 2>&1
+30 9 * * * TZ=Europe/London /usr/bin/python3 /opt/stic-scraper/scraper/retailer_scraper.py --retailer Overclockers >> /opt/stic-scraper/logs/retailer_ocuk.log 2>&1
+30 9 * * * TZ=Europe/London /usr/bin/python3 /opt/stic-scraper/scraper/retailer_scraper.py --retailer Box         >> /opt/stic-scraper/logs/retailer_box.log 2>&1
+30 9 * * * TZ=Europe/London /usr/bin/python3 /opt/stic-scraper/scraper/retailer_scraper.py --retailer "CCL Online" >> /opt/stic-scraper/logs/retailer_ccl.log 2>&1
+30 9 * * * TZ=Europe/London /usr/bin/python3 /opt/stic-scraper/scraper/retailer_scraper.py --retailer AWD-IT      >> /opt/stic-scraper/logs/retailer_awdit.log 2>&1
+30 9 * * * TZ=Europe/London /usr/bin/python3 /opt/stic-scraper/scraper/retailer_scraper.py --retailer Very        >> /opt/stic-scraper/logs/retailer_very.log 2>&1
+30 9 * * * TZ=Europe/London /usr/bin/python3 /opt/stic-scraper/scraper/retailer_scraper.py --retailer Argos       >> /opt/stic-scraper/logs/retailer_argos.log 2>&1
 ```
 
 ---
@@ -269,12 +291,13 @@ chown -R adminclaude:adminclaude /opt/openclaw
 
 ## Notes
 
-- **prices.db WAL mode** — after restore, run `sqlite3 /opt/openclaw/data/analytics/prices.db "PRAGMA wal_checkpoint(FULL);"` to ensure DB is clean
-- **Portal port** — served on `:8090`, local network only
-- **OpenClaw container ports** — 18789 (main), 3000 (internal), 2099 (manifest public)
+- **prices.db WAL mode** — after restore, run `sqlite3 /opt/stic-scraper/data/prices.db "PRAGMA wal_checkpoint(FULL);"` to ensure DB is clean
+- **Portal port** — `portal.py` serves on `:8090`, local network only. This is a **host systemd service** (`openclaw-portal`), not inside Docker. Restart with `sudo systemctl restart openclaw-portal`, not `safe-restart.sh`.
+- **OpenClaw Docker container** — Kevin AI agent only. Ports: 18789 (main), 3000 (internal), 2099 (manifest public). Restart with `bash /opt/openclaw/scripts/safe-restart.sh`.
+- **Scraper files location** — `/opt/stic-scraper/scraper/` (Python scripts), `/opt/stic-scraper/analytics/portal.py` (portal), `/opt/stic-scraper/logs/` (all log files), `/opt/stic-scraper/data/` (DB + progress files)
 - **TrueNAS backup path** — `/mnt/Deep/backups/openclaw/`
 - **GitHub repo** — `jackd71-ops/syndrome-open-claw`
-- Update this document whenever cron jobs, services, or packages change
+- Update this document whenever cron jobs, services, packages, or architecture changes
 
 ---
 
@@ -371,7 +394,7 @@ CSV column named `Product` is the VIP product code (maps to `product_id` in DB).
 
 ## Scraper Groups
 
-STIC scraper runs as 9 manufacturer/product-group segments instead of batches. Each group sends its own Telegram on completion.
+STIC scraper runs as 14 manufacturer/product-group segments. Each group sends its own Telegram on completion.
 
 | Label | Manufacturer | Group |
 |---|---|---|
@@ -384,12 +407,19 @@ STIC scraper runs as 9 manufacturer/product-group segments instead of batches. E
 | Gigabyte Motherboards | GIGABYTE | PROD_MBRD |
 | ASUS Motherboards | ASUS | PROD_MBRD |
 | Server / Pro | (all) | PROD_MBRDS |
+| AMD Retail CPU | AMD Retail | PROD_CPU |
+| AMD MPK CPU | AMD MPK | PROD_CPU |
+| Intel CPU | Intel | PROD_CPU |
+| Intel OEM CPU | Intel OEM | PROD_CPU |
+| Probe SKUs | (all) | PROBE |
 
 **CLI:**
 ```bash
-python3 stic_scraper.py --runall          # all groups, random 0–10 min start delay
-python3 stic_scraper.py --gpus            # GPU groups only
-python3 stic_scraper.py --group "ASUS GPU"  # single named group, no delay
+python3 stic_scraper.py --runall              # all 14 groups, random 0–10 min start delay
+python3 stic_scraper.py --gpus                # GPU groups only (PROD_VIDEO)
+python3 stic_scraper.py --cpus-amd            # AMD CPU groups only
+python3 stic_scraper.py --cpus-intel          # Intel CPU groups only
+python3 stic_scraper.py --group "ASUS GPU"    # single named group, no delay
 python3 stic_scraper.py --rescrape 123456,234567  # re-scrape specific VIP codes
 ```
 
@@ -401,14 +431,36 @@ Groups can also be triggered from the portal: STIC → Scraper → Refresh SKUs.
 
 Reads products from `products` table and retailer IDs from `retailer_ids` table (no Excel dependency).
 
+**Architecture — 8 parallel sessions:**
+All 8 retailers run simultaneously at 09:30, one session per retailer, each scraping all ~587 active products for their retailer. Each session has its own log file and progress file so crashes are independent. Peak RAM usage ~9.2 GB with browser restart every 100 products.
+
 **CLI:**
 ```bash
-python3 retailer_scraper.py --batch 1|2|3    # run one of three equal-sized batches
-python3 retailer_scraper.py --test            # scrape first 20 products
-python3 retailer_scraper.py --discover        # run URL discovery only (for new products)
+python3 retailer_scraper.py --retailer Currys       # single retailer, all products
+python3 retailer_scraper.py --retailer "CCL Online" # (quote names with spaces)
+python3 retailer_scraper.py --discover              # URL discovery only (nightly 01:00)
+python3 retailer_scraper.py --test                  # first 20 products, no retailer filter
 ```
 
-Pre-flight discovery runs automatically before batch 1 — it finds product URLs for any new products added to `retailer_ids` without URLs yet (AWD-IT, Scan, Box, CCL, Very).
+**Discovery** runs nightly at 01:00 as a standalone job — finds product URLs for retailers that use URL-based scraping (AWD-IT, Scan, Box, CCL, Very). After the initial full discovery pass, only new products without URLs are searched so subsequent runs complete in minutes.
+
+**Log files** (one per retailer session):
+```
+/opt/stic-scraper/logs/retailer_currys.log
+/opt/stic-scraper/logs/retailer_scan.log
+/opt/stic-scraper/logs/retailer_ocuk.log
+/opt/stic-scraper/logs/retailer_box.log
+/opt/stic-scraper/logs/retailer_ccl.log
+/opt/stic-scraper/logs/retailer_awdit.log
+/opt/stic-scraper/logs/retailer_very.log
+/opt/stic-scraper/logs/retailer_argos.log
+/opt/stic-scraper/logs/retailer_discovery.log
+```
+
+**Progress files** (allow crash recovery per-retailer):
+```
+/opt/stic-scraper/data/retailer_progress_{DD-MM-YYYY}_{retailer}.json
+```
 
 **Bot detection bypass — headed mode:**
 All scrapers run patchright (patched Chromium) in **headed mode** (`headless=False`) via Xvfb virtual display. This bypasses Cloudflare and Akamai Bot Manager on a residential IP. Key requirements:

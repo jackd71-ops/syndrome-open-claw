@@ -35,7 +35,6 @@ Usage:
 """
 
 import argparse
-import fcntl
 import json
 import os
 import re
@@ -44,7 +43,6 @@ import random
 import time
 import urllib.parse
 import urllib.request
-from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -56,7 +54,7 @@ from patchright.sync_api import sync_playwright as patchright_playwright
 # ── Paths ─────────────────────────────────────────────────────────────────────
 DB_PATH            = "/opt/stic-scraper/analytics/prices.db"
 OUTPUT_DIR         = "/opt/stic-scraper/general"
-PROGRESS_PATH      = "/opt/stic-scraper/data/retailer_progress_{date}.json"
+PROGRESS_PATH      = "/opt/stic-scraper/data/retailer_progress_{date}_{retailer}.json"
 LOG_PATH           = "/opt/stic-scraper/logs/retailer.log"
 SECRETS_PATH       = "/opt/stic-scraper/secrets.json"
 AWDIT_CATALOG_PATH = "/opt/stic-scraper/data/awdit_catalog.json"
@@ -64,31 +62,8 @@ SCAN_SCRAPE_PATH   = "/opt/stic-scraper/scraper/scan_scrape.py"
 VERY_SCRAPE_PATH   = "/opt/stic-scraper/scraper/very_scrape.py"
 BOX_SCRAPE_PATH    = "/opt/stic-scraper/scraper/box_scrape.py"
 ARGOS_SCRAPE_PATH  = "/opt/stic-scraper/scraper/argos_scrape.py"
-LOCK_PATH          = "/opt/stic-scraper/data/retailer_scraper.lock"
-
 # Populated by discover_* functions; consumed by run_discovery_sanity_report()
 _DISCOVERY_LOG: list = []
-
-# ── Process lock ──────────────────────────────────────────────────────────────
-@contextmanager
-def scraper_lock():
-    """Prevent concurrent scraper/discovery instances from corrupting shared files."""
-    lock_file = open(LOCK_PATH, "w")
-    try:
-        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        lock_file.write(str(os.getpid()))
-        lock_file.flush()
-        yield
-    except IOError:
-        print(f"[Lock] Another scraper instance is already running — exiting.")
-        sys.exit(0)
-    finally:
-        fcntl.flock(lock_file, fcntl.LOCK_UN)
-        lock_file.close()
-        try:
-            os.unlink(LOCK_PATH)
-        except OSError:
-            pass
 
 
 # ── Virtual display (for patchright headed mode) ──────────────────────────────
@@ -148,6 +123,7 @@ DELAY_MIN      = 6
 DELAY_MAX      = 14
 LONG_PAUSE_MIN = 30
 LONG_PAUSE_MAX = 90
+BROWSER_RESTART_EVERY = 100   # restart browser every N products to clear memory bloat
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 def log(msg):
@@ -162,15 +138,19 @@ def get_secrets():
         return json.load(f)
 
 # ── Progress ──────────────────────────────────────────────────────────────────
-def load_progress(date_str):
-    path = PROGRESS_PATH.format(date=date_str)
+def _progress_path(date_str, retailer_filter=None):
+    key = retailer_filter.lower().replace(" ", "_") if retailer_filter else "all"
+    return PROGRESS_PATH.format(date=date_str, retailer=key)
+
+def load_progress(date_str, retailer_filter=None):
+    path = _progress_path(date_str, retailer_filter)
     if Path(path).exists():
         with open(path) as f:
             return set(json.load(f))
     return set()
 
-def save_progress(date_str, completed):
-    with open(PROGRESS_PATH.format(date=date_str), "w") as f:
+def save_progress(date_str, completed, retailer_filter=None):
+    with open(_progress_path(date_str, retailer_filter), "w") as f:
         json.dump(list(completed), f)
 
 # ── Dynamic batch split ───────────────────────────────────────────────────────
@@ -1087,10 +1067,12 @@ def discover_scan_urls(page):
         url = _google_scan_url(page, ln)
         if url:
             log(f"  [Scan] ✅ {url}")
+            _write_discovered_urls("Scan URL", {pid: url})
             found_urls[pid] = url
         else:
             log(f"  [Scan] ❌ not found")
             failed.append(ln)
+            _mark_searched("scan_searched", [pid])
 
         if i < len(needs):
             time.sleep(random.uniform(GOOGLE_DELAY_MIN, GOOGLE_DELAY_MAX))
@@ -1098,9 +1080,7 @@ def discover_scan_urls(page):
     log(f"[Discovery] Scan: found {len(found_urls)}/{len(needs)} URLs.")
     if failed:
         log(f"[Discovery] Scan: unresolved LN codes: {', '.join(failed[:20])}")
-    not_found_ids = [r["product_id"] for r in needs if r["product_id"] not in found_urls]
-    _mark_searched("scan_searched", not_found_ids)
-    return _write_discovered_urls("Scan URL", found_urls)
+    return len(found_urls)
 
 
 def discover_scan_urls_by_model(page):
@@ -1132,19 +1112,19 @@ def discover_scan_urls_by_model(page):
         url = _scan_direct_url(page, model, mfr)
         if url:
             log(f"  [Scan] ✅ {url}")
-            found_urls[pid] = url
             _DISCOVERY_LOG.append({"product_id": pid, "model_no": model,
                                    "manufacturer": mfr, "retailer": "Scan", "url": url})
+            _write_discovered_urls("Scan URL", {pid: url})
+            found_urls[pid] = url
         else:
             log(f"  [Scan] ❌ not found / no valid match")
+            _mark_searched("scan_searched", [pid])
 
         if i < len(needs):
             time.sleep(random.uniform(3, 6))
 
     log(f"[Discovery] Scan (model): found {len(found_urls)}/{len(needs)} URLs.")
-    not_found_ids = [r["product_id"] for r in needs if r["product_id"] not in found_urls]
-    _mark_searched("scan_searched", not_found_ids)
-    return _write_discovered_urls("Scan URL", found_urls)
+    return len(found_urls)
 
 
 # ── Combined pre-flight orchestrator ─────────────────────────────────────────
@@ -1237,11 +1217,13 @@ def discover_very_urls(page):
 
         url = _very_search_url(page, sku)
         if url:
-            found_urls[p["product_id"]] = url
             log(f"  [Very] ✅ {url}")
+            _write_discovered_urls("Very URL", {p["product_id"]: url})
+            found_urls[p["product_id"]] = url
         else:
             failed.append(sku)
             log(f"  [Very] ❌ not found")
+            _mark_searched("very_searched", [p["product_id"]])
 
         # Return to homepage between searches so search box is available
         _very_ensure_homepage(page)
@@ -1249,9 +1231,7 @@ def discover_very_urls(page):
     log(f"[Discovery] Very: found {len(found_urls)}/{len(needs)} URLs.")
     if failed:
         log(f"[Discovery] Very: unresolved SKUs: {', '.join(failed[:20])}")
-    not_found_ids = [r["product_id"] for r in needs if r["product_id"] not in found_urls]
-    _mark_searched("very_searched", not_found_ids)
-    return _write_discovered_urls("Very URL", found_urls)
+    return len(found_urls)
 
 
 # ── URL verification via page title ──────────────────────────────────────────
@@ -1495,19 +1475,19 @@ def discover_box_urls(page):
         time.sleep(random.uniform(GOOGLE_DELAY_MIN, GOOGLE_DELAY_MAX))
         url = _google_box_url(page, model, mfr)
         if url:
-            found_urls[p["product_id"]] = url
             log(f"  [Box] ✅ {url}")
             _DISCOVERY_LOG.append({"product_id": p["product_id"], "model_no": model,
                                    "manufacturer": mfr, "retailer": "Box", "url": url})
+            _write_discovered_urls("Box URL", {p["product_id"]: url})
+            found_urls[p["product_id"]] = url
         else:
             failed.append(model)
             log(f"  [Box] ❌ not found")
+            _mark_searched("box_searched", [p["product_id"]])
     log(f"[Discovery] Box: found {len(found_urls)}/{len(needs)} URLs.")
     if failed:
         log(f"[Discovery] Box: unresolved: {', '.join(f[:30] for f in failed[:20])}")
-    not_found_ids = [r["product_id"] for r in needs if r["product_id"] not in found_urls]
-    _mark_searched("box_searched", not_found_ids)
-    return _write_discovered_urls("Box URL", found_urls)
+    return len(found_urls)
 
 
 # ── CCL URL discovery ─────────────────────────────────────────────────────────
@@ -1526,19 +1506,19 @@ def discover_ccl_urls(page):
         time.sleep(random.uniform(GOOGLE_DELAY_MIN, GOOGLE_DELAY_MAX))
         url = _google_ccl_url(page, model, mfr)
         if url:
-            found_urls[p["product_id"]] = url
             log(f"  [CCL] ✅ {url}")
             _DISCOVERY_LOG.append({"product_id": p["product_id"], "model_no": model,
                                    "manufacturer": mfr, "retailer": "CCL Online", "url": url})
+            _write_discovered_urls("CCL URL", {p["product_id"]: url})
+            found_urls[p["product_id"]] = url
         else:
             failed.append(model)
             log(f"  [CCL] ❌ not found")
+            _mark_searched("ccl_searched", [p["product_id"]])
     log(f"[Discovery] CCL: found {len(found_urls)}/{len(needs)} URLs.")
     if failed:
         log(f"[Discovery] CCL: unresolved: {', '.join(f[:30] for f in failed[:20])}")
-    not_found_ids = [r["product_id"] for r in needs if r["product_id"] not in found_urls]
-    _mark_searched("ccl_searched", not_found_ids)
-    return _write_discovered_urls("CCL URL", found_urls)
+    return len(found_urls)
 
 
 def load_amazon_prices():
@@ -1761,44 +1741,48 @@ def run_preflight_discovery():
             browser.close()
 
     # Scan + Very + Box + CCL: patchright headed via Xvfb (Google blocks headless Chromium)
+    # Each retailer gets a fresh browser to keep memory flat across long discovery runs
     if scan_needs or scan_model_needs or very_needs or box_needs or ccl_needs:
         with virtual_display():
             with patchright_playwright() as pw:
-                browser = pw.chromium.launch(
-                    headless=False,
-                    args=["--no-sandbox", "--disable-dev-shm-usage"]
-                )
-                ctx = browser.new_context(
-                    viewport={"width": 1366, "height": 768},
-                    locale="en-GB",
-                    timezone_id="Europe/London",
-                )
-                page = ctx.new_page()
+
+                def _fresh_browser_page():
+                    b = pw.chromium.launch(headless=False, args=["--no-sandbox", "--disable-dev-shm-usage"])
+                    c = b.new_context(viewport={"width": 1366, "height": 768},
+                                      locale="en-GB", timezone_id="Europe/London")
+                    return b, c.new_page()
 
                 if scan_needs:
-                    written = discover_scan_urls(page)
-                    total_written += written
+                    browser, page = _fresh_browser_page()
+                    total_written += discover_scan_urls(page)
+                    browser.close()
+                    log("[Discovery] Browser restarted after Scan discovery.")
 
                 if scan_model_needs:
-                    written = discover_scan_urls_by_model(page)
-                    total_written += written
+                    browser, page = _fresh_browser_page()
+                    total_written += discover_scan_urls_by_model(page)
+                    browser.close()
+                    log("[Discovery] Browser restarted after Scan (model) discovery.")
 
                 if very_needs:
-                    written = discover_very_urls(page)
-                    total_written += written
+                    browser, page = _fresh_browser_page()
+                    total_written += discover_very_urls(page)
+                    browser.close()
+                    log("[Discovery] Browser restarted after Very discovery.")
 
                 if box_needs:
-                    written = discover_box_urls(page)
-                    total_written += written
+                    browser, page = _fresh_browser_page()
+                    total_written += discover_box_urls(page)
+                    browser.close()
+                    log("[Discovery] Browser restarted after Box discovery.")
 
                 if ccl_needs:
-                    written = discover_ccl_urls(page)
-                    total_written += written
-
-                # Price sanity check — uses same live browser page
-                run_discovery_sanity_report(page)
-
-                browser.close()
+                    browser, page = _fresh_browser_page()
+                    total_written += discover_ccl_urls(page)
+                    # Price sanity check uses the last live browser page
+                    run_discovery_sanity_report(page)
+                    browser.close()
+                    log("[Discovery] Browser restarted after CCL discovery.")
 
     if total_written:
         log(f"[Discovery] {total_written} new URLs written to DB.")
@@ -1809,14 +1793,20 @@ def run_preflight_discovery():
 
 
 # ── Main run ──────────────────────────────────────────────────────────────────
-def run(offset, limit, date_str, notify=False):
-    log(f"Starting retailer scrape: offset={offset}, limit={limit}, date={date_str}")
+def run(offset, limit, date_str, notify=False, retailer_filter=None):
+    label = f"[{retailer_filter}]" if retailer_filter else "[ALL]"
+    log(f"Starting retailer scrape: offset={offset}, limit={limit}, date={date_str}, retailer={label}")
 
     id_codes  = load_retailer_ids()
     products  = read_products(offset, limit)
-    completed = load_progress(date_str)
+    completed = load_progress(date_str, retailer_filter)
 
     active = [r for r in RETAILERS if not r["blocked"]]
+    if retailer_filter:
+        active = [r for r in active if r["name"].lower() == retailer_filter.lower()]
+        if not active:
+            log(f"ERROR: no retailer matching '{retailer_filter}' — valid names: {[r['name'] for r in RETAILERS]}")
+            return
     log(f"Loaded {len(products)} products | ID codes: {len(id_codes)} | Active: {[r['name'] for r in active]}")
 
     found = 0
@@ -1828,20 +1818,22 @@ def run(offset, limit, date_str, notify=False):
 
     with virtual_display():
       with patchright_playwright() as p:
-        browser = p.chromium.launch(
-            headless=False,
-            args=["--no-sandbox","--disable-dev-shm-usage"]
-        )
-        context = browser.new_context(
-            viewport={"width":1366,"height":768},
-            locale="en-GB", timezone_id="Europe/London",
-            extra_http_headers={
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-                "Accept-Language": "en-GB,en;q=0.9",
-                "DNT": "1",
-            }
-        )
-        page = context.new_page()
+
+        def _new_browser_page():
+            b = p.chromium.launch(headless=False, args=["--no-sandbox", "--disable-dev-shm-usage"])
+            c = b.new_context(
+                viewport={"width": 1366, "height": 768},
+                locale="en-GB", timezone_id="Europe/London",
+                extra_http_headers={
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                    "Accept-Language": "en-GB,en;q=0.9",
+                    "DNT": "1",
+                }
+            )
+            return b, c.new_page()
+
+        browser, page = _new_browser_page()
+        pages_since_restart = 0
 
         for product in products:
             product_id = product["product_id"]
@@ -1894,13 +1886,23 @@ def run(offset, limit, date_str, notify=False):
                     db_seller_type[name] = None
                     not_found += 1
 
-                time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
+                if status != "NOT_STOCKED":
+                    time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
 
             write_to_db(date_str, product, db_prices, db_in_stock, db_seller_type)
 
             products_done += 1
+            pages_since_restart += 1
             completed.add(product_id)
-            save_progress(date_str, completed)
+            save_progress(date_str, completed, retailer_filter)
+
+            # Restart browser every N products to clear patchright memory bloat
+            if pages_since_restart >= BROWSER_RESTART_EVERY:
+                log(f"[Browser] Restarting browser after {BROWSER_RESTART_EVERY} products to clear memory...")
+                browser.close()
+                browser, page = _new_browser_page()
+                pages_since_restart = 0
+                log("[Browser] Browser restarted — memory cleared.")
 
             since_pause += 1
             if since_pause >= long_pause_every:
@@ -1927,44 +1929,39 @@ def run(offset, limit, date_str, notify=False):
 # ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--retailer", type=str, default=None,
+                        help="Run a single retailer session (e.g. --retailer Box)")
     parser.add_argument("--batch",    type=int, choices=[1, 2, 3],
-                        help="Run one of three equal-sized batches (discovery runs before batch 1)")
+                        help="Run one of three equal-sized product batches (all retailers)")
     parser.add_argument("--test",     action="store_true",
-                        help="Scrape first 20 products (includes pre-flight discovery)")
+                        help="Scrape first 20 products across all retailers")
     parser.add_argument("--discover", action="store_true",
                         help="Run only the pre-flight URL discovery, then exit")
     args = parser.parse_args()
 
     date_str = datetime.now().strftime("%d-%m-%Y")
 
-    with scraper_lock():
-
-      if args.discover:
-        # Standalone discovery run — useful to trigger manually after adding new IDs to DB
+    if args.discover:
+        # Standalone discovery run — scheduled nightly at 01:00 via cron
         run_preflight_discovery()
 
-      elif args.test:
-        # Test mode: run discovery then scrape first 20 products
+    elif args.test:
         run_preflight_discovery()
         run(offset=0, limit=20, date_str=date_str, notify=False)
 
-      elif args.batch in (1, 2, 3):
+    elif args.retailer:
+        # Single-retailer session — 8 run simultaneously, one per retailer
+        total = count_products()
+        log(f"RETAILER SCRAPER — {date_str} [{args.retailer.upper()}] {total} products")
+        run(offset=0, limit=total, date_str=date_str, notify=False, retailer_filter=args.retailer)
+
+    elif args.batch in (1, 2, 3):
         log(f"RETAILER SCRAPER — {date_str} [BATCH {args.batch}]")
         total  = count_products()
         ranges = batch_ranges(total)
         log(f"DB: {total} active products — batch ranges (offset, limit): {ranges}")
         offset, limit = ranges[args.batch - 1]
-
-        if args.batch == 1:
-            # Run URL discovery for any new products before price scraping starts
-            run_preflight_discovery()
-            # Re-read count after discovery (new products may have been found in other tables,
-            # but DB product count itself doesn't change here)
-            total  = count_products()
-            ranges = batch_ranges(total)
-            offset, limit = ranges[0]
-
         run(offset, limit, date_str, notify=(args.batch == 3))
 
-      else:
+    else:
         parser.print_help()
