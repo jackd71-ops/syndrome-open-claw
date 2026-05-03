@@ -6584,7 +6584,7 @@ def retailer_sku(product_id):
     ) or {}
 
     snapshot = qry(
-        "SELECT retailer, price, seller_type FROM retailer_prices WHERE date=? AND product_id=? ORDER BY retailer",
+        "SELECT retailer, price, in_stock, seller_type FROM retailer_prices WHERE date=? AND product_id=? ORDER BY retailer",
         (latest, product_id)
     )
 
