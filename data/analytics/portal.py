@@ -4970,9 +4970,11 @@ function renderRetSku(data) {
   snapshot.forEach(r => {
     const ret       = r.retailer;
     const retEsc    = ret.replace(/'/g,"\\'");
-    const belowBadge = r.below_msrp === 1
-      ? '<span class="badge badge-red">Below MSRP</span>'
-      : (r.price ? '<span class="badge badge-green">Above MSRP</span>' : '');
+    const msrp = info.msrp;
+    const belowBadge = (!r.price || !msrp) ? ''
+      : r.price < msrp  ? '<span class="badge badge-red">Below MSRP</span>'
+      : r.price > msrp  ? '<span class="badge badge-green">Above MSRP</span>'
+      : '<span style="color:#605E5C;font-size:11px">At MSRP</span>';
     const stockCell  = r.in_stock === 1 ? '<span style="color:#107C10">✓ In Stock</span>'
                      : r.in_stock === 0 ? '<span style="color:#A4262C">✗ OOS</span>' : '—';
     const linkStyle  = _retSkuLinks[ret]
@@ -6573,12 +6575,16 @@ def retailer_sku(product_id):
         return jsonify({})
 
     info = qry_one(
-        "SELECT product_id, model_no, manufacturer, description, msrp FROM retailer_prices WHERE product_id=? LIMIT 1",
+        """SELECT rp.product_id, rp.model_no, rp.manufacturer, rp.description,
+                  COALESCE(p.msrp, rp.msrp) AS msrp
+           FROM retailer_prices rp
+           LEFT JOIN products p ON p.product_id = rp.product_id
+           WHERE rp.product_id = ? LIMIT 1""",
         (product_id,)
     ) or {}
 
     snapshot = qry(
-        "SELECT retailer, price, below_msrp, seller_type FROM retailer_prices WHERE date=? AND product_id=? ORDER BY retailer",
+        "SELECT retailer, price, seller_type FROM retailer_prices WHERE date=? AND product_id=? ORDER BY retailer",
         (latest, product_id)
     )
 
