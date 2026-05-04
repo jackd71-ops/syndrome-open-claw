@@ -902,6 +902,7 @@ HTML = r"""<!DOCTYPE html>
         <button class="sidebar-btn" onclick="loadCatImportExport(this,'retailer-ids-import')">📥 Import Retailer IDs</button>
         <button class="sidebar-btn" onclick="loadCatImportExport(this,'retailer-ids-export')">📤 Export Retailer IDs</button>
         <button class="sidebar-btn" onclick="loadCatMissingUrls(this)">🔍 Missing URLs</button>
+        <button class="sidebar-btn" onclick="loadCatNotStocked(this)">🚫 Not Stocked Flags</button>
       </div>
     </div>
     <div class="sidebar-section">
@@ -952,6 +953,10 @@ HTML = r"""<!DOCTYPE html>
     <!-- Missing URLs import/export -->
     <div class="content-section" id="cat-missing-urls">
       <div id="cat-missing-urls-content"><div class="spinner">Loading…</div></div>
+    </div>
+    <!-- Not Stocked Flags audit -->
+    <div class="content-section" id="cat-not-stocked">
+      <div id="cat-not-stocked-content"><div class="spinner">Loading…</div></div>
     </div>
     <!-- Scraper — Refresh SKUs -->
     <div class="content-section" id="stic-scrape">
@@ -1074,48 +1079,58 @@ HTML = r"""<!DOCTYPE html>
         <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#605E5C;margin-bottom:12px">Retailer IDs &amp; URLs</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px">
           <div class="edit-field">
-            <label>Amazon ASIN</label>
-            <input type="text" id="ep-amazon-asin" placeholder="e.g. B0XXXXXXXX">
+            <label style="display:flex;justify-content:space-between;align-items:center">Amazon ASIN
+              <span style="font-size:11px;font-weight:400;color:#A4262C"><input type="checkbox" id="ep-ns-amazon" onchange="_epNsCheck('Amazon',this)"> Not stocked</span></label>
+            <input type="text" id="ep-amazon-asin" placeholder="e.g. B0XXXXXXXX" oninput="_epNsInput('Amazon',this)">
           </div>
           <div class="edit-field">
-            <label>Currys SKU</label>
-            <input type="text" id="ep-currys-sku" placeholder="e.g. 10XXXXXX">
+            <label style="display:flex;justify-content:space-between;align-items:center">Currys SKU
+              <span style="font-size:11px;font-weight:400;color:#A4262C"><input type="checkbox" id="ep-ns-currys" onchange="_epNsCheck('Currys',this)"> Not stocked</span></label>
+            <input type="text" id="ep-currys-sku" placeholder="e.g. 10XXXXXX" oninput="_epNsInput('Currys',this)">
           </div>
           <div class="edit-field">
-            <label>Argos SKU</label>
-            <input type="text" id="ep-argos-sku" placeholder="e.g. 7629329">
+            <label style="display:flex;justify-content:space-between;align-items:center">Argos SKU
+              <span style="font-size:11px;font-weight:400;color:#A4262C"><input type="checkbox" id="ep-ns-argos" onchange="_epNsCheck('Argos',this)"> Not stocked</span></label>
+            <input type="text" id="ep-argos-sku" placeholder="e.g. 7629329" oninput="_epNsInput('Argos',this)">
           </div>
           <div class="edit-field">
-            <label>Overclockers Code</label>
-            <input type="text" id="ep-ocuk-code" placeholder="e.g. MSI-XXX-XXX">
+            <label style="display:flex;justify-content:space-between;align-items:center">Overclockers Code
+              <span style="font-size:11px;font-weight:400;color:#A4262C"><input type="checkbox" id="ep-ns-overclockers" onchange="_epNsCheck('Overclockers',this)"> Not stocked</span></label>
+            <input type="text" id="ep-ocuk-code" placeholder="e.g. MSI-XXX-XXX" oninput="_epNsInput('Overclockers',this)">
           </div>
           <div class="edit-field">
-            <label>Very SKU</label>
-            <input type="text" id="ep-very-sku" placeholder="SKU code">
+            <label style="display:flex;justify-content:space-between;align-items:center">Very SKU
+              <span style="font-size:11px;font-weight:400;color:#A4262C"><input type="checkbox" id="ep-ns-very" onchange="_epNsCheck('Very',this)"> Not stocked</span></label>
+            <input type="text" id="ep-very-sku" placeholder="SKU code" oninput="_epNsInput('Very',this)">
           </div>
           <div class="edit-field">
             <label>Scan LN Code</label>
             <input type="text" id="ep-scan-ln" placeholder="e.g. LN12345">
           </div>
           <div class="edit-field" style="grid-column:1/-1">
-            <label>Very URL</label>
+            <label style="display:flex;justify-content:space-between;align-items:center">Very URL
+              <span style="font-size:11px;font-weight:400;color:#605E5C">(auto-discovered from Very SKU)</span></label>
             <input type="text" id="ep-very-url" placeholder="https://www.very.co.uk/...">
           </div>
           <div class="edit-field" style="grid-column:1/-1">
-            <label>Scan URL</label>
-            <input type="text" id="ep-scan-url" placeholder="https://www.scan.co.uk/products/...">
+            <label style="display:flex;justify-content:space-between;align-items:center">Scan URL
+              <span style="font-size:11px;font-weight:400;color:#A4262C"><input type="checkbox" id="ep-ns-scan" onchange="_epNsCheck('Scan',this)"> Not stocked</span></label>
+            <input type="text" id="ep-scan-url" placeholder="https://www.scan.co.uk/products/..." oninput="_epNsInput('Scan',this)">
           </div>
           <div class="edit-field" style="grid-column:1/-1">
-            <label>AWD-IT URL</label>
-            <input type="text" id="ep-awdit-url" placeholder="https://www.awd-it.co.uk/...">
+            <label style="display:flex;justify-content:space-between;align-items:center">AWD-IT URL
+              <span style="font-size:11px;font-weight:400;color:#A4262C"><input type="checkbox" id="ep-ns-awdit" onchange="_epNsCheck('AWD-IT',this)"> Not stocked</span></label>
+            <input type="text" id="ep-awdit-url" placeholder="https://www.awd-it.co.uk/..." oninput="_epNsInput('AWD-IT',this)">
           </div>
           <div class="edit-field" style="grid-column:1/-1">
-            <label>CCL Online URL</label>
-            <input type="text" id="ep-ccl-url" placeholder="https://www.cclonline.com/...">
+            <label style="display:flex;justify-content:space-between;align-items:center">CCL Online URL
+              <span style="font-size:11px;font-weight:400;color:#A4262C"><input type="checkbox" id="ep-ns-ccl" onchange="_epNsCheck('CCL Online',this)"> Not stocked</span></label>
+            <input type="text" id="ep-ccl-url" placeholder="https://www.cclonline.com/..." oninput="_epNsInput('CCL Online',this)">
           </div>
           <div class="edit-field" style="grid-column:1/-1">
-            <label>Box URL</label>
-            <input type="text" id="ep-box-url" placeholder="https://www.box.co.uk/...">
+            <label style="display:flex;justify-content:space-between;align-items:center">Box URL
+              <span style="font-size:11px;font-weight:400;color:#A4262C"><input type="checkbox" id="ep-ns-box" onchange="_epNsCheck('Box',this)"> Not stocked</span></label>
+            <input type="text" id="ep-box-url" placeholder="https://www.box.co.uk/..." oninput="_epNsInput('Box',this)">
           </div>
         </div>
       </div>
@@ -2088,6 +2103,38 @@ function closeHelp() {
 // ── Product edit modal ─────────────────────────────────────────────────────────
 let _editCallback = null;   // called after a successful save to refresh the parent view
 
+// Retailer → checkbox ID + input field ID mapping for Not Stocked checkboxes
+const _EP_NS = [
+  {r:'Amazon',       cb:'ep-ns-amazon',       inp:'ep-amazon-asin'},
+  {r:'Currys',       cb:'ep-ns-currys',        inp:'ep-currys-sku'},
+  {r:'Argos',        cb:'ep-ns-argos',         inp:'ep-argos-sku'},
+  {r:'Overclockers', cb:'ep-ns-overclockers',  inp:'ep-ocuk-code'},
+  {r:'Very',         cb:'ep-ns-very',          inp:'ep-very-sku'},
+  {r:'Scan',         cb:'ep-ns-scan',          inp:'ep-scan-url'},
+  {r:'AWD-IT',       cb:'ep-ns-awdit',         inp:'ep-awdit-url'},
+  {r:'CCL Online',   cb:'ep-ns-ccl',           inp:'ep-ccl-url'},
+  {r:'Box',          cb:'ep-ns-box',           inp:'ep-box-url'},
+];
+
+function _epNsInput(retailer, inputEl) {
+  if (!inputEl.value.trim()) return;
+  const m = _EP_NS.find(x => x.r === retailer);
+  if (m) document.getElementById(m.cb).checked = false;
+}
+
+function _epNsCheck(retailer, cbEl) {
+  if (!cbEl.checked) return;
+  const m = _EP_NS.find(x => x.r === retailer);
+  if (!m) return;
+  const inp = document.getElementById(m.inp);
+  if (inp && inp.value.trim()) {
+    if (!confirm(`Clear ${retailer} code/URL and mark as not stocked?`)) {
+      cbEl.checked = false; return;
+    }
+    inp.value = '';
+  }
+}
+
 function _openProductEditFocus(productId, focusFieldId) {
   _openProductEdit(productId, false, focusFieldId);
 }
@@ -2117,6 +2164,12 @@ function _openProductEdit(productId, focusMsrp, focusFieldId) {
       document.getElementById('ep-box-url').value       = p.box_url      || '';
       document.getElementById('ep-msg').textContent     = '';
       document.getElementById('edit-modal-title').textContent = `Edit Product — ${p.product_id}`;
+      // Not-stocked checkboxes
+      const nsSet = new Set(p.not_stocked || []);
+      _EP_NS.forEach(m => {
+        const cb = document.getElementById(m.cb);
+        if (cb) cb.checked = nsSet.has(m.r);
+      });
       document.getElementById('ep-stic-url').value      = p.stic_url      || '';
       document.getElementById('ep-notes').value         = p.notes         || '';
       document.getElementById('ep-eol').value           = p.eol          ? '1' : '0';
@@ -2296,6 +2349,12 @@ function _saveProduct() {
     eol:           parseInt(document.getElementById('ep-eol').value),
     stic_exclude:  parseInt(document.getElementById('ep-stic-exclude').value),
   };
+  // Not-stocked flags — send all 9 so backend can set or clear each one
+  payload.not_stocked = {};
+  _EP_NS.forEach(m => {
+    const cb = document.getElementById(m.cb);
+    payload.not_stocked[m.r] = cb ? cb.checked : false;
+  });
   const msg = document.getElementById('ep-msg');
   msg.style.color = '#605E5C';
   msg.textContent = 'Saving…';
@@ -3878,6 +3937,118 @@ function confirmMissingUrlsImport(btn) {
     document.getElementById('mu-file-input').value = '';
     document.getElementById('mu-preview').innerHTML = '';
   }).catch(() => { btn.disabled = false; btn.textContent = '✓ Apply Changes'; });
+}
+
+// ── Not Stocked Flags audit page ─────────────────────────────────────────────
+let _nsAllRows = [];
+
+function loadCatNotStocked(btn) {
+  showCatSection('not-stocked', btn);
+  _renderNotStockedPage();
+}
+
+function _renderNotStockedPage() {
+  const el = document.getElementById('cat-not-stocked-content');
+  el.innerHTML = '<div class="spinner">Loading…</div>';
+  fetch('/api/retailer/not-stocked/list').then(r=>r.json()).then(rows => {
+    _nsAllRows = rows;
+    el.innerHTML = `
+      <h2 style="margin:0 0 12px">Not Stocked Flags</h2>
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+        <select id="ns-filter-retailer" onchange="_nsFilter()"
+          style="padding:4px 8px;border:1px solid #C8C6C4;border-radius:2px;font-size:13px">
+          <option value="">All retailers</option>
+          ${[...new Set(rows.map(r=>r.retailer))].sort().map(r=>`<option value="${r}">${r}</option>`).join('')}
+        </select>
+        <select id="ns-filter-mfr" onchange="_nsFilter()"
+          style="padding:4px 8px;border:1px solid #C8C6C4;border-radius:2px;font-size:13px">
+          <option value="">All manufacturers</option>
+          ${[...new Set(rows.map(r=>r.manufacturer).filter(Boolean))].sort().map(m=>`<option value="${m}">${m}</option>`).join('')}
+        </select>
+        <span id="ns-count" style="font-size:12px;color:#605E5C;font-weight:600"></span>
+        <button id="ns-unset-all-btn" onclick="_nsUnsetAll(this)"
+          style="margin-left:auto;padding:4px 14px;border:1px solid #A4262C;color:#A4262C;background:#fff;border-radius:2px;font-size:12px;cursor:pointer;display:none">
+          ✕ Unset All Visible</button>
+      </div>
+      <div class="tbl-wrap" id="ns-tbl"></div>`;
+    _nsFilter();
+  });
+}
+
+function _nsFilter() {
+  const ret = (document.getElementById('ns-filter-retailer')||{}).value || '';
+  const mfr = (document.getElementById('ns-filter-mfr')||{}).value || '';
+  let rows = _nsAllRows;
+  if (ret) rows = rows.filter(r => r.retailer === ret);
+  if (mfr) rows = rows.filter(r => r.manufacturer === mfr);
+  const countEl = document.getElementById('ns-count');
+  const unsetBtn = document.getElementById('ns-unset-all-btn');
+  if (countEl) countEl.textContent = rows.length + ' flag' + (rows.length!==1?'s':'');
+  if (unsetBtn) unsetBtn.style.display = rows.length ? '' : 'none';
+  _nsRender(rows);
+}
+
+function _nsRender(rows) {
+  const el = document.getElementById('ns-tbl');
+  if (!rows.length) {
+    el.innerHTML = '<p style="color:#107C10;padding:20px">✅ No not-stocked flags match the current filter.</p>';
+    return;
+  }
+  let html = '<table><thead><tr><th>Product ID</th><th>Description</th><th>Model No</th>'
+    + '<th>Manufacturer</th><th>Retailer</th><th>Source</th><th>Date Set</th><th></th></tr></thead><tbody>';
+  rows.forEach(r => {
+    html += `<tr>
+      <td><a href="#" onclick="event.preventDefault();_openProductEdit(${r.product_id},false)">${r.product_id}</a></td>
+      <td>${r.description||''}</td>
+      <td>${r.model_no||''}</td>
+      <td>${r.manufacturer||''}</td>
+      <td>${r.retailer}</td>
+      <td style="color:#A19F9D;font-size:11px">${r.source}</td>
+      <td style="color:#A19F9D;font-size:11px">${r.set_date||''}</td>
+      <td><button onclick="_nsUnsetOne(${r.product_id},'${r.retailer.replace(/'/g,"\\'")}',this)"
+        style="background:none;border:1px solid #C8C6C4;border-radius:2px;padding:2px 8px;cursor:pointer;font-size:11px;color:#A4262C">
+        ✕ Unset</button></td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  el.innerHTML = html;
+  makeSortableAll(el);
+}
+
+function _nsUnsetOne(productId, retailer, btn) {
+  btn.disabled = true; btn.textContent = '…';
+  fetch('/api/retailer/not-stocked/unset', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({product_id: productId, retailer: retailer})
+  }).then(r=>r.json()).then(d => {
+    if (d.ok) {
+      _nsAllRows = _nsAllRows.filter(r => !(r.product_id===productId && r.retailer===retailer));
+      _nsFilter();
+    } else { btn.disabled=false; btn.textContent='✕ Unset'; }
+  }).catch(() => { btn.disabled=false; btn.textContent='✕ Unset'; });
+}
+
+function _nsUnsetAll(btn) {
+  const ret = (document.getElementById('ns-filter-retailer')||{}).value || '';
+  const mfr = (document.getElementById('ns-filter-mfr')||{}).value || '';
+  let visible = _nsAllRows;
+  if (ret) visible = visible.filter(r => r.retailer === ret);
+  if (mfr) visible = visible.filter(r => r.manufacturer === mfr);
+  if (!visible.length) return;
+  if (!confirm(`Unset ${visible.length} not-stocked flag${visible.length!==1?'s':''}?`)) return;
+  btn.disabled = true; btn.textContent = 'Unsetting…';
+  const pairs = visible.map(r => ({product_id: r.product_id, retailer: r.retailer}));
+  fetch('/api/retailer/not-stocked/unset-bulk', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({pairs})
+  }).then(r=>r.json()).then(d => {
+    if (d.ok) {
+      const removed = new Set(pairs.map(p => p.product_id + '|' + p.retailer));
+      _nsAllRows = _nsAllRows.filter(r => !removed.has(r.product_id + '|' + r.retailer));
+      _nsFilter();
+    }
+    btn.disabled = false; btn.textContent = '✕ Unset All Visible';
+  }).catch(() => { btn.disabled=false; btn.textContent='✕ Unset All Visible'; });
 }
 
 let _ieCurrentTool = null;    // tool id currently open
@@ -7243,6 +7414,46 @@ def retailer_not_stocked_unset():
     return jsonify({"ok": True})
 
 
+@app.route("/api/retailer/not-stocked/unset-bulk", methods=["POST"])
+def retailer_not_stocked_unset_bulk():
+    data  = request.get_json(silent=True) or {}
+    pairs = data.get("pairs", [])
+    if not pairs:
+        return jsonify({"error": "No pairs provided"}), 400
+    db = get_db()
+    for p in pairs:
+        pid = p.get("product_id")
+        ret = str(p.get("retailer", "")).strip()
+        if pid and ret:
+            db.execute(
+                "DELETE FROM retailer_not_stocked WHERE product_id=? AND retailer=?",
+                (pid, ret)
+            )
+    db.commit()
+    db.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/retailer/not-stocked/list")
+def retailer_not_stocked_list():
+    retailer = request.args.get("retailer", "").strip()
+    params   = []
+    where    = ""
+    if retailer:
+        where  = "WHERE ns.retailer = ?"
+        params = [retailer]
+    rows = qry(
+        f"""SELECT ns.product_id, ns.retailer, ns.source, ns.set_date,
+               p.description, p.model_no, p.manufacturer
+           FROM retailer_not_stocked ns
+           LEFT JOIN products p ON p.product_id = ns.product_id
+           {where}
+           ORDER BY ns.retailer, p.manufacturer, p.model_no""",
+        params
+    )
+    return jsonify(rows)
+
+
 _RETAILER_REF_COL = {
     "Amazon":       "amazon_asin",
     "Currys":       "currys_sku",
@@ -9380,10 +9591,16 @@ def catalogue_product(product_id):
             "LEFT JOIN retailer_ids r ON r.product_id = p.product_id "
             "WHERE p.product_id = ?", (product_id,)
         ).fetchone()
-        db.close()
         if not row:
+            db.close()
             return jsonify({"error": "Product not found"}), 404
-        return jsonify(dict(row))
+        result = dict(row)
+        ns = db.execute(
+            "SELECT retailer FROM retailer_not_stocked WHERE product_id=?", (product_id,)
+        ).fetchall()
+        result["not_stocked"] = [r["retailer"] for r in ns]
+        db.close()
+        return jsonify(result)
 
     # POST — update product fields and/or retailer IDs
     data = request.get_json(silent=True) or {}
@@ -9451,6 +9668,27 @@ def catalogue_product(product_id):
 
     if ret_data:
         _auto_clear_not_stocked(db, product_id, ret_data)
+
+    # Handle not_stocked flag updates from edit modal
+    ns_updates = data.get("not_stocked")
+    if ns_updates and isinstance(ns_updates, dict):
+        import zoneinfo as _zi
+        today_iso = datetime.now(_zi.ZoneInfo("Europe/London")).date().isoformat()
+        for retailer, flag in ns_updates.items():
+            if flag:
+                db.execute(
+                    "INSERT OR REPLACE INTO retailer_not_stocked "
+                    "(product_id,retailer,source,set_date) VALUES (?,?,'manual',?)",
+                    (product_id, retailer, today_iso)
+                )
+            else:
+                db.execute(
+                    "DELETE FROM retailer_not_stocked WHERE product_id=? AND retailer=?",
+                    (product_id, retailer)
+                )
+        # Auto-clear again — if a code was just set, it wins over the not_stocked flag
+        if ret_data:
+            _auto_clear_not_stocked(db, product_id, ret_data)
 
     db.commit()
     db.close()
@@ -9568,7 +9806,7 @@ def import_retailer_ids_confirm():
 
 @app.route("/api/export/retailer-ids")
 def export_retailer_ids():
-    """Download all retailer IDs as CSV."""
+    """Download all retailer IDs as CSV, including not-stocked flags."""
     from flask import Response
     import io, csv as _csv
     db = get_db()
@@ -9579,18 +9817,29 @@ def export_retailer_ids():
         "FROM retailer_ids r LEFT JOIN products p ON p.product_id = r.product_id "
         "ORDER BY r.product_id"
     ).fetchall()
+    # Build per-product not_stocked set
+    ns_rows = db.execute("SELECT product_id, retailer FROM retailer_not_stocked").fetchall()
+    ns_map  = {}
+    for nr in ns_rows:
+        ns_map.setdefault(nr["product_id"], set()).add(nr["retailer"])
     db.close()
+    _ns_retailers = ["Amazon","Currys","Argos","Overclockers","Very","Scan","AWD-IT","CCL Online","Box"]
     out = io.StringIO()
     w   = _csv.writer(out)
     w.writerow(["Product","model_no","amazon_asin","currys_sku","very_sku","argos_sku",
-                "ccl_url","awdit_url","scan_ln","scan_url","ocuk_code","box_url","very_url"])
+                "ccl_url","awdit_url","scan_ln","scan_url","ocuk_code","box_url","very_url",
+                "ns_amazon","ns_currys","ns_argos","ns_overclockers","ns_very",
+                "ns_scan","ns_awdit","ns_ccl","ns_box"])
     for r in rows:
-        w.writerow([r["product_id"], r["model_no"] or "",
+        pid  = r["product_id"]
+        ns   = ns_map.get(pid, set())
+        w.writerow([pid, r["model_no"] or "",
                     r["amazon_asin"] or "", r["currys_sku"] or "",
                     r["very_sku"] or "", r["argos_sku"] or "",
                     r["ccl_url"] or "", r["awdit_url"] or "",
                     r["scan_ln"] or "", r["scan_url"] or "",
-                    r["ocuk_code"] or "", r["box_url"] or "", r["very_url"] or ""])
+                    r["ocuk_code"] or "", r["box_url"] or "", r["very_url"] or ""]
+                   + ["TRUE" if ret in ns else "" for ret in _ns_retailers])
     from datetime import datetime as _dt
     fname = f"retailer_ids_{_dt.now().strftime('%Y-%m-%d')}.csv"
     return Response(out.getvalue(), mimetype="text/csv",
