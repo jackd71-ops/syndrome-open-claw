@@ -847,7 +847,10 @@ HTML = r"""<!DOCTYPE html>
             <option value="unsearched">Not yet searched</option>
             <option value="searched">Confirmed not stocked</option>
           </select>
-          <span id="ret-miss-ret-count" style="font-size:12px;color:#A19F9D"></span>
+          <span id="ret-miss-ret-count" style="font-size:12px;color:#605E5C;font-weight:600"></span>
+          <button onclick="exportRetMissing('retailer')"
+            style="padding:4px 12px;border:1px solid #C8C6C4;border-radius:2px;font-size:12px;cursor:pointer;background:#fff;margin-left:4px">
+            📥 Export Excel</button>
         </div>
         <div class="tbl-wrap" id="ret-miss-ret-tbl"></div>
       </div>
@@ -863,7 +866,10 @@ HTML = r"""<!DOCTYPE html>
             style="padding:4px 8px;border:1px solid #C8C6C4;border-radius:2px;font-size:13px;display:none">
             <option value="">All groups</option>
           </select>
-          <span id="ret-miss-grp-count" style="font-size:12px;color:#A19F9D"></span>
+          <span id="ret-miss-grp-count" style="font-size:12px;color:#605E5C;font-weight:600"></span>
+          <button onclick="exportRetMissing('group')"
+            style="padding:4px 12px;border:1px solid #C8C6C4;border-radius:2px;font-size:12px;cursor:pointer;background:#fff;margin-left:4px">
+            📥 Export Excel</button>
         </div>
         <div class="tbl-wrap" id="ret-miss-grp-tbl"></div>
       </div>
@@ -895,6 +901,7 @@ HTML = r"""<!DOCTYPE html>
         <button class="sidebar-btn" onclick="loadCatRetailerIds(this)">🔗 View Retailer IDs</button>
         <button class="sidebar-btn" onclick="loadCatImportExport(this,'retailer-ids-import')">📥 Import Retailer IDs</button>
         <button class="sidebar-btn" onclick="loadCatImportExport(this,'retailer-ids-export')">📤 Export Retailer IDs</button>
+        <button class="sidebar-btn" onclick="loadCatMissingUrls(this)">🔍 Missing URLs</button>
       </div>
     </div>
     <div class="sidebar-section">
@@ -941,6 +948,10 @@ HTML = r"""<!DOCTYPE html>
     <!-- Missing EAN report -->
     <div class="content-section" id="cat-missing-ean">
       <div id="cat-missing-ean-content"><div class="spinner">Loading…</div></div>
+    </div>
+    <!-- Missing URLs import/export -->
+    <div class="content-section" id="cat-missing-urls">
+      <div id="cat-missing-urls-content"><div class="spinner">Loading…</div></div>
     </div>
     <!-- Scraper — Refresh SKUs -->
     <div class="content-section" id="stic-scrape">
@@ -3787,6 +3798,88 @@ function _missingEanRender() {
     });
 }
 
+// ── Missing URLs import page ──────────────────────────────────────────────────
+function loadCatMissingUrls(btn) {
+  showCatSection('missing-urls', btn);
+  const el = document.getElementById('cat-missing-urls-content');
+  el.innerHTML = `
+    <h2 style="margin:0 0 16px">Missing URLs — Import / Export</h2>
+    <p style="margin:0 0 16px;font-size:13px;color:#605E5C">
+      Use the <strong>Retailer Missing report</strong> Export button to download a template.<br>
+      Fill in <em>Retailer Ref</em> (ASIN / SKU / Code), <em>URL</em>, and/or set <em>Not Stocked</em> to TRUE.<br>
+      Then upload the completed sheet here to apply all changes in one go.
+    </p>
+    <div style="background:#F3F2F1;border-radius:4px;padding:16px;max-width:540px;margin-bottom:20px">
+      <label style="font-size:13px;font-weight:600;display:block;margin-bottom:8px">Upload completed Excel sheet (.xlsx)</label>
+      <input type="file" id="mu-file-input" accept=".xlsx"
+        style="font-size:13px;margin-bottom:12px;display:block"
+        onchange="previewMissingUrlsImport(this)">
+      <div id="mu-preview"></div>
+      <button id="mu-confirm-btn" onclick="confirmMissingUrlsImport(this)"
+        style="display:none;margin-top:12px;padding:6px 18px;background:#0078D4;color:#fff;border:none;border-radius:2px;cursor:pointer;font-size:13px;font-weight:600">
+        ✓ Apply Changes</button>
+    </div>
+    <div id="mu-result"></div>`;
+}
+
+let _muPreviewData = [];
+
+function previewMissingUrlsImport(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const prevEl = document.getElementById('mu-preview');
+  const confirmBtn = document.getElementById('mu-confirm-btn');
+  prevEl.innerHTML = '<div class="spinner" style="margin:8px 0">Parsing…</div>';
+  confirmBtn.style.display = 'none';
+  _muPreviewData = [];
+  const reader = new FileReader();
+  reader.onload = e => {
+    fetch('/api/retailer/missing/import-preview', {
+      method: 'POST',
+      headers: {'Content-Type':'application/octet-stream',
+                'X-Filename': encodeURIComponent(file.name)},
+      body: e.target.result
+    }).then(r=>r.json()).then(d => {
+      if (d.error) { prevEl.innerHTML = '<span style="color:#A4262C">Error: ' + d.error + '</span>'; return; }
+      _muPreviewData = d.rows;
+      const sets    = d.rows.filter(r=>r.action==='set_ref'||r.action==='set_url').length;
+      const flags   = d.rows.filter(r=>r.action==='not_stocked').length;
+      const unflags = d.rows.filter(r=>r.action==='clear_not_stocked').length;
+      const skipped = d.rows.filter(r=>r.action==='skip').length;
+      prevEl.innerHTML = `<table style="font-size:12px;border-collapse:collapse">
+        <tr><td style="padding:2px 12px 2px 0;color:#605E5C">Ref / URL to set</td><td style="font-weight:600">${sets}</td></tr>
+        <tr><td style="padding:2px 12px 2px 0;color:#605E5C">Mark not stocked</td><td style="font-weight:600">${flags}</td></tr>
+        <tr><td style="padding:2px 12px 2px 0;color:#605E5C">Clear not stocked</td><td style="font-weight:600">${unflags}</td></tr>
+        <tr><td style="padding:2px 12px 2px 0;color:#A19F9D">No change (skipped)</td><td style="color:#A19F9D">${skipped}</td></tr>
+      </table>`;
+      if (sets + flags + unflags > 0) confirmBtn.style.display = '';
+      else prevEl.innerHTML += '<p style="color:#A19F9D;font-size:12px;margin:8px 0 0">Nothing to update.</p>';
+    }).catch(err => { prevEl.innerHTML = '<span style="color:#A4262C">Upload failed: ' + err + '</span>'; });
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function confirmMissingUrlsImport(btn) {
+  if (!_muPreviewData.length) return;
+  btn.disabled = true; btn.textContent = 'Applying…';
+  fetch('/api/retailer/missing/import-apply', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({rows: _muPreviewData})
+  }).then(r=>r.json()).then(d => {
+    btn.style.display = 'none';
+    const resEl = document.getElementById('mu-result');
+    if (d.error) { resEl.innerHTML = '<span style="color:#A4262C">Error: '+d.error+'</span>'; return; }
+    resEl.innerHTML = `<div style="background:#DFF6DD;border:1px solid #107C10;border-radius:4px;padding:12px 16px;max-width:540px;font-size:13px">
+      ✅ Import complete — <strong>${d.updated}</strong> update${d.updated!==1?'s':''} applied.
+      ${d.errors ? '<br><span style="color:#A4262C">'+d.errors+' row(s) had errors.</span>' : ''}
+    </div>`;
+    _muPreviewData = [];
+    document.getElementById('mu-file-input').value = '';
+    document.getElementById('mu-preview').innerHTML = '';
+  }).catch(() => { btn.disabled = false; btn.textContent = '✓ Apply Changes'; });
+}
+
 let _ieCurrentTool = null;    // tool id currently open
 let _iePreviewRows  = [];     // validated rows from last preview, ready to confirm
 
@@ -4778,7 +4871,7 @@ function filterRetMissingByRetailer() {
   let rows = _retMissRetRows;
   if (filter === 'unsearched') rows = rows.filter(r => !r.searched);
   if (filter === 'searched')   rows = rows.filter(r => r.searched  === 1);
-  document.getElementById('ret-miss-ret-count').textContent = rows.length + ' product' + (rows.length!==1?'s':'');
+  document.getElementById('ret-miss-ret-count').textContent = rows.length + ' SKU' + (rows.length!==1?'s':'') + ' not found';
   renderRetMissingByRetailer(rows);
 }
 
@@ -4874,6 +4967,26 @@ function markRetNotStocked(productId, retailer, btn) {
   }).catch(() => { btn.disabled = false; btn.textContent = '✕ Not Stocked'; });
 }
 
+// ── Export ──
+function exportRetMissing(mode) {
+  let url;
+  if (mode === 'retailer') {
+    const retailer = document.getElementById('ret-miss-retailer').value;
+    if (!retailer) { alert('Select a retailer first.'); return; }
+    const status = document.getElementById('ret-miss-status-filter').value;
+    url = '/api/retailer/missing/export?retailer=' + encodeURIComponent(retailer) + '&status=' + encodeURIComponent(status);
+  } else {
+    const mfr = document.getElementById('ret-miss-mfr').value;
+    if (!mfr) { alert('Select a manufacturer first.'); return; }
+    const group = document.getElementById('ret-miss-grp').value;
+    url = '/api/retailer/missing/export?mfr=' + encodeURIComponent(mfr)
+      + (group ? '&group=' + encodeURIComponent(group) : '');
+  }
+  const a = document.createElement('a');
+  a.href = url; a.download = '';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
 // ── By Manufacturer mode ──
 function loadRetMissingMfrGroups() {
   const mfr = document.getElementById('ret-miss-mfr').value;
@@ -4903,7 +5016,7 @@ function loadRetMissingByGroup() {
 }
 
 function renderRetMissingByGroup(rows) {
-  document.getElementById('ret-miss-grp-count').textContent = rows.length + ' product' + (rows.length!==1?'s':'');
+  document.getElementById('ret-miss-grp-count').textContent = rows.length + ' product' + (rows.length!==1?'s':'') + ' found';
   if (!rows.length) {
     document.getElementById('ret-miss-grp-tbl').innerHTML = '<p style="color:#A19F9D;padding:20px">No products found.</p>';
     return;
@@ -7128,6 +7241,394 @@ def retailer_not_stocked_unset():
     db.commit()
     db.close()
     return jsonify({"ok": True})
+
+
+_RETAILER_REF_COL = {
+    "Amazon":       "amazon_asin",
+    "Currys":       "currys_sku",
+    "Argos":        "argos_sku",
+    "Overclockers": "ocuk_code",
+    "Very":         "very_sku",
+}
+_RETAILER_URL_COL = {
+    "Scan":      "scan_url",
+    "AWD-IT":    "awdit_url",
+    "CCL Online":"ccl_url",
+    "Box":       "box_url",
+    "Very":      "very_url",
+}
+_RETAILER_REF_LABEL = {
+    "Amazon":       "ASIN",
+    "Currys":       "Currys SKU",
+    "Argos":        "Argos SKU",
+    "Overclockers": "OCUK Code",
+    "Very":         "Very SKU",
+    "Scan":         "",
+    "AWD-IT":       "",
+    "CCL Online":   "",
+    "Box":          "",
+}
+
+# All coverage retailers for by-group export
+_ALL_RETAILER_COLS = [
+    ("Amazon",       "amazon_asin",  None),
+    ("Currys",       "currys_sku",   None),
+    ("Argos",        "argos_sku",    None),
+    ("Overclockers", "ocuk_code",    None),
+    ("Very",         "very_sku",     "very_url"),
+    ("Scan",         None,           "scan_url"),
+    ("AWD-IT",       None,           "awdit_url"),
+    ("CCL Online",   None,           "ccl_url"),
+    ("Box",          None,           "box_url"),
+]
+
+
+def _build_missing_export_rows(retailer=None, status="all", mfr=None, group=None):
+    """Return list of dicts for export, one row per (product, retailer) missing pair."""
+    import zoneinfo
+    today_iso = datetime.now(zoneinfo.ZoneInfo("Europe/London")).date().isoformat()
+    db = get_db()
+    export_rows = []
+
+    if retailer:
+        # By-retailer mode
+        searched_col  = DISCOVERY_SEARCHED_COL.get(retailer)
+        ref_col       = _RETAILER_REF_COL.get(retailer)
+        url_col       = _RETAILER_URL_COL.get(retailer)
+        # presence_col is the column that must be NULL/empty for the product to be "missing"
+        # Use RETAILER_COVERAGE_MAP as the authoritative source
+        cov_entry = next(((c, u) for n, c, u in RETAILER_COVERAGE_MAP if n == retailer), None)
+        if not cov_entry:
+            db.close()
+            return []
+        presence_col = cov_entry[0]   # e.g. very_url for Very, amazon_asin for Amazon
+
+        prereq = "AND ri.very_sku IS NOT NULL AND ri.very_sku != ''" if retailer == "Very" else ""
+
+        if searched_col:
+            ref_expr = f"ri.{ref_col}" if ref_col else "NULL"
+            url_expr = f"ri.{url_col}" if url_col else "NULL"
+            sql = f"""SELECT p.product_id, p.description, p.model_no, p.manufacturer,
+                         {ref_expr} AS ref_val,
+                         {url_expr} AS url_val,
+                         ri.{searched_col} AS searched,
+                         CASE WHEN ns.product_id IS NOT NULL THEN 1 ELSE 0 END AS not_stocked
+                     FROM products p
+                     LEFT JOIN retailer_ids ri ON ri.product_id = p.product_id
+                     LEFT JOIN retailer_not_stocked ns
+                           ON  ns.product_id = p.product_id AND ns.retailer = ?
+                     WHERE p.eol = 0
+                       AND (ri.{presence_col} IS NULL OR ri.{presence_col} = '')
+                       {prereq}
+                     ORDER BY p.manufacturer, p.model_no"""
+            rows = db.execute(sql, (retailer,)).fetchall()
+            cols = ["product_id","description","model_no","manufacturer","ref_val","url_val","searched","not_stocked"]
+            rows = [dict(zip(cols, r)) for r in rows]
+            if status == "unsearched":
+                rows = [r for r in rows if not r["searched"]]
+            elif status == "searched":
+                rows = [r for r in rows if r["searched"] == 1]
+        else:
+            # Non-discovery retailer: export products that are genuinely missing a code
+            ref_expr2 = f"ri.{ref_col}" if ref_col else "NULL"
+            sql = f"""SELECT p.product_id, p.description, p.model_no, p.manufacturer,
+                         {ref_expr2} AS ref_val,
+                         NULL AS url_val,
+                         NULL AS searched,
+                         CASE WHEN ns.product_id IS NOT NULL THEN 1 ELSE 0 END AS not_stocked
+                     FROM products p
+                     LEFT JOIN retailer_ids ri ON ri.product_id = p.product_id
+                     LEFT JOIN retailer_not_stocked ns
+                           ON  ns.product_id = p.product_id AND ns.retailer = ?
+                     WHERE p.eol = 0
+                       AND (ri.{presence_col} IS NULL OR ri.{presence_col} = '')
+                     ORDER BY p.manufacturer, p.model_no"""
+            rows = db.execute(sql, (retailer,)).fetchall()
+            cols = ["product_id","description","model_no","manufacturer","ref_val","url_val","searched","not_stocked"]
+            rows = [dict(zip(cols, r)) for r in rows]
+
+        for r in rows:
+            export_rows.append({
+                "product_id":   r["product_id"],
+                "description":  r["description"] or "",
+                "model_no":     r["model_no"] or "",
+                "retailer":     retailer,
+                "retailer_ref": r["ref_val"] or "",
+                "not_stocked":  bool(r["not_stocked"]),
+                "url":          r["url_val"] or "",
+            })
+
+    else:
+        # By-manufacturer mode: all products for mfr/group, one row per missing (product, retailer)
+        params = [mfr]
+        group_clause = ""
+        if group:
+            group_clause = "AND p.product_group = ?"
+            params.append(group)
+        # Fetch all retailer columns in one query
+        ri_cols = ",".join(
+            [f"ri.{rc} AS {rc}" for _, rc, _ in _ALL_RETAILER_COLS if rc]
+            + [f"ri.{uc} AS {uc}" for _, _, uc in _ALL_RETAILER_COLS if uc]
+        )
+        rows = db.execute(
+            f"""SELECT p.product_id, p.description, p.model_no, p.manufacturer,
+                    {ri_cols}
+                FROM products p
+                LEFT JOIN retailer_ids ri ON ri.product_id = p.product_id
+                WHERE p.eol = 0 AND p.manufacturer = ?
+                  {group_clause}
+                ORDER BY p.product_group, p.model_no""",
+            params
+        ).fetchall()
+        # Get not_stocked flags for this set
+        pids = [r[0] for r in rows]
+        ns_set = set()
+        if pids:
+            placeholders = ",".join("?" * len(pids))
+            ns_rows = db.execute(
+                f"SELECT product_id, retailer FROM retailer_not_stocked WHERE product_id IN ({placeholders})",
+                pids
+            ).fetchall()
+            ns_set = {(r[0], r[1]) for r in ns_rows}
+
+        # Build column name list from query
+        ri_col_names = ([rc for _, rc, _ in _ALL_RETAILER_COLS if rc]
+                        + [uc for _, _, uc in _ALL_RETAILER_COLS if uc])
+        all_col_names = ["product_id","description","model_no","manufacturer"] + ri_col_names
+
+        for r in rows:
+            rd = dict(zip(all_col_names, r))
+            for ret_name, ref_col, url_col in _ALL_RETAILER_COLS:
+                ref_val = rd.get(ref_col, "") if ref_col else ""
+                url_val = rd.get(url_col, "") if url_col else ""
+                if ref_val or url_val:
+                    continue  # has data — not missing
+                export_rows.append({
+                    "product_id":   rd["product_id"],
+                    "description":  rd["description"] or "",
+                    "model_no":     rd["model_no"] or "",
+                    "retailer":     ret_name,
+                    "retailer_ref": "",
+                    "not_stocked":  (rd["product_id"], ret_name) in ns_set,
+                    "url":          "",
+                })
+    db.close()
+    return export_rows
+
+
+@app.route("/api/retailer/missing/export")
+def retailer_missing_export():
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from io import BytesIO
+
+    retailer = request.args.get("retailer", "").strip()
+    mfr      = request.args.get("mfr",      "").strip()
+    group    = request.args.get("group",    "").strip()
+    status   = request.args.get("status",   "all")
+
+    if not retailer and not mfr:
+        return jsonify({"error": "retailer or mfr required"}), 400
+
+    rows = _build_missing_export_rows(
+        retailer=retailer or None,
+        status=status,
+        mfr=mfr or None,
+        group=group or None,
+    )
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Missing URLs"
+
+    headers = ["product_id", "description", "model_no", "retailer",
+               "retailer_ref", "not_stocked", "url"]
+    header_labels = ["Product ID", "Description", "Model No", "Retailer",
+                     "Retailer Ref (ASIN / SKU / Code)", "Not Stocked", "URL"]
+
+    # Header row styling
+    hdr_fill   = PatternFill("solid", fgColor="243A5E")
+    hdr_font   = Font(bold=True, color="FFFFFF")
+    input_fill = PatternFill("solid", fgColor="EBF3FB")
+    ro_fill    = PatternFill("solid", fgColor="F3F2F1")
+    ro_font    = Font(color="605E5C")
+
+    for c, label in enumerate(header_labels, 1):
+        cell = ws.cell(row=1, column=c, value=label)
+        cell.fill = hdr_fill
+        cell.font = hdr_font
+        cell.alignment = Alignment(horizontal="center")
+
+    # Column widths
+    ws.column_dimensions["A"].width = 12
+    ws.column_dimensions["B"].width = 42
+    ws.column_dimensions["C"].width = 30
+    ws.column_dimensions["D"].width = 14
+    ws.column_dimensions["E"].width = 30
+    ws.column_dimensions["F"].width = 14
+    ws.column_dimensions["G"].width = 55
+
+    for row_i, rd in enumerate(rows, 2):
+        vals = [rd["product_id"], rd["description"], rd["model_no"], rd["retailer"],
+                rd["retailer_ref"], rd["not_stocked"], rd["url"]]
+        for c, v in enumerate(vals, 1):
+            cell = ws.cell(row=row_i, column=c, value=v)
+            if c in (1, 2, 3, 4):   # read-only info columns
+                cell.fill = ro_fill
+                cell.font = ro_font
+            else:                    # user-input columns
+                cell.fill = input_fill
+
+    # Freeze header row
+    ws.freeze_panes = "A2"
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    fname_parts = []
+    if retailer:
+        fname_parts.append(retailer.replace(" ", "_"))
+    elif mfr:
+        fname_parts.append(mfr.replace(" ", "_"))
+        if group:
+            fname_parts.append(group)
+    import zoneinfo
+    fname_date = datetime.now(zoneinfo.ZoneInfo("Europe/London")).strftime("%Y%m%d")
+    fname = f"missing_urls_{'_'.join(fname_parts)}_{fname_date}.xlsx"
+
+    from flask import send_file
+    return send_file(buf, as_attachment=True, download_name=fname,
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+@app.route("/api/retailer/missing/import-preview", methods=["POST"])
+def retailer_missing_import_preview():
+    import openpyxl
+    from io import BytesIO
+    raw = request.get_data()
+    try:
+        wb = openpyxl.load_workbook(BytesIO(raw), read_only=True, data_only=True)
+    except Exception as e:
+        return jsonify({"error": f"Could not parse file: {e}"}), 400
+    ws = wb.active
+
+    headers = [str(c.value).strip().lower() if c.value else "" for c in next(ws.iter_rows(min_row=1, max_row=1))]
+    col_idx = {h: i for i, h in enumerate(headers)}
+
+    required = {"product_id", "retailer"}
+    if not required.issubset(col_idx):
+        return jsonify({"error": "Missing required columns: product_id, retailer"}), 400
+
+    def _col(row, name):
+        i = col_idx.get(name)
+        if i is None:
+            return None
+        v = row[i].value
+        return str(v).strip() if v is not None else ""
+
+    preview_rows = []
+    for row in ws.iter_rows(min_row=2):
+        pid_raw   = _col(row, "product_id")
+        retailer  = _col(row, "retailer")
+        ref_val   = _col(row, "retailer_ref")   or ""
+        ns_raw    = _col(row, "not_stocked")    or ""
+        url_val   = _col(row, "url")            or ""
+
+        if not pid_raw or not retailer:
+            continue
+        try:
+            pid = int(float(pid_raw))
+        except (ValueError, TypeError):
+            continue
+
+        not_stocked = ns_raw.upper() in ("TRUE", "1", "YES")
+        has_ref = bool(ref_val)
+        has_url = bool(url_val)
+
+        if has_ref or has_url:
+            action = "set_ref" if has_ref else "set_url"
+        elif not_stocked:
+            action = "not_stocked"
+        else:
+            # check if currently marked not_stocked to clear it
+            action = "clear_not_stocked" if ns_raw.upper() in ("FALSE", "0", "NO") else "skip"
+
+        preview_rows.append({
+            "product_id":  pid,
+            "retailer":    retailer,
+            "retailer_ref": ref_val,
+            "url":          url_val,
+            "not_stocked":  not_stocked,
+            "action":       action,
+        })
+
+    wb.close()
+    return jsonify({"rows": preview_rows})
+
+
+@app.route("/api/retailer/missing/import-apply", methods=["POST"])
+def retailer_missing_import_apply():
+    import zoneinfo
+    today_iso = datetime.now(zoneinfo.ZoneInfo("Europe/London")).date().isoformat()
+    data = request.get_json(silent=True) or {}
+    rows = data.get("rows", [])
+    if not rows:
+        return jsonify({"error": "No rows"}), 400
+
+    db = get_db()
+    updated = 0
+    errors  = 0
+
+    for rd in rows:
+        try:
+            pid      = int(rd["product_id"])
+            retailer = str(rd["retailer"]).strip()
+            action   = rd.get("action", "skip")
+            ref_val  = str(rd.get("retailer_ref", "")).strip()
+            url_val  = str(rd.get("url", "")).strip()
+
+            if action == "skip":
+                continue
+
+            if action in ("set_ref", "set_url"):
+                if action == "set_ref" and ref_val:
+                    ref_col = _RETAILER_REF_COL.get(retailer)
+                    if ref_col:
+                        db.execute(f"UPDATE retailer_ids SET {ref_col}=? WHERE product_id=?",
+                                   (ref_val, pid))
+                        db.execute("DELETE FROM retailer_not_stocked WHERE product_id=? AND retailer=?",
+                                   (pid, retailer))
+                        updated += 1
+                if url_val:
+                    url_col = _RETAILER_URL_COL.get(retailer)
+                    if url_col:
+                        db.execute(f"UPDATE retailer_ids SET {url_col}=? WHERE product_id=?",
+                                   (url_val, pid))
+                        db.execute("DELETE FROM retailer_not_stocked WHERE product_id=? AND retailer=?",
+                                   (pid, retailer))
+                        updated += 1
+
+            elif action == "not_stocked":
+                db.execute(
+                    "INSERT OR REPLACE INTO retailer_not_stocked (product_id,retailer,source,set_date) VALUES (?,?,'manual',?)",
+                    (pid, retailer, today_iso)
+                )
+                updated += 1
+
+            elif action == "clear_not_stocked":
+                db.execute(
+                    "DELETE FROM retailer_not_stocked WHERE product_id=? AND retailer=?",
+                    (pid, retailer)
+                )
+                updated += 1
+
+        except Exception:
+            errors += 1
+
+    db.commit()
+    db.close()
+    return jsonify({"ok": True, "updated": updated, "errors": errors})
 
 
 @app.route("/api/catalogue/manufacturers")
