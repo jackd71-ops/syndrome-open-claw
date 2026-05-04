@@ -209,6 +209,10 @@ def _init_products():
             WHERE p.eol = 0
               AND (ri.{col} IS NULL OR ri.{col} = '')
         """, (retailer, today_iso))
+    db.execute("""CREATE TABLE IF NOT EXISTS housekeeping_log (
+        task_id   TEXT PRIMARY KEY,
+        last_done TEXT NOT NULL
+    )""")
     db.commit()
     db.close()
 
@@ -924,6 +928,14 @@ HTML = r"""<!DOCTYPE html>
         <button class="sidebar-btn" onclick="loadScrapeGroups(this)">⟳ Refresh SKUs</button>
       </div>
     </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-header" onclick="toggleSection(this)">
+        Admin <span class="arrow">▾</span>
+      </div>
+      <div class="sidebar-items">
+        <button class="sidebar-btn" onclick="loadCatHousekeeping(this)">🗓 Monthly Housekeeping</button>
+      </div>
+    </div>
   </div>
   <div class="main" id="main-catalogue">
     <!-- Products view -->
@@ -957,6 +969,10 @@ HTML = r"""<!DOCTYPE html>
     <!-- Not Stocked Flags audit -->
     <div class="content-section" id="cat-not-stocked">
       <div id="cat-not-stocked-content"><div class="spinner">Loading…</div></div>
+    </div>
+    <!-- Monthly housekeeping -->
+    <div class="content-section" id="cat-housekeeping">
+      <div id="cat-housekeeping-content"><div class="spinner">Loading…</div></div>
     </div>
     <!-- Scraper — Refresh SKUs -->
     <div class="content-section" id="stic-scrape">
@@ -4049,6 +4065,153 @@ function _nsUnsetAll(btn) {
     }
     btn.disabled = false; btn.textContent = '✕ Unset All Visible';
   }).catch(() => { btn.disabled=false; btn.textContent='✕ Unset All Visible'; });
+}
+
+// ── Monthly Housekeeping ─────────────────────────────────────────────────────
+const _HK_TASKS = [
+  {
+    id:    'add-products',
+    title: 'Add New Products',
+    desc:  'Import any new SKUs launched since last month — GPUs, motherboards, CPUs. Check manufacturer release lists and add via Add / Update SKUs.',
+    link:  () => document.querySelector('#sidebar-catalogue .sidebar-btn[onclick*="new-skus"]')?.click(),
+    linkLabel: '→ Add / Update SKUs',
+    warn:  35,
+  },
+  {
+    id:    'eol-status',
+    title: 'Update EOL / Product Status',
+    desc:  'Mark discontinued products as End of Life so they stop appearing in reports and scrape runs.',
+    link:  () => document.querySelector('#sidebar-catalogue .sidebar-btn[onclick*="eol-status"]')?.click(),
+    linkLabel: '→ Update EOL Status',
+    warn:  35,
+  },
+  {
+    id:    'msrp-update',
+    title: 'Review & Update MSRP',
+    desc:  'Check for manufacturer price changes. Update MSRP via Import by VIP Code or Import by Model. Check the Missing MSRP report for gaps.',
+    link:  () => document.querySelector('#sidebar-catalogue .sidebar-btn[onclick*="missing-msrp"]')?.click(),
+    linkLabel: '→ Missing MSRP Report',
+    warn:  35,
+  },
+  {
+    id:    'missing-ean',
+    title: 'Fill Missing EAN Codes',
+    desc:  'EANs are needed for accurate product matching. Review the Missing EAN report and add barcodes for any new products.',
+    link:  () => document.querySelector('#sidebar-catalogue .sidebar-btn[onclick*="missing-ean"]')?.click(),
+    linkLabel: '→ Missing EAN Report',
+    warn:  35,
+  },
+  {
+    id:    'retailer-coverage',
+    title: 'Review Retailer Coverage',
+    desc:  'Walk through the Retailer Missing report for each retailer. Add codes/URLs where found, mark "Not Stocked" where confirmed absent.',
+    link:  () => { showRetSection('missing'); document.querySelector('#layout-retailer')?.querySelector('.sidebar-btn[onclick*="showRetMissing"]')?.click(); },
+    linkLabel: '→ Retailer Missing Report',
+    warn:  35,
+  },
+  {
+    id:    'not-stocked-audit',
+    title: 'Audit Not Stocked Flags',
+    desc:  'Review all retailer not-stocked flags — particularly auto-set ones. Remove flags for products that are now listed.',
+    link:  () => loadCatNotStocked(null),
+    linkLabel: '→ Not Stocked Flags',
+    warn:  35,
+  },
+  {
+    id:    'very-skus',
+    title: 'Update Very SKU Codes',
+    desc:  'Add Very SKU codes for new products. Once a SKU is set, nightly discovery will find the URL automatically.',
+    link:  () => document.querySelector('#sidebar-catalogue .sidebar-btn[onclick*="retailer-ids-import"]')?.click(),
+    linkLabel: '→ Import Retailer IDs',
+    warn:  35,
+  },
+  {
+    id:    'scraper-health',
+    title: 'Check Scraper Health',
+    desc:  'Review the Scraper Health report. Investigate any retailers or STIC groups that have been silent for multiple days.',
+    link:  () => { document.querySelector('.nav-btn[onclick*="retailer"]')?.click(); },
+    linkLabel: '→ Scraper Health Report',
+    warn:  35,
+  },
+  {
+    id:    'export-backup',
+    title: 'Export Retailer IDs Backup',
+    desc:  'Download a full retailer IDs CSV including not-stocked flags as an offline backup before making bulk changes.',
+    link:  () => { window.location.href = '/api/export/retailer-ids'; },
+    linkLabel: '→ Download CSV',
+    warn:  35,
+  },
+  {
+    id:    'truenas-backup',
+    title: 'Verify TrueNAS Backup',
+    desc:  'Check TrueNAS dashboard that the nightly snapshot task completed successfully and the data pool is healthy.',
+    link:  null,
+    linkLabel: null,
+    warn:  35,
+  },
+];
+
+function loadCatHousekeeping(btn) {
+  showCatSection('housekeeping', btn);
+  fetch('/api/housekeeping/status').then(r=>r.json()).then(status => {
+    const el = document.getElementById('cat-housekeeping-content');
+    const now = new Date();
+
+    let html = `<h2 style="margin:0 0 4px">Monthly Housekeeping</h2>
+      <p style="margin:0 0 20px;font-size:13px;color:#605E5C">
+        Regular tasks to keep the catalogue and scraper data accurate. Mark each complete when done — the date is saved.</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px">`;
+
+    _HK_TASKS.forEach(t => {
+      const lastDone = status[t.id] || null;
+      let ageDays = null, badge = '', badgeColor = '';
+      if (lastDone) {
+        const d = new Date(lastDone);
+        ageDays = Math.floor((now - d) / 86400000);
+        if (ageDays <= t.warn) {
+          badge = `✓ ${ageDays}d ago`; badgeColor = '#107C10';
+        } else if (ageDays <= t.warn * 2) {
+          badge = `⚠ ${ageDays}d ago`; badgeColor = '#D29200';
+        } else {
+          badge = `✗ ${ageDays}d ago`; badgeColor = '#A4262C';
+        }
+      } else {
+        badge = 'Never done'; badgeColor = '#A4262C';
+      }
+
+      const linkHtml = t.link ? `<button onclick="event.stopPropagation();(${t.link.toString()})()"
+        style="background:none;border:none;color:#0078D4;cursor:pointer;font-size:12px;padding:0;text-decoration:underline"
+        >${t.linkLabel}</button>` : '';
+
+      html += `<div style="border:1px solid #EDEBE9;border-radius:4px;padding:14px 16px;background:#fff;display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+          <div style="font-size:14px;font-weight:600">${t.title}</div>
+          <span style="font-size:11px;font-weight:600;color:${badgeColor};white-space:nowrap">${badge}</span>
+        </div>
+        <div style="font-size:12px;color:#605E5C;flex:1">${t.desc}</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+          <div>${linkHtml}</div>
+          <button onclick="_hkMarkDone('${t.id}',this)"
+            style="padding:4px 14px;background:#0078D4;color:#fff;border:none;border-radius:2px;font-size:12px;cursor:pointer;font-weight:600;white-space:nowrap">
+            ✓ Mark Done</button>
+        </div>
+      </div>`;
+    });
+    html += '</div>';
+    el.innerHTML = html;
+  });
+}
+
+function _hkMarkDone(taskId, btn) {
+  btn.disabled = true; btn.textContent = '…';
+  fetch('/api/housekeeping/mark-done', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({task_id: taskId})
+  }).then(r=>r.json()).then(d => {
+    if (d.ok) loadCatHousekeeping(document.querySelector('#sidebar-catalogue .sidebar-btn[onclick*="Housekeeping"]'));
+    else { btn.disabled=false; btn.textContent='✓ Mark Done'; }
+  }).catch(() => { btn.disabled=false; btn.textContent='✓ Mark Done'; });
 }
 
 let _ieCurrentTool = null;    // tool id currently open
@@ -7840,6 +8003,30 @@ def retailer_missing_import_apply():
     db.commit()
     db.close()
     return jsonify({"ok": True, "updated": updated, "errors": errors})
+
+
+@app.route("/api/housekeeping/status")
+def housekeeping_status():
+    rows = qry("SELECT task_id, last_done FROM housekeeping_log")
+    return jsonify({r["task_id"]: r["last_done"] for r in rows})
+
+
+@app.route("/api/housekeeping/mark-done", methods=["POST"])
+def housekeeping_mark_done():
+    import zoneinfo as _zi
+    data    = request.get_json(silent=True) or {}
+    task_id = str(data.get("task_id", "")).strip()
+    if not task_id:
+        return jsonify({"error": "task_id required"}), 400
+    today = datetime.now(_zi.ZoneInfo("Europe/London")).strftime("%Y-%m-%d")
+    db = get_db()
+    db.execute(
+        "INSERT OR REPLACE INTO housekeeping_log (task_id, last_done) VALUES (?,?)",
+        (task_id, today)
+    )
+    db.commit()
+    db.close()
+    return jsonify({"ok": True})
 
 
 @app.route("/api/catalogue/manufacturers")
