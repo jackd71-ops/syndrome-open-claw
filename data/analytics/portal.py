@@ -184,8 +184,57 @@ def _init_products():
             db.execute(col_sql)
         except Exception:
             pass
+    # retailer_not_stocked — explicit per-retailer not-stocked flags
+    db.execute("""CREATE TABLE IF NOT EXISTS retailer_not_stocked (
+        product_id INTEGER NOT NULL,
+        retailer   TEXT    NOT NULL,
+        source     TEXT    NOT NULL DEFAULT 'manual',
+        set_date   TEXT    NOT NULL,
+        PRIMARY KEY (product_id, retailer)
+    )""")
+    # Pre-populate for code-based retailers where no code exists (source='auto')
+    today_iso = datetime.now().strftime("%Y-%m-%d")
+    for retailer, col in [
+        ("Amazon",       "amazon_asin"),
+        ("Currys",       "currys_sku"),
+        ("Argos",        "argos_sku"),
+        ("Overclockers", "ocuk_code"),
+        ("Very",         "very_sku"),
+    ]:
+        db.execute(f"""
+            INSERT OR IGNORE INTO retailer_not_stocked (product_id, retailer, source, set_date)
+            SELECT ri.product_id, ?, 'auto', ?
+            FROM retailer_ids ri
+            JOIN products p ON p.product_id = ri.product_id
+            WHERE p.eol = 0
+              AND (ri.{col} IS NULL OR ri.{col} = '')
+        """, (retailer, today_iso))
     db.commit()
     db.close()
+
+
+# Retailer → the code column that, when set, means the product IS stocked
+_RETAILER_CODE_COL = {
+    "Amazon":      "amazon_asin",
+    "Currys":      "currys_sku",
+    "Argos":       "argos_sku",
+    "Overclockers":"ocuk_code",
+    "Very":        "very_sku",
+    "Scan":        "scan_url",
+    "CCL Online":  "ccl_url",
+    "AWD-IT":      "awdit_url",
+    "Box":         "box_url",
+}
+
+def _auto_clear_not_stocked(db, product_id, updates):
+    """Remove retailer_not_stocked entries for any retailer whose code is being set to a non-empty value."""
+    for retailer, col in _RETAILER_CODE_COL.items():
+        val = updates.get(col)
+        if val and str(val).strip():
+            db.execute(
+                "DELETE FROM retailer_not_stocked WHERE product_id=? AND retailer=?",
+                (product_id, retailer)
+            )
 
 
 def read_template_products():
@@ -4753,11 +4802,19 @@ function renderRetMissingByRetailer(rows) {
       statusCell = '<span style="color:#D29200">⚠ Has ASIN — no scrape result in last 48 hrs</span>';
     } else if (r.searched === 1) {
       statusCell = '<span style="color:#A4262C">✗ No URL found</span>';
-      resetBtn   = `<button onclick="event.stopPropagation();resetRetSearch(${r.product_id},'${retailer.replace(/'/g,"\\'")}',this)"
-           style="background:none;border:1px solid #C8C6C4;border-radius:2px;padding:2px 7px;cursor:pointer;font-size:11px"
-           title="Reset — discovery will search again on next nightly run">↺ Reset</button>`;
+      resetBtn   = `<span style="display:flex;gap:4px">
+        <button onclick="event.stopPropagation();resetRetSearch(${r.product_id},'${retailer.replace(/'/g,"\\'")}',this)"
+             style="background:none;border:1px solid #C8C6C4;border-radius:2px;padding:2px 7px;cursor:pointer;font-size:11px"
+             title="Reset — discovery will search again on next nightly run">↺ Reset</button>
+        <button onclick="event.stopPropagation();markRetNotStocked(${r.product_id},'${retailer.replace(/'/g,"\\'")}',this)"
+             style="background:none;border:1px solid #C8C6C4;border-radius:2px;padding:2px 7px;cursor:pointer;font-size:11px;color:#A4262C"
+             title="Mark as not stocked — removes from this report">✕ Not Stocked</button>
+      </span>`;
     } else {
       statusCell = '<span style="color:#A19F9D">○ Not yet searched</span>';
+      resetBtn   = `<button onclick="event.stopPropagation();markRetNotStocked(${r.product_id},'${retailer.replace(/'/g,"\\'")}',this)"
+           style="background:none;border:1px solid #C8C6C4;border-radius:2px;padding:2px 7px;cursor:pointer;font-size:11px;color:#A4262C"
+           title="Mark as not stocked — removes from this report">✕ Not Stocked</button>`;
     }
     html += `<tr class="clickable" onclick="_openProductEdit(${r.product_id},false)" title="Click to edit retailer IDs">
       <td>${r.product_id}</td>
@@ -4792,6 +4849,29 @@ function resetRetSearch(productId, retailer, btn) {
       btn.textContent = '✗'; btn.disabled = false;
     }
   }).catch(() => { btn.textContent = '✗'; btn.disabled = false; });
+}
+
+function markRetNotStocked(productId, retailer, btn) {
+  btn.disabled = true;
+  btn.textContent = '…';
+  fetch('/api/retailer/not-stocked/set', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({product_id: productId, retailer: retailer})
+  }).then(r => r.json()).then(d => {
+    if (d.ok) {
+      const row = btn.closest('tr');
+      if (row) row.remove();
+      const countEl = document.getElementById('ret-miss-ret-count');
+      if (countEl) {
+        const n = parseInt(countEl.textContent) - 1;
+        countEl.textContent = n + ' product' + (n !== 1 ? 's' : '');
+      }
+    } else {
+      btn.disabled = false;
+      btn.textContent = '✕ Not Stocked';
+    }
+  }).catch(() => { btn.disabled = false; btn.textContent = '✕ Not Stocked'; });
 }
 
 // ── By Manufacturer mode ──
@@ -6938,7 +7018,11 @@ def retailer_missing_by_retailer():
                WHERE p.eol = 0
                  AND (ri.{col} IS NULL OR ri.{col} = '')
                  {prereq}
-               ORDER BY p.manufacturer, p.model_no"""
+                 AND p.product_id NOT IN (
+                     SELECT product_id FROM retailer_not_stocked WHERE retailer = ?
+                 )
+               ORDER BY p.manufacturer, p.model_no""",
+            (retailer,)
         )
     else:
         # Non-discovery retailer (e.g. Amazon) — only show products that HAVE an ID
@@ -7006,6 +7090,41 @@ def retailer_missing_reset_searched():
         return jsonify({"ok": False, "error": f"No discovery for retailer {retailer}"}), 400
     db = get_db()
     db.execute(f"UPDATE retailer_ids SET {searched_col}=0 WHERE product_id=?", (int(pid),))
+    db.commit()
+    db.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/retailer/not-stocked/set", methods=["POST"])
+def retailer_not_stocked_set():
+    data       = request.get_json(silent=True) or {}
+    product_id = data.get("product_id")
+    retailer   = data.get("retailer", "").strip()
+    if not product_id or not retailer:
+        return jsonify({"error": "product_id and retailer required"}), 400
+    today_iso = datetime.now().strftime("%Y-%m-%d")
+    db = get_db()
+    db.execute(
+        "INSERT OR REPLACE INTO retailer_not_stocked (product_id, retailer, source, set_date) VALUES (?,?,'manual',?)",
+        (product_id, retailer, today_iso)
+    )
+    db.commit()
+    db.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/retailer/not-stocked/unset", methods=["POST"])
+def retailer_not_stocked_unset():
+    data       = request.get_json(silent=True) or {}
+    product_id = data.get("product_id")
+    retailer   = data.get("retailer", "").strip()
+    if not product_id or not retailer:
+        return jsonify({"error": "product_id and retailer required"}), 400
+    db = get_db()
+    db.execute(
+        "DELETE FROM retailer_not_stocked WHERE product_id=? AND retailer=?",
+        (product_id, retailer)
+    )
     db.commit()
     db.close()
     return jsonify({"ok": True})
@@ -8829,6 +8948,9 @@ def catalogue_product(product_id):
         db.close()
         return jsonify({"error": "No fields to update"})
 
+    if ret_data:
+        _auto_clear_not_stocked(db, product_id, ret_data)
+
     db.commit()
     db.close()
     return jsonify({"ok": True})
@@ -8932,6 +9054,7 @@ def import_retailer_ids_confirm():
             set_clause = ", ".join(f"{col}=?" for col in updates)
             vals       = list(updates.values()) + [pid]
             db.execute(f"UPDATE retailer_ids SET {set_clause} WHERE product_id=?", vals)
+            _auto_clear_not_stocked(db, pid, updates)
             updated += 1
         db.commit()
     except Exception as e:
