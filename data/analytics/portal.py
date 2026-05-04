@@ -4370,6 +4370,32 @@ function showScraperHealth(btn) {
 
     let html = `<div style="color:#605E5C;font-size:12px;margin-bottom:16px">Today — ${data.date}</div>`;
 
+    // Discovery section
+    const disc = data.discovery || {};
+    const discNeeds = disc.needs || {};
+    const needsParts = Object.entries(discNeeds).map(([k,v]) => `${k}: ${v}`).join(' | ');
+    const discErrCol = disc.errors > 0 ? 'color:#A4262C;font-weight:600' : 'color:#A19F9D';
+    html += `<div style="font-weight:600;font-size:13px;margin-bottom:10px;color:#201F1E">Discovery (01:00)</div>`;
+    html += `<table style="border-collapse:collapse;width:100%;margin-bottom:${needsParts ? '4px' : '20px'}"><thead>
+      <tr style="background:#F3F2F1;font-size:12px;color:#605E5C">
+        <th style="padding:6px 10px;text-align:left">Status</th>
+        <th style="padding:6px 10px;text-align:left">Started</th>
+        <th style="padding:6px 10px;text-align:left">Finished</th>
+        <th style="padding:6px 10px;text-align:right">URLs Written</th>
+        <th style="padding:6px 10px;text-align:right">Errors</th>
+      </tr></thead><tbody>
+      <tr style="font-size:12px">
+        <td style="padding:8px 10px">${badge(disc.status || 'pending')}</td>
+        <td style="padding:8px 10px;color:#605E5C">${fmtTime(disc.started)}</td>
+        <td style="padding:8px 10px;color:#605E5C">${fmtTime(disc.finished)}</td>
+        <td style="padding:8px 10px;text-align:right">${disc.urls_written ?? '—'}</td>
+        <td style="padding:8px 10px;text-align:right;${discErrCol}">${disc.errors ?? '—'}</td>
+      </tr>
+    </tbody></table>`;
+    if (needsParts) {
+      html += `<div style="font-size:11px;color:#605E5C;margin:0 0 16px 2px">Products needing URLs — ${needsParts}</div>`;
+    }
+
     // STIC section
     html += `<div style="font-weight:600;font-size:13px;margin-bottom:10px;color:#201F1E">STIC</div>`;
     html += `<table style="border-collapse:collapse;width:100%;margin-bottom:6px"><thead>
@@ -6293,7 +6319,7 @@ def scraper_health():
     today    = now_uk.date().isoformat()                      # 2026-05-02
     today_dm = now_uk.date().strftime("%d-%m-%Y")             # 02-05-2026
 
-    result = {"date": today, "stic": [], "amazon": {}, "retailer": []}
+    result = {"date": today, "discovery": {}, "stic": [], "amazon": {}, "retailer": []}
 
     # ── STIC (stic_cron.log) ──────────────────────────────────────────────────
     stic_log = "/opt/stic-scraper/logs/stic_cron.log"
@@ -6430,6 +6456,46 @@ def scraper_health():
         except FileNotFoundError:
             sessions.append({"retailer": r_name, "status": "pending"})
     result["retailer"] = sessions
+
+    # ── Discovery (retailer.log — script writes here directly via log()) ────────
+    disc_log = "/opt/stic-scraper/logs/retailer.log"
+    try:
+        with open(disc_log) as f:
+            disc_lines = f.readlines()
+        start_i = next((i for i, l in enumerate(disc_lines)
+                        if "PRE-FLIGHT URL DISCOVERY" in l and l.startswith(f"[{today}")), None)
+        if start_i is None:
+            result["discovery"] = {"status": "pending"}
+        else:
+            started = disc_lines[start_i][12:20]
+            chunk = disc_lines[start_i:]
+            complete_line = next((l for l in chunk if "PRE-FLIGHT COMPLETE" in l), None)
+            nothing_line  = next((l for l in chunk if "Nothing to discover" in l), None)
+            written_line  = next((l for l in chunk if "new URLs written to DB" in l), None)
+            none_line     = next((l for l in chunk if "No new URLs found" in l), None)
+            needs_line    = next((l for l in chunk if "AWD-IT:" in l and "Scan(LN):" in l), None)
+            errors = sum(1 for l in chunk if "ERROR" in l)
+            needs = {}
+            if needs_line:
+                for part in re.findall(r'([\w()/-]+): (\d+)', needs_line):
+                    needs[part[0]] = int(part[1])
+            urls_written = None
+            if written_line:
+                m = re.search(r'(\d+) new URLs written', written_line)
+                urls_written = int(m.group(1)) if m else 0
+            elif none_line or nothing_line:
+                urls_written = 0
+            if complete_line or nothing_line:
+                fin_line = next((l for l in reversed(chunk) if l.startswith(f"[{today}")), None)
+                finished = fin_line[12:20] if fin_line else "?"
+                result["discovery"] = {"status": "complete", "started": started,
+                                       "finished": finished, "urls_written": urls_written,
+                                       "needs": needs, "errors": errors}
+            else:
+                result["discovery"] = {"status": "running", "started": started,
+                                       "urls_written": urls_written, "needs": needs, "errors": errors}
+    except FileNotFoundError:
+        result["discovery"] = {"status": "pending"}
 
     return jsonify(result)
 
