@@ -4118,9 +4118,9 @@ const _HK_TASKS = [
     warn:  35,
   },
   {
-    id:    'very-skus',
-    title: 'Update Very SKU Codes',
-    desc:  'Add Very SKU codes for new products. Once a SKU is set, nightly discovery will find the URL automatically.',
+    id:    'retailer-codes',
+    title: 'Update Retailer Codes for New Products',
+    desc:  'Add missing retailer codes for new products: Amazon ASIN, Currys SKU, Argos SKU, Overclockers Code, Very SKU. For URL-based retailers (Scan, AWD-IT, CCL, Box) check the Missing URLs report — nightly discovery handles these once listed. Use Import Retailer IDs for bulk entry.',
     link:  () => document.querySelector('#sidebar-catalogue .sidebar-btn[onclick*="retailer-ids-import"]')?.click(),
     linkLabel: '→ Import Retailer IDs',
     warn:  35,
