@@ -4752,10 +4752,10 @@ function renderRetMissingByRetailer(rows) {
       // Non-discovery retailer: has ID but scraper got no result on latest date
       statusCell = '<span style="color:#D29200">⚠ Has ASIN — no scrape result in last 48 hrs</span>';
     } else if (r.searched === 1) {
-      statusCell = '<span style="color:#A4262C">✗ Confirmed not stocked</span>';
+      statusCell = '<span style="color:#A4262C">✗ No URL found</span>';
       resetBtn   = `<button onclick="event.stopPropagation();resetRetSearch(${r.product_id},'${retailer.replace(/'/g,"\\'")}',this)"
            style="background:none;border:1px solid #C8C6C4;border-radius:2px;padding:2px 7px;cursor:pointer;font-size:11px"
-           title="Reset — pre-flight will try again next batch 1">↺ Reset</button>`;
+           title="Reset — discovery will search again on next nightly run">↺ Reset</button>`;
     } else {
       statusCell = '<span style="color:#A19F9D">○ Not yet searched</span>';
     }
