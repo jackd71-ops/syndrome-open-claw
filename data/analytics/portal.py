@@ -6924,6 +6924,9 @@ def retailer_missing_by_retailer():
         return jsonify([])
     col, _ = ret_entry
 
+    # Very requires a very_sku to be stocked — only show products that have one
+    prereq = "AND ri.very_sku IS NOT NULL AND ri.very_sku != ''" if retailer == "Very" else ""
+
     if searched_col:
         # Discovery retailer — products with no URL yet (never searched or searched+not found)
         rows = qry(
@@ -6934,6 +6937,7 @@ def retailer_missing_by_retailer():
                LEFT JOIN retailer_ids ri ON ri.product_id = p.product_id
                WHERE p.eol = 0
                  AND (ri.{col} IS NULL OR ri.{col} = '')
+                 {prereq}
                ORDER BY p.manufacturer, p.model_no"""
         )
     else:
