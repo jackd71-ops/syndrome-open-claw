@@ -188,11 +188,42 @@ def load_retailer_ids():
     return mapping
 
 # ── Read products from DB ──────────────────────────────────────────────────────
-def read_products(offset=0, limit=None):
-    """Return active products ordered by product_id, with optional offset/limit for batching."""
+def read_products(offset=0, limit=None, product_ids=None, mfr=None, group=None):
+    """Return active products ordered by product_id.
+
+    Filters (mutually exclusive, checked in order):
+      product_ids — list of int/str product IDs
+      mfr + group — manufacturer and/or product_group filter
+      offset/limit — batch mode
+    """
     con = sqlite3.connect(DB_PATH)
     con.row_factory = sqlite3.Row
-    if limit is not None:
+    if product_ids is not None:
+        placeholders = ",".join("?" * len(product_ids))
+        rows = con.execute(
+            f"SELECT product_id, description, model_no, manufacturer, product_group, msrp "
+            f"FROM products WHERE eol=0 AND product_id IN ({placeholders}) ORDER BY product_id",
+            [int(p) for p in product_ids]
+        ).fetchall()
+    elif mfr and group:
+        rows = con.execute(
+            "SELECT product_id, description, model_no, manufacturer, product_group, msrp "
+            "FROM products WHERE eol=0 AND manufacturer=? AND product_group=? ORDER BY product_id",
+            (mfr, group)
+        ).fetchall()
+    elif mfr:
+        rows = con.execute(
+            "SELECT product_id, description, model_no, manufacturer, product_group, msrp "
+            "FROM products WHERE eol=0 AND manufacturer=? ORDER BY product_id",
+            (mfr,)
+        ).fetchall()
+    elif group:
+        rows = con.execute(
+            "SELECT product_id, description, model_no, manufacturer, product_group, msrp "
+            "FROM products WHERE eol=0 AND product_group=? ORDER BY product_id",
+            (group,)
+        ).fetchall()
+    elif limit is not None:
         rows = con.execute(
             "SELECT product_id, description, model_no, manufacturer, product_group, msrp "
             "FROM products WHERE eol=0 ORDER BY product_id LIMIT ? OFFSET ?",
@@ -1794,12 +1825,13 @@ def run_preflight_discovery():
 
 
 # ── Main run ──────────────────────────────────────────────────────────────────
-def run(offset, limit, date_str, notify=False, retailer_filter=None):
+def run(offset=0, limit=None, date_str=None, notify=False, retailer_filter=None,
+        product_ids=None, mfr=None, group=None):
     label = f"[{retailer_filter}]" if retailer_filter else "[ALL]"
     log(f"Starting retailer scrape: offset={offset}, limit={limit}, date={date_str}, retailer={label}")
 
     id_codes  = load_retailer_ids()
-    products  = read_products(offset, limit)
+    products  = read_products(offset, limit, product_ids=product_ids, mfr=mfr, group=group)
     completed = load_progress(date_str, retailer_filter)
 
     active = [r for r in RETAILERS if not r["blocked"]]
@@ -1931,13 +1963,19 @@ def run(offset, limit, date_str, notify=False, retailer_filter=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--retailer", type=str, default=None,
-                        help="Run a single retailer session (e.g. --retailer Box)")
+                        help="Filter to a single retailer (e.g. --retailer Box)")
     parser.add_argument("--batch",    type=int, choices=[1, 2, 3],
                         help="Run one of three equal-sized product batches (all retailers)")
     parser.add_argument("--test",     action="store_true",
                         help="Scrape first 20 products across all retailers")
     parser.add_argument("--discover", action="store_true",
                         help="Run only the pre-flight URL discovery, then exit")
+    parser.add_argument("--product",  type=int, default=None,
+                        help="Scrape a single product_id across all retailers (combine with --retailer to target one)")
+    parser.add_argument("--mfr",      type=str, default=None,
+                        help="Manufacturer filter — use with --group to scrape a product group")
+    parser.add_argument("--group",    type=str, default=None,
+                        help="Product group filter (e.g. PROD_VIDEO) — use alone or with --mfr")
     args = parser.parse_args()
 
     date_str = datetime.now().strftime("%d-%m-%Y")
@@ -1949,6 +1987,17 @@ if __name__ == "__main__":
     elif args.test:
         run_preflight_discovery()
         run(offset=0, limit=20, date_str=date_str, notify=False)
+
+    elif args.product is not None:
+        log(f"RETAILER SCRAPER — {date_str} [SINGLE PRODUCT {args.product}] retailer={args.retailer or 'ALL'}")
+        run(date_str=date_str, notify=False, retailer_filter=args.retailer,
+            product_ids=[args.product])
+
+    elif args.mfr or args.group:
+        desc = f"mfr={args.mfr or '*'} group={args.group or '*'} retailer={args.retailer or 'ALL'}"
+        log(f"RETAILER SCRAPER — {date_str} [{desc}]")
+        run(date_str=date_str, notify=False, retailer_filter=args.retailer,
+            mfr=args.mfr, group=args.group)
 
     elif args.retailer:
         # Single-retailer session — 8 run simultaneously, one per retailer

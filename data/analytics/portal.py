@@ -925,7 +925,7 @@ HTML = r"""<!DOCTYPE html>
         Scraper <span class="arrow">▾</span>
       </div>
       <div class="sidebar-items">
-        <button class="sidebar-btn" onclick="loadScrapeGroups(this)">⟳ Refresh SKUs</button>
+        <button class="sidebar-btn" onclick="loadScrapeGroups(this)">⟳ Manual Triggers</button>
       </div>
     </div>
     <div class="sidebar-section">
@@ -3089,10 +3089,10 @@ function loadScrapeGroups(btn) {
     });
     html += `</tbody></table></div>`;
 
-    // ── Group trigger table ──────────────────────────────────────────────────
-    html += `<div style="font-size:13px;font-weight:600;color:#1a1a1a;margin-bottom:8px">Manual Trigger by Group</div>`;
-    html += `<p style="color:#605E5C;margin:0 0 12px;font-size:13px">Runs in the background — a Telegram message will confirm when complete.</p>`;
-    html += '<div class="tbl-wrap"><table><thead><tr><th>Group</th><th>Active SKUs</th><th>Last Scraped</th><th></th></tr></thead><tbody>';
+    // ── STIC Scraper section ─────────────────────────────────────────────────
+    html += `<div style="font-size:15px;font-weight:700;color:#1a1a1a;margin:0 0 4px">STIC Scraper</div>`;
+    html += `<p style="color:#605E5C;margin:0 0 12px;font-size:13px">Triggers the STIC price scraper by product group. Runs in the background — Telegram confirms when complete.</p>`;
+    html += '<div class="tbl-wrap" style="margin-bottom:28px"><table><thead><tr><th>Group</th><th>Active SKUs</th><th>Last Scraped</th><th></th></tr></thead><tbody>';
     data.forEach(g => {
       const running = g.cpu_brand ? _scrapeGroupsRunning['CPU ' + g.cpu_brand.toUpperCase()]
                                   : _scrapeGroupsRunning[g.label];
@@ -3109,8 +3109,62 @@ function loadScrapeGroups(btn) {
       </tr>`;
     });
     html += '</tbody></table></div>';
+
+    // ── Retailer Scraper section ─────────────────────────────────────────────
+    html += `<div style="font-size:15px;font-weight:700;color:#1a1a1a;margin:0 0 4px">Retailer Scraper</div>`;
+    html += `<p style="color:#605E5C;margin:0 0 16px;font-size:13px">Trigger the retailer price scraper for a specific SKU or product group across all retailers or one.</p>`;
+
+    // Single-SKU block
+    html += `
+      <div style="background:#F7F6F5;border:1px solid #E1DFDD;border-radius:6px;padding:16px;margin-bottom:16px">
+        <div style="font-size:13px;font-weight:600;color:#1a1a1a;margin-bottom:10px">🔍 Single SKU</div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+          <input id="ret-sku-search" type="text" placeholder="Search model, description or product ID…"
+            style="flex:1;min-width:220px;padding:6px 10px;border:1px solid #C8C6C4;border-radius:4px;font-size:13px"
+            oninput="_retSkuSearch(this.value)">
+          <select id="ret-sku-retailer" style="padding:6px 10px;border:1px solid #C8C6C4;border-radius:4px;font-size:13px">
+            <option value="">All retailers</option>
+            ${['Amazon','Currys','Very','Argos','CCL Online','AWD-IT','Scan','Overclockers','Box'].map(r=>`<option value="${r}">${r}</option>`).join('')}
+          </select>
+        </div>
+        <div id="ret-sku-results" style="margin-bottom:10px;max-height:180px;overflow-y:auto"></div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span id="ret-sku-selected" style="font-size:12px;color:#605E5C;flex:1">No SKU selected</span>
+          <button id="ret-sku-run-btn" onclick="_triggerRetailerSku()" disabled
+            style="padding:6px 16px;background:#0078D4;color:#fff;border:none;border-radius:4px;font-size:13px;cursor:pointer;opacity:0.5">▶ Run</button>
+        </div>
+        <div id="ret-sku-status" style="font-size:12px;margin-top:6px"></div>
+      </div>`;
+
+    // Group/Manufacturer block — populated from API after render
+    html += `
+      <div style="background:#F7F6F5;border:1px solid #E1DFDD;border-radius:6px;padding:16px">
+        <div style="font-size:13px;font-weight:600;color:#1a1a1a;margin-bottom:10px">📦 Product Group / Manufacturer</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+          <select id="ret-grp-mfr" style="padding:6px 10px;border:1px solid #C8C6C4;border-radius:4px;font-size:13px;min-width:160px"
+            onchange="_retGrpUpdateGroup()">
+            <option value="">All manufacturers</option>
+          </select>
+          <select id="ret-grp-group" style="padding:6px 10px;border:1px solid #C8C6C4;border-radius:4px;font-size:13px;min-width:160px"
+            onchange="_retGrpUpdateCount()">
+            <option value="">All groups</option>
+          </select>
+          <select id="ret-grp-retailer" style="padding:6px 10px;border:1px solid #C8C6C4;border-radius:4px;font-size:13px">
+            <option value="">All retailers</option>
+            ${['Amazon','Currys','Very','Argos','CCL Online','AWD-IT','Scan','Overclockers','Box'].map(r=>`<option value="${r}">${r}</option>`).join('')}
+          </select>
+          <span id="ret-grp-count" style="font-size:12px;color:#605E5C"></span>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button onclick="_triggerRetailerGroup(this)"
+            style="padding:6px 16px;background:#0078D4;color:#fff;border:none;border-radius:4px;font-size:13px;cursor:pointer">▶ Run</button>
+        </div>
+        <div id="ret-grp-status" style="font-size:12px;margin-top:6px"></div>
+      </div>`;
+
     el.innerHTML = html;
     makeSortableAll(el);
+    _loadRetGrpData();
 
     // ── Auto-refresh the banner every 20s while page is active ──────────────
     clearInterval(_scrapePagePollInterval);
@@ -3237,6 +3291,158 @@ function _onScrapeGroupDone(label, btn) {
     if (btn) { btn.disabled = false; btn.textContent = '▶ Run'; }
     _refreshScrapeStatusCards();
   }
+}
+
+// ── Retailer Scraper helpers ──────────────────────────────────────────────────
+let _retSkuSelectedId   = null;
+let _retSkuSelectedName = '';
+let _retGrpData         = [];   // [{mfr, group, sku_count}]
+
+function _loadRetGrpData() {
+  fetch('/api/scrape/retailer/mfrgroups').then(r => r.json()).then(rows => {
+    _retGrpData = rows;
+    const mfrs = [...new Set(rows.map(r => r.mfr).filter(Boolean))].sort();
+    const mfrSel = document.getElementById('ret-grp-mfr');
+    if (!mfrSel) return;
+    mfrSel.innerHTML = '<option value="">All manufacturers</option>'
+      + mfrs.map(m => `<option value="${m}">${m}</option>`).join('');
+    _retGrpUpdateGroup();
+  }).catch(() => {});
+}
+
+function _retGrpUpdateGroup() {
+  const mfr     = (document.getElementById('ret-grp-mfr')?.value || '').trim();
+  const grpSel  = document.getElementById('ret-grp-group');
+  if (!grpSel) return;
+  const groups  = [...new Set(
+    _retGrpData.filter(r => !mfr || r.mfr === mfr).map(r => r.group).filter(Boolean)
+  )].sort();
+  grpSel.innerHTML = '<option value="">All groups</option>'
+    + groups.map(g => `<option value="${g}">${g}</option>`).join('');
+  _retGrpUpdateCount();
+}
+
+function _retGrpUpdateCount() {
+  const mfr   = (document.getElementById('ret-grp-mfr')?.value  || '').trim();
+  const group = (document.getElementById('ret-grp-group')?.value || '').trim();
+  const match = _retGrpData.filter(r =>
+    (!mfr   || r.mfr   === mfr) &&
+    (!group || r.group === group)
+  );
+  const total = match.reduce((s, r) => s + r.sku_count, 0);
+  const el = document.getElementById('ret-grp-count');
+  if (el) el.textContent = total ? `${total} SKUs` : '';
+}
+
+let _retSkuSearchTimeout = null;
+function _retSkuSearch(q) {
+  clearTimeout(_retSkuSearchTimeout);
+  const el = document.getElementById('ret-sku-results');
+  if (!q.trim()) { el.innerHTML = ''; return; }
+  _retSkuSearchTimeout = setTimeout(() => {
+    fetch('/api/products/search?q=' + encodeURIComponent(q) + '&limit=8')
+      .then(r => r.json()).then(rows => {
+        if (!rows.length) { el.innerHTML = '<div style="font-size:12px;color:#A19F9D;padding:4px">No results</div>'; return; }
+        el.innerHTML = rows.map(p => `
+          <div onclick="_retSkuSelect(${p.product_id},'${(p.model_no||p.description||'').replace(/'/g,"\\'")}',this)"
+            style="padding:6px 10px;font-size:12px;cursor:pointer;border-radius:3px;background:#fff;margin-bottom:2px;border:1px solid #E1DFDD">
+            <strong>${p.model_no || ''}</strong> ${p.description || ''} <span style="color:#A19F9D">#${p.product_id}</span>
+          </div>`).join('');
+      }).catch(() => { el.innerHTML = '<div style="font-size:12px;color:#A4262C;padding:4px">Search failed</div>'; });
+  }, 300);
+}
+
+function _retSkuSelect(id, name, rowEl) {
+  _retSkuSelectedId   = id;
+  _retSkuSelectedName = name;
+  document.querySelectorAll('#ret-sku-results div').forEach(d => d.style.background = '#fff');
+  rowEl.style.background = '#EFF6FC';
+  const sel = document.getElementById('ret-sku-selected');
+  if (sel) sel.textContent = `Selected: ${name} (#${id})`;
+  const btn = document.getElementById('ret-sku-run-btn');
+  if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+  document.getElementById('ret-sku-status').textContent = '';
+}
+
+function _triggerRetailerSku() {
+  if (!_retSkuSelectedId) return;
+  const retailer = document.getElementById('ret-sku-retailer')?.value || '';
+  const btn = document.getElementById('ret-sku-run-btn');
+  const statusEl = document.getElementById('ret-sku-status');
+  btn.disabled = true; btn.style.opacity = '0.5'; btn.textContent = '⏳ Running…';
+  statusEl.style.color = '#605E5C';
+  statusEl.textContent = `Scraping ${_retSkuSelectedName}${retailer ? ' @ ' + retailer : ' across all retailers'}…`;
+  fetch('/api/scrape/retailer/sku', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({product_id: _retSkuSelectedId, retailer: retailer || null})
+  }).then(r => r.json()).then(d => {
+    if (!d.started) {
+      btn.disabled = false; btn.style.opacity = '1'; btn.textContent = '▶ Run';
+      statusEl.style.color = '#A4262C';
+      statusEl.textContent = 'Failed: ' + (d.error || 'unknown error');
+      return;
+    }
+    const pid = _retSkuSelectedId;
+    const iv = setInterval(() => {
+      fetch('/api/scrape/retailer/sku/status?product_id=' + pid)
+        .then(r => r.json()).then(s => {
+          if (s.done) {
+            clearInterval(iv);
+            btn.disabled = false; btn.style.opacity = '1'; btn.textContent = '▶ Run';
+            statusEl.style.color = '#107C10';
+            statusEl.textContent = '✅ Complete — results written to DB.';
+          }
+        }).catch(() => clearInterval(iv));
+    }, 8000);
+    setTimeout(() => { clearInterval(iv); btn.disabled=false; btn.style.opacity='1'; btn.textContent='▶ Run'; }, 3600000);
+  }).catch(() => {
+    btn.disabled = false; btn.style.opacity = '1'; btn.textContent = '▶ Run';
+    statusEl.style.color = '#A4262C';
+    statusEl.textContent = 'Network error — could not start scrape.';
+  });
+}
+
+function _triggerRetailerGroup(btn) {
+  const mfr      = (document.getElementById('ret-grp-mfr')?.value    || '').trim();
+  const group    = (document.getElementById('ret-grp-group')?.value   || '').trim();
+  const retailer = (document.getElementById('ret-grp-retailer')?.value|| '').trim();
+  const statusEl = document.getElementById('ret-grp-status');
+  if (!mfr && !group) { statusEl.style.color='#A4262C'; statusEl.textContent='Select a manufacturer or group first.'; return; }
+  const desc = [mfr, group].filter(Boolean).join(' / ') + (retailer ? ' @ ' + retailer : ' — all retailers');
+  if (!confirm(`Start retailer scrape for "${desc}"?\\n\\nThis will run in the background.`)) return;
+  btn.disabled = true; btn.textContent = '⏳ Running…';
+  statusEl.style.color = '#605E5C';
+  statusEl.textContent = `Scraping ${desc}…`;
+  fetch('/api/scrape/retailer/mfrgroup', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({mfr: mfr || null, group: group || null, retailer: retailer || null})
+  }).then(r => r.json()).then(d => {
+    if (!d.started) {
+      btn.disabled = false; btn.textContent = '▶ Run';
+      statusEl.style.color = '#A4262C';
+      statusEl.textContent = 'Failed: ' + (d.error || 'unknown error');
+      return;
+    }
+    const key = d.key;
+    const iv = setInterval(() => {
+      fetch('/api/scrape/retailer/mfrgroup/status?key=' + encodeURIComponent(key))
+        .then(r => r.json()).then(s => {
+          if (s.done) {
+            clearInterval(iv);
+            btn.disabled = false; btn.textContent = '▶ Run';
+            statusEl.style.color = '#107C10';
+            statusEl.textContent = '✅ Complete — results written to DB.';
+          }
+        }).catch(() => clearInterval(iv));
+    }, 10000);
+    setTimeout(() => { clearInterval(iv); btn.disabled=false; btn.textContent='▶ Run'; }, 5400000);
+  }).catch(() => {
+    btn.disabled = false; btn.textContent = '▶ Run';
+    statusEl.style.color = '#A4262C';
+    statusEl.textContent = 'Network error — could not start scrape.';
+  });
 }
 
 function _refreshScrapeStatusCards() {
@@ -9063,6 +9269,118 @@ def scrape_sku_status():
     return jsonify({"done": job["done"]})
 
 
+_retailer_sku_jobs   = {}   # product_id → {"proc", "done"}
+_retailer_group_jobs = {}   # key → {"proc", "done"}
+
+RETAILER_NAMES = [r[0] for r in RETAILER_COVERAGE_MAP]   # ordered list for UI
+
+@app.route("/api/scrape/retailer/mfrgroups")
+def scrape_retailer_mfrgroups():
+    """Return distinct (manufacturer, product_group) combos with SKU counts."""
+    db = get_db()
+    rows = db.execute(
+        "SELECT manufacturer, product_group, COUNT(*) AS sku_count "
+        "FROM products WHERE eol=0 "
+        "GROUP BY manufacturer, product_group ORDER BY manufacturer, product_group"
+    ).fetchall()
+    db.close()
+    return jsonify([{"mfr": r["manufacturer"], "group": r["product_group"],
+                     "sku_count": r["sku_count"]} for r in rows])
+
+
+@app.route("/api/scrape/retailer/sku", methods=["POST"])
+def scrape_retailer_sku():
+    """Scrape a single product across all retailers (or one retailer)."""
+    import subprocess
+    data       = request.get_json(silent=True) or {}
+    retailer   = (data.get("retailer") or "").strip() or None
+    try:
+        product_id = int(data["product_id"])
+    except (KeyError, TypeError, ValueError):
+        return jsonify({"started": False, "error": "Invalid product_id"})
+    if retailer and retailer not in RETAILER_NAMES:
+        return jsonify({"started": False, "error": f"Unknown retailer: {retailer}"})
+
+    cmd = ["/usr/bin/python3", "/opt/stic-scraper/scraper/retailer_scraper.py",
+           "--product", str(product_id)]
+    if retailer:
+        cmd += ["--retailer", retailer]
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=open("/opt/stic-scraper/logs/retailer.log", "a"),
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        _retailer_sku_jobs[product_id] = {"proc": proc, "done": False}
+        return jsonify({"started": True, "product_id": product_id})
+    except Exception as e:
+        return jsonify({"started": False, "error": str(e)})
+
+
+@app.route("/api/scrape/retailer/sku/status")
+def scrape_retailer_sku_status():
+    try:
+        product_id = int(request.args.get("product_id"))
+    except (TypeError, ValueError):
+        return jsonify({"done": True})
+    job = _retailer_sku_jobs.get(product_id)
+    if not job:
+        return jsonify({"done": True})
+    if not job["done"] and job["proc"].poll() is not None:
+        job["done"] = True
+    return jsonify({"done": job["done"]})
+
+
+@app.route("/api/scrape/retailer/mfrgroup", methods=["POST"])
+def scrape_retailer_mfrgroup():
+    """Scrape all products in a mfr+group combo across all retailers (or one retailer)."""
+    import subprocess
+    data     = request.get_json(silent=True) or {}
+    mfr      = (data.get("mfr") or "").strip() or None
+    group    = (data.get("group") or "").strip() or None
+    retailer = (data.get("retailer") or "").strip() or None
+    if not mfr and not group:
+        return jsonify({"started": False, "error": "mfr or group required"})
+    if retailer and retailer not in RETAILER_NAMES:
+        return jsonify({"started": False, "error": f"Unknown retailer: {retailer}"})
+
+    key = f"{mfr or '*'}|{group or '*'}|{retailer or 'ALL'}"
+    existing = _retailer_group_jobs.get(key)
+    if existing and not existing["done"] and existing["proc"].poll() is None:
+        return jsonify({"started": False, "error": "Already running — wait for it to finish"})
+
+    cmd = ["/usr/bin/python3", "/opt/stic-scraper/scraper/retailer_scraper.py"]
+    if mfr:
+        cmd += ["--mfr", mfr]
+    if group:
+        cmd += ["--group", group]
+    if retailer:
+        cmd += ["--retailer", retailer]
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=open("/opt/stic-scraper/logs/retailer.log", "a"),
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        _retailer_group_jobs[key] = {"proc": proc, "done": False}
+        return jsonify({"started": True, "key": key})
+    except Exception as e:
+        return jsonify({"started": False, "error": str(e)})
+
+
+@app.route("/api/scrape/retailer/mfrgroup/status")
+def scrape_retailer_mfrgroup_status():
+    key = request.args.get("key", "")
+    job = _retailer_group_jobs.get(key)
+    if not job:
+        return jsonify({"done": True})
+    if not job["done"] and job["proc"].poll() is not None:
+        job["done"] = True
+    return jsonify({"done": job["done"]})
+
+
 @app.route("/api/scrape/live-status")
 def scrape_live_status():
     """Return whether the cron scraper is running, current progress, and schedule."""
@@ -9686,6 +10004,25 @@ def catalogue_product_prices(product_id):
     except Exception as e:
         db.close()
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/products/search")
+def products_search():
+    """Quick product search for autocomplete — returns product_id, model_no, description."""
+    q     = (request.args.get("q") or "").strip()
+    limit = min(int(request.args.get("limit", 10)), 20)
+    if not q:
+        return jsonify([])
+    db    = get_db()
+    like  = f"%{q}%"
+    rows  = db.execute(
+        "SELECT product_id, model_no, description, manufacturer FROM products "
+        "WHERE eol=0 AND (model_no LIKE ? OR description LIKE ? OR CAST(product_id AS TEXT) LIKE ?) "
+        "ORDER BY product_id LIMIT ?",
+        (like, like, like, limit)
+    ).fetchall()
+    db.close()
+    return jsonify([dict(r) for r in rows])
 
 
 @app.route("/api/catalogue/products")
