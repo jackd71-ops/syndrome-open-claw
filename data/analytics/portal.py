@@ -92,7 +92,6 @@ RETAILER_COVERAGE_MAP = [
 # manufacturer=None means no manufacturer filter (e.g. Server/Pro)
 SCRAPE_GROUPS = [
     ("PALIT",      "PROD_VIDEO", "Palit GPU"),
-    ("POWERCOLOR", "PROD_VIDEO", "PowerColor GPU"),
     ("MSI",        "PROD_VIDEO", "MSI GPU"),
     ("ASUS",       "PROD_VIDEO", "ASUS GPU"),
     ("GIGABYTE",   "PROD_VIDEO", "Gigabyte GPU"),
@@ -8519,7 +8518,6 @@ def scrape_groups():
     # Individual groups — each has a single manufacturer (or None for all of that product_group)
     SCRAPE_GROUPS = [
         ("PALIT",      "PROD_VIDEO", "Palit GPU",              None),
-        ("POWERCOLOR", "PROD_VIDEO", "PowerColor GPU",         None),
         ("MSI",        "PROD_VIDEO", "MSI GPU",                None),
         ("ASUS",       "PROD_VIDEO", "ASUS GPU",               None),
         ("GIGABYTE",   "PROD_VIDEO", "Gigabyte GPU",           None),
@@ -8713,7 +8711,6 @@ def scrape_missing_group_trigger():
     import subprocess
     SCRAPE_GROUPS = [
         ("PALIT",      "PROD_VIDEO", "Palit GPU"),
-        ("POWERCOLOR", "PROD_VIDEO", "PowerColor GPU"),
         ("MSI",        "PROD_VIDEO", "MSI GPU"),
         ("ASUS",       "PROD_VIDEO", "ASUS GPU"),
         ("GIGABYTE",   "PROD_VIDEO", "Gigabyte GPU"),
@@ -8915,7 +8912,7 @@ def scrape_group_trigger():
         return jsonify({"started": False, "error": "No label provided"})
 
     VALID_LABELS = {
-        "Palit GPU", "PowerColor GPU", "MSI GPU", "ASUS GPU", "Gigabyte GPU",
+        "Palit GPU", "MSI GPU", "ASUS GPU", "Gigabyte GPU",
         "MSI Motherboards", "Gigabyte Motherboards", "ASUS Motherboards", "Server / Pro",
         "AMD Retail CPU", "AMD MPK CPU", "Intel CPU", "Intel OEM CPU",
         "Probe SKUs",

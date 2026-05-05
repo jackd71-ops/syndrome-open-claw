@@ -223,7 +223,6 @@ def read_products_for_group(manufacturer: str | None, product_group: str) -> lis
 # Order determines scrape sequence — GPUs first (smaller, faster), boards after.
 SCRAPE_GROUPS = [
     ("PALIT",      "PROD_VIDEO", "Palit GPU"),
-    ("POWERCOLOR", "PROD_VIDEO", "PowerColor GPU"),
     ("MSI",        "PROD_VIDEO", "MSI GPU"),
     ("ASUS",       "PROD_VIDEO", "ASUS GPU"),
     ("GIGABYTE",   "PROD_VIDEO", "Gigabyte GPU"),
