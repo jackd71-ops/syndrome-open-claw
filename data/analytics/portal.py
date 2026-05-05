@@ -3073,22 +3073,6 @@ function loadScrapeGroups(btn) {
         </div>`;
     }
 
-    // ── Schedule table ───────────────────────────────────────────────────────
-    html += `<div style="font-size:13px;font-weight:600;color:#1a1a1a;margin-bottom:8px">Scheduled Runs</div>`;
-    html += `<div class="tbl-wrap" style="margin-bottom:20px"><table><thead><tr><th>Run</th><th>Days</th><th>Time (UK)</th><th>SKUs</th><th>Est. Duration</th><th>Est. End</th><th>Next Run</th></tr></thead><tbody>`;
-    (live.schedule || []).forEach(s => {
-      html += `<tr>
-        <td><strong>${s.label}</strong></td>
-        <td>${s.days}</td>
-        <td>${s.time}</td>
-        <td>${s.sku_count}</td>
-        <td style="color:#605E5C">${s.est_duration}</td>
-        <td style="font-weight:600">${s.est_end}</td>
-        <td style="color:#107C10;font-weight:600">${s.next_label}</td>
-      </tr>`;
-    });
-    html += `</tbody></table></div>`;
-
     // ── STIC Scraper section ─────────────────────────────────────────────────
     html += `<div style="font-size:15px;font-weight:700;color:#1a1a1a;margin:0 0 4px">STIC Scraper</div>`;
     html += `<p style="color:#605E5C;margin:0 0 12px;font-size:13px">Triggers the STIC price scraper by product group. Runs in the background — Telegram confirms when complete.</p>`;
