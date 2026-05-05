@@ -601,6 +601,7 @@ HTML = r"""<!DOCTYPE html>
       </div>
       <div class="sidebar-items">
         <button class="sidebar-btn" onclick="loadMissingResults(this)">❌ Missing Results</button>
+        <button class="sidebar-btn" onclick="showSticScraperHealth(this)">🩺 Scraper Health</button>
       </div>
     </div>
   </div>
@@ -976,6 +977,11 @@ HTML = r"""<!DOCTYPE html>
     <!-- Scraper — Refresh SKUs -->
     <div class="content-section" id="stic-scrape">
       <div id="stic-scrape-content"><div class="spinner">Loading…</div></div>
+    </div>
+
+    <div class="content-section" id="stic-scraper-health">
+      <div class="section-title" style="margin-bottom:16px">Scraper Health</div>
+      <div id="scraper-health-content-stic"><div class="spinner">Loading…</div></div>
     </div>
   </div>
 </div>
@@ -4826,9 +4832,9 @@ function closeRetDailySkuDrill() {
 }
 
 // ── Scraper Health report ─────────────────────────────────────────────────────
-function showScraperHealth(btn) {
-  showRetSection('scraper-health', btn);
-  const el = document.getElementById('scraper-health-content');
+let _scraperHealthInterval = null;
+
+function _renderScraperHealth(el) {
   el.innerHTML = '<div class="spinner">Loading…</div>';
   fetch('/api/scraper/health').then(r => r.json()).then(data => {
     const fmtTime = t => t || '—';
@@ -4982,6 +4988,34 @@ function showScraperHealth(btn) {
   }).catch(() => {
     el.innerHTML = '<p style="color:#A4262C">Failed to load scraper health data.</p>';
   });
+}
+
+function _startScraperHealthRefresh(el) {
+  if (_scraperHealthInterval) clearInterval(_scraperHealthInterval);
+  _scraperHealthInterval = setInterval(() => {
+    // only refresh if the element is still visible (its parent section is active)
+    const section = el.closest('.content-section');
+    if (section && section.classList.contains('active')) {
+      _renderScraperHealth(el);
+    } else {
+      clearInterval(_scraperHealthInterval);
+      _scraperHealthInterval = null;
+    }
+  }, 60000);
+}
+
+function showScraperHealth(btn) {
+  showRetSection('scraper-health', btn);
+  const el = document.getElementById('scraper-health-content');
+  _renderScraperHealth(el);
+  _startScraperHealthRefresh(el);
+}
+
+function showSticScraperHealth(btn) {
+  showSticSection('scraper-health', btn);
+  const el = document.getElementById('scraper-health-content-stic');
+  _renderScraperHealth(el);
+  _startScraperHealthRefresh(el);
 }
 
 // ── Scraper Coverage report ───────────────────────────────────────────────────
