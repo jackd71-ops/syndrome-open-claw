@@ -625,6 +625,11 @@ HTML = r"""<!DOCTYPE html>
           <span id="stic-chipset-drill-title" class="section-title" style="margin:0"></span>
           <button class="drill-close" onclick="closeChipsetDrill()">✕ Close</button>
         </div>
+        <div id="stic-chipset-trend-wrap" style="margin-bottom:20px">
+          <div style="font-size:13px;font-weight:600;color:#201F1E;margin-bottom:8px">Channel Stock Holding — Historical</div>
+          <div id="stic-chipset-trend-chart" style="position:relative"><div class="spinner">Loading…</div></div>
+        </div>
+        <div style="font-size:13px;font-weight:600;color:#201F1E;margin-bottom:8px" id="stic-chipset-sku-heading">SKUs</div>
         <div class="tbl-wrap" id="stic-chipset-drill-tbl"></div>
       </div>
     </div>
@@ -1666,8 +1671,10 @@ function closeChipsetDrill() {
 function loadChipsetDrill(chipset) {
   const drillEl = document.getElementById('stic-chipset-drill');
   drillEl.style.display = 'block';
-  document.getElementById('stic-chipset-drill-title').textContent = chipset + ' — SKUs';
+  document.getElementById('stic-chipset-drill-title').textContent = chipset;
+  document.getElementById('stic-chipset-sku-heading').textContent = chipset + ' — SKUs';
   document.getElementById('stic-chipset-drill-tbl').innerHTML = '<div class="spinner">Loading…</div>';
+  loadChipsetStockTrend(chipset);
   fetch('/api/stic/chipset-skus?group=' + _chipsetGroup + '&chipset=' + encodeURIComponent(chipset))
     .then(r=>r.json()).then(rows => {
       if (!rows.length) {
@@ -1691,6 +1698,147 @@ function loadChipsetDrill(chipset) {
       const _drillEl = document.getElementById('stic-chipset-drill-tbl');
       _drillEl.innerHTML = html;
       makeSortableAll(_drillEl);
+    });
+}
+
+// ── Chipset stock trend chart ─────────────────────────────────────────────────
+const _DIST_COLOURS = {
+  'VIP':          '#8764B8',
+  'Ingram Micro': '#0078D4',
+  'TD Synnex':    '#107C10',
+  'Westcoast':    '#E74856',
+  'Target':       '#D29200',
+  'M2M Direct':   '#00BCF2',
+};
+const _DIST_DEFAULT = '#A19F9D';
+
+function loadChipsetStockTrend(chipset) {
+  const wrap = document.getElementById('stic-chipset-trend-chart');
+  wrap.innerHTML = '<div class="spinner">Loading…</div>';
+  fetch('/api/stic/chipset-stock-trend?group=' + _chipsetGroup + '&chipset=' + encodeURIComponent(chipset))
+    .then(r => r.json()).then(data => {
+      const rows  = data.rows  || [];
+      const dists = data.distributors || [];
+      if (!rows.length) {
+        wrap.innerHTML = '<p style="color:#A19F9D;font-size:12px">No historical data</p>';
+        return;
+      }
+
+      // ── Canvas dimensions ───────────────────────────────────────────────────
+      const W = Math.min(wrap.offsetWidth || 900, 1100);
+      const H = 220;
+      const PAD_L = 54, PAD_R = 16, PAD_T = 14, PAD_B = 52;
+      const chartW = W - PAD_L - PAD_R;
+      const chartH = H - PAD_T - PAD_B;
+
+      const canvas = document.createElement('canvas');
+      canvas.width  = W;
+      canvas.height = H;
+      canvas.style.cssText = 'width:100%;height:auto;display:block';
+      wrap.innerHTML = '';
+      wrap.appendChild(canvas);
+      const ctx = canvas.getContext('2d');
+
+      // ── Compute stacked totals per date ────────────────────────────────────
+      const maxTotal = Math.max(...rows.map(r => r.total || 0));
+      if (maxTotal === 0) {
+        wrap.innerHTML = '<p style="color:#A19F9D;font-size:12px">No stock recorded for this chipset</p>';
+        return;
+      }
+      const yMax = Math.ceil(maxTotal / 100) * 100 || 100;
+      const n    = rows.length;
+      const barW = Math.max(4, Math.floor(chartW / n) - 2);
+      const gap  = Math.floor((chartW - barW * n) / (n + 1));
+
+      // ── Draw grid lines & Y labels ─────────────────────────────────────────
+      ctx.font      = '10px system-ui,sans-serif';
+      ctx.fillStyle = '#605E5C';
+      const yTicks  = 4;
+      for (let i = 0; i <= yTicks; i++) {
+        const val = Math.round(yMax * i / yTicks);
+        const y   = PAD_T + chartH - (i / yTicks) * chartH;
+        ctx.strokeStyle = '#E1DFDD';
+        ctx.lineWidth   = 1;
+        ctx.beginPath(); ctx.moveTo(PAD_L, y); ctx.lineTo(PAD_L + chartW, y); ctx.stroke();
+        ctx.textAlign = 'right';
+        ctx.fillText(val.toLocaleString(), PAD_L - 4, y + 3);
+      }
+
+      // ── Draw bars ──────────────────────────────────────────────────────────
+      rows.forEach((r, i) => {
+        const x0   = PAD_L + gap + i * (barW + gap);
+        let yBase  = PAD_T + chartH;
+        dists.forEach(dist => {
+          const qty = r[dist] || 0;
+          if (!qty) return;
+          const barH = (qty / yMax) * chartH;
+          ctx.fillStyle = _DIST_COLOURS[dist] || _DIST_DEFAULT;
+          ctx.fillRect(x0, yBase - barH, barW, barH);
+          yBase -= barH;
+        });
+      });
+
+      // ── X axis date labels (every other label if crowded) ─────────────────
+      ctx.fillStyle = '#605E5C';
+      ctx.textAlign = 'center';
+      const labelEvery = n > 14 ? 2 : 1;
+      rows.forEach((r, i) => {
+        if (i % labelEvery !== 0) return;
+        const x0  = PAD_L + gap + i * (barW + gap) + barW / 2;
+        const lbl = r.date ? r.date.slice(5) : '';   // MM-DD
+        ctx.save();
+        ctx.translate(x0, PAD_T + chartH + 4);
+        ctx.rotate(-Math.PI / 4);
+        ctx.textAlign = 'right';
+        ctx.fillText(lbl, 0, 0);
+        ctx.restore();
+      });
+
+      // ── Legend ─────────────────────────────────────────────────────────────
+      const legendEl = document.createElement('div');
+      legendEl.style.cssText = 'display:flex;flex-wrap:wrap;gap:12px;margin-top:6px;font-size:11px;color:#323130';
+      dists.forEach(dist => {
+        const col  = _DIST_COLOURS[dist] || _DIST_DEFAULT;
+        const swatch = `<span style="display:inline-block;width:10px;height:10px;background:${col};border-radius:2px;margin-right:4px;vertical-align:middle"></span>`;
+        const span = document.createElement('span');
+        span.innerHTML = swatch + dist;
+        legendEl.appendChild(span);
+      });
+      wrap.appendChild(legendEl);
+
+      // ── Tooltip on hover ───────────────────────────────────────────────────
+      const tooltip = document.createElement('div');
+      tooltip.style.cssText = 'position:absolute;background:#fff;border:1px solid #C8C6C4;border-radius:4px;padding:8px 10px;font-size:11px;pointer-events:none;display:none;z-index:10;min-width:140px;box-shadow:0 2px 6px rgba(0,0,0,.12)';
+      wrap.style.position = 'relative';
+      wrap.appendChild(tooltip);
+
+      canvas.addEventListener('mousemove', e => {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const mx = (e.clientX - rect.left) * scaleX;
+        // Find which bar we're over
+        let found = -1;
+        for (let i = 0; i < n; i++) {
+          const x0 = PAD_L + gap + i * (barW + gap);
+          if (mx >= x0 && mx <= x0 + barW) { found = i; break; }
+        }
+        if (found < 0) { tooltip.style.display = 'none'; return; }
+        const r = rows[found];
+        let tip = `<strong>${r.date}</strong><br>Total: <strong>${(r.total||0).toLocaleString()}</strong><hr style="margin:4px 0;border:none;border-top:1px solid #E1DFDD">`;
+        dists.forEach(d => {
+          if (r[d]) tip += `<span style="display:inline-block;width:8px;height:8px;background:${_DIST_COLOURS[d]||_DIST_DEFAULT};border-radius:2px;margin-right:4px"></span>${d}: ${r[d].toLocaleString()}<br>`;
+        });
+        tooltip.innerHTML = tip;
+        tooltip.style.display  = 'block';
+        const tipX = (PAD_L + gap + found * (barW + gap)) / scaleX;
+        tooltip.style.left = Math.min(tipX + 8, rect.width - 160) + 'px';
+        tooltip.style.top  = '10px';
+      });
+      canvas.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
+    })
+    .catch(() => {
+      document.getElementById('stic-chipset-trend-chart').innerHTML =
+        '<p style="color:#A4262C;font-size:12px">Failed to load trend data</p>';
     });
 }
 
@@ -6528,6 +6676,68 @@ def stic_chipset_skus():
             "channel_stock": p["channel_stock"],
         })
     return jsonify(result)
+
+
+@app.route("/api/stic/chipset-stock-trend")
+def stic_chipset_stock_trend():
+    """Return daily channel stock totals per distributor for a chipset, for trend charting."""
+    group   = request.args.get("group", "mbrd")
+    chipset = request.args.get("chipset", "").strip()
+    if not chipset:
+        return jsonify({"rows": [], "distributors": []})
+
+    group_filter = {
+        "mbrd":   "p.product_group = 'PROD_MBRD'",
+        "server": "p.product_group = 'PROD_MBRDS'",
+        "gpu":    "p.product_group = 'PROD_VIDEO'",
+        "cpu":    "p.product_group = 'PROD_CPU'",
+    }.get(group, "p.product_group = 'PROD_MBRD'")
+
+    chipset_fn = extract_gpu_chipset if group == "gpu" else extract_chipset
+
+    # Identify product_ids that belong to this chipset
+    id_rows = qry(
+        f"""SELECT DISTINCT sp.product_id, sp.model_no,
+               COALESCE(p.chipset, sp.chipset) AS chipset
+           FROM stic_prices sp
+           JOIN products p ON p.product_id = sp.product_id
+           WHERE {group_filter}""", ()
+    )
+    product_ids = [
+        r["product_id"] for r in id_rows
+        if (r["chipset"] or chipset_fn(r["model_no"])) == chipset
+    ]
+    if not product_ids:
+        return jsonify({"rows": [], "distributors": []})
+
+    placeholders = ",".join("?" * len(product_ids))
+    trend_rows = qry(
+        f"""SELECT date, distributor, SUM(COALESCE(qty, 0)) AS qty
+            FROM stic_prices
+            WHERE product_id IN ({placeholders})
+            GROUP BY date, distributor
+            ORDER BY date, distributor""",
+        product_ids,
+    )
+
+    from collections import defaultdict
+    by_date     = defaultdict(dict)
+    distributors = set()
+    for r in trend_rows:
+        by_date[r["date"]][r["distributor"]] = r["qty"]
+        distributors.add(r["distributor"])
+
+    # VIP first, then rest alphabetically
+    dist_order = sorted(distributors, key=lambda d: (0 if d == "VIP" else 1, d))
+    result = []
+    for date in sorted(by_date.keys()):
+        d = by_date[date]
+        row = {"date": date, "total": sum(d.values())}
+        for dist in dist_order:
+            row[dist] = d.get(dist, 0)
+        result.append(row)
+
+    return jsonify({"rows": result, "distributors": dist_order})
 
 
 @app.route("/api/stic/search")
