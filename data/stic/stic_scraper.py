@@ -241,6 +241,11 @@ SCRAPE_GROUPS = [
 GPU_GROUPS       = [g for g in SCRAPE_GROUPS if g[1] == "PROD_VIDEO"]
 CPU_AMD_GROUPS   = [g for g in SCRAPE_GROUPS if g[1] == "PROD_CPU" and g[0] and "amd"   in g[0].lower()]
 CPU_INTEL_GROUPS = [g for g in SCRAPE_GROUPS if g[1] == "PROD_CPU" and g[0] and "intel" in g[0].lower()]
+# Afternoon re-scrape: Palit/MSI/ASUS/Gigabyte GPU + AMD Retail/MPK CPU (force=True)
+PM_GROUPS        = [g for g in SCRAPE_GROUPS if g[2] in (
+    "Palit GPU", "MSI GPU", "ASUS GPU", "Gigabyte GPU",
+    "AMD Retail CPU", "AMD MPK CPU",
+)]
 
 # Gap between groups: random 2–5 minutes
 GROUP_GAP_MIN = 120
@@ -1669,7 +1674,8 @@ def run_missing_all(date_str: str):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--runall",     action="store_true", help="Morning run: all groups in sequence with random start delay")
-    parser.add_argument("--gpus",       action="store_true", help="Afternoon run: GPU groups only with random start delay")
+    parser.add_argument("--pm",         action="store_true", help="Afternoon re-scrape: Palit/MSI/ASUS/Gigabyte GPU + AMD Retail/MPK CPU, force=True")
+    parser.add_argument("--gpus",       action="store_true", help="Manual: all GPU groups with random start delay")
     parser.add_argument("--cpus-amd",   action="store_true", help="Manual run: AMD CPU groups only (AMD Retail + AMD MPK)")
     parser.add_argument("--cpus-intel", action="store_true", help="Manual run: Intel CPU groups only (Intel + Intel OEM)")
     parser.add_argument("--group",      type=str,            help="Run a single named group by label, e.g. --group \"ASUS GPU\"")
@@ -1703,6 +1709,9 @@ if __name__ == "__main__":
     elif args.runall:
         log(f"Morning run: {len(SCRAPE_GROUPS)} groups — all products" + (" (force)" if args.force else ""))
         run_groups(SCRAPE_GROUPS, date_str, random_start_delay=True, force=args.force)
+    elif args.pm:
+        log(f"Afternoon run: {len(PM_GROUPS)} groups (Palit/MSI/ASUS/Gigabyte GPU + AMD Retail/MPK CPU) force=True")
+        run_groups(PM_GROUPS, date_str, random_start_delay=True, force=True)
     elif args.gpus:
         log(f"Afternoon run: {len(GPU_GROUPS)} GPU groups only (force=True)")
         run_groups(GPU_GROUPS, date_str, random_start_delay=True, force=True)
