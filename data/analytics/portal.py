@@ -1703,12 +1703,12 @@ function loadChipsetDrill(chipset) {
 
 // ── Chipset stock trend chart ─────────────────────────────────────────────────
 const _DIST_COLOURS = {
-  'VIP':          '#8764B8',
-  'Ingram Micro': '#0078D4',
-  'TD Synnex':    '#107C10',
-  'Westcoast':    '#E74856',
-  'Target':       '#D29200',
-  'M2M Direct':   '#00BCF2',
+  'VIP':          '#0078D4',   // blue
+  'M2M Direct':   '#FFB900',   // amber
+  'TD Synnex':    '#D13438',   // red
+  'Target':       '#8A8886',   // grey
+  'Westcoast':    '#107C10',   // green
+  'Ingram Micro': '#00B7C3',   // teal
 };
 const _DIST_DEFAULT = '#A19F9D';
 
