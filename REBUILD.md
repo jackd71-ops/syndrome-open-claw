@@ -209,10 +209,10 @@ Add:
 0 8,18 * * * /usr/bin/python3 /opt/openclaw/data/travel/check_watchlist.py >> /opt/openclaw/logs/travel.log 2>&1
 
 # ── STIC scraper ──────────────────────────────────────────────────────────────
-# Morning: full run all groups (Mon-Fri 06:30 UK)
+# Morning: full run all 13 groups (Mon-Fri 06:30 UK)
 30 6 * * 1-5 TZ=Europe/London python3 /opt/stic-scraper/scraper/stic_scraper.py --runall >> /opt/stic-scraper/logs/stic_cron.log 2>&1
-# Afternoon: full run all groups again with --force (Mon-Fri 12:30 UK)
-30 12 * * 1-5 TZ=Europe/London python3 /opt/stic-scraper/scraper/stic_scraper.py --runall >> /opt/stic-scraper/logs/stic_cron.log 2>&1
+# Afternoon: 6 volatile groups only, force=True — price move check (Mon-Fri 12:30 UK)
+30 12 * * 1-5 TZ=Europe/London python3 /opt/stic-scraper/scraper/stic_scraper.py --pm >> /opt/stic-scraper/logs/stic_cron.log 2>&1
 
 # ── Amazon scraper ────────────────────────────────────────────────────────────
 0 8  * * * TZ=Europe/London /usr/bin/python3 /opt/stic-scraper/scraper/amazon_scraper.py --slot am >> /opt/stic-scraper/logs/amazon_cron.log 2>&1
@@ -320,6 +320,24 @@ All operational data lives in `prices.db`. Key tables:
 | stic_url | TEXT | Cached STIC product detail URL (auto-populated by scraper) |
 | msrp | REAL | Recommended retail price |
 
+### `retailer_not_stocked` — explicit per-retailer not-stocked flags
+
+| Column | Type | Notes |
+|---|---|---|
+| product_id | INTEGER | FK → products |
+| retailer | TEXT | e.g. "Amazon", "Currys" |
+| source | TEXT | "import", "edit", "audit" |
+| set_date | TEXT | ISO date when flag was set |
+
+PK is `(product_id, retailer)`. Auto-cleared when a code/URL is added for that retailer.
+
+### `housekeeping_log` — monthly task completion tracking
+
+| Column | Type | Notes |
+|---|---|---|
+| task_id | TEXT PK | Static task identifier (e.g. "new-skus") |
+| last_done | TEXT | ISO date of last completion |
+
 ### `retailer_ids` — retailer-specific IDs per product
 
 | Column | Type | Notes |
@@ -369,7 +387,16 @@ The Catalogue tab provides:
 |---|---|
 | View Retailer IDs | Searchable table of all retailer IDs/URLs |
 | Import Retailer IDs | CSV import to add/update ASINs, SKUs, URLs |
-| Export Retailer IDs | CSV download of all retailer IDs |
+| Export Retailer IDs | CSV download including 9 `ns_*` not-stocked boolean columns |
+| Missing URLs Report | Filter by retailer/mfr/group; SKU count; export to Excel; shows not-stocked flags |
+| Not Stocked Flags | Audit page — view all `retailer_not_stocked` entries; unset individually or bulk |
+| Missing URLs Import | Catalogue → Missing URLs; import the exported Excel back to update codes/URLs/not-stocked |
+
+**Not Stocked flags (`retailer_not_stocked` table):**
+- Explicit per-retailer flag: `(product_id, retailer, source, set_date)`
+- Set via: import, inline checkbox in product edit modal, or audit page
+- Auto-cleared when a code/URL is set for that retailer (code always wins)
+- Flag means "we know this retailer doesn't stock it" — suppresses from missing reports
 
 **MSRP section:**
 | Action | Description |
@@ -380,9 +407,22 @@ The Catalogue tab provides:
 | Missing MSRP Report | Summary by manufacturer/group + filterable product list; click row to add MSRP inline |
 | Missing EAN Report | Summary by manufacturer/group + filterable product list; click row to add EAN inline |
 
-CSV column named `Product` is the VIP product code (maps to `product_id` in DB).
+**Scraper section:**
+| Action | Description |
+|---|---|
+| Manual Triggers | STIC scraper group triggers + Retailer scraper single-SKU and mfr/group triggers |
 
-**Inline product editing:** Clicking any row in View/Search SKUs or either missing report opens an edit modal. All fields are editable: Model, Manufacturer, Product Group, Description, Chipset, EAN, MSRP. In missing reports the relevant field (MSRP or EAN) is highlighted and auto-focused. After saving, the search filter re-runs and the row disappears if it no longer matches.
+Manual Triggers page has three panels:
+1. **Live banner** — shows if a scraper is currently running with progress bar
+2. **STIC Scraper** — table of all 13 groups with last-scraped date and Run button
+3. **Retailer Scraper** — Single SKU search (autocomplete → select → retailer filter → Run); Product Group panel (manufacturer + group dropdowns + retailer filter → Run)
+
+**Admin section:**
+| Action | Description |
+|---|---|
+| Monthly Housekeeping | 10 recurring tasks with colour-coded age badges (green <35d, amber <70d, red 70d+); mark-done stores date in `housekeeping_log` DB table |
+
+**Inline product editing:** Clicking any row in View/Search SKUs or either missing report opens an edit modal. All fields are editable: Model, Manufacturer, Product Group, Description, Chipset, EAN, MSRP. Each of the 9 retailers has a "Not stocked" checkbox inline. After saving, the search filter re-runs and the row disappears if it no longer matches.
 
 **MSRP import notes:**
 - Parser handles `£299.99`, `299.99 GBP`, European decimal `299,99`, European thousands `1.234,56`
@@ -390,32 +430,44 @@ CSV column named `Product` is the VIP product code (maps to `product_id` in DB).
 - Broken Excel cells (`#REF!`, blank) are flagged as bad value — fix in the source spreadsheet
 - Every preview is logged to `/opt/openclaw/logs/import.log` (JSON lines) for diagnostics
 
+## Portal — STIC Tab
+
+**Chipset Daily Overview drill-down:**
+Clicking a chipset row now shows a three-layer panel:
+1. **Channel Stock Holding — Historical**: stacked bar chart (canvas, no external libs) showing daily total stock per distributor across all available dates. Distributor colours match all other portal charts (VIP=blue, M2M=amber, TD Synnex=red, Target=grey, Westcoast=green, Ingram=teal). Hover tooltip shows date + per-distributor breakdown.
+2. **SKU table**: per-product stock, VIP stock, floor price, VIP price.
+
+**Scraper section:**
+The STIC tab has its own Scraper Health view (🩺 Scraper Health) mirrored from the Retailer tab. Both instances auto-refresh every 60 seconds while the section is active; the interval self-clears on navigation away.
+
 ---
 
 ## Scraper Groups
 
-STIC scraper runs as 14 manufacturer/product-group segments. Each group sends its own Telegram on completion.
+STIC scraper runs as 13 manufacturer/product-group segments (PowerColor removed — VIP-distributed only, not in channel). Each group sends its own Telegram on completion.
 
-| Label | Manufacturer | Group |
-|---|---|---|
-| Palit GPU | PALIT | PROD_VIDEO |
-| PowerColor GPU | POWERCOLOR | PROD_VIDEO |
-| MSI GPU | MSI | PROD_VIDEO |
-| ASUS GPU | ASUS | PROD_VIDEO |
-| Gigabyte GPU | GIGABYTE | PROD_VIDEO |
-| MSI Motherboards | MSI | PROD_MBRD |
-| Gigabyte Motherboards | GIGABYTE | PROD_MBRD |
-| ASUS Motherboards | ASUS | PROD_MBRD |
-| Server / Pro | (all) | PROD_MBRDS |
-| AMD Retail CPU | AMD Retail | PROD_CPU |
-| AMD MPK CPU | AMD MPK | PROD_CPU |
-| Intel CPU | Intel | PROD_CPU |
-| Intel OEM CPU | Intel OEM | PROD_CPU |
-| Probe SKUs | (all) | PROBE |
+| Label | Manufacturer | Group | Morning | Afternoon (PM) |
+|---|---|---|---|---|
+| Palit GPU | PALIT | PROD_VIDEO | ✓ | ✓ |
+| MSI GPU | MSI | PROD_VIDEO | ✓ | ✓ |
+| ASUS GPU | ASUS | PROD_VIDEO | ✓ | ✓ |
+| Gigabyte GPU | GIGABYTE | PROD_VIDEO | ✓ | ✓ |
+| MSI Motherboards | MSI | PROD_MBRD | ✓ | — |
+| Gigabyte Motherboards | GIGABYTE | PROD_MBRD | ✓ | — |
+| ASUS Motherboards | ASUS | PROD_MBRD | ✓ | — |
+| Server / Pro | (all) | PROD_MBRDS | ✓ | — |
+| AMD Retail CPU | AMD Retail | PROD_CPU | ✓ | ✓ |
+| AMD MPK CPU | AMD MPK | PROD_CPU | ✓ | ✓ |
+| Intel CPU | Intel | PROD_CPU | ✓ | — |
+| Intel OEM CPU | Intel OEM | PROD_CPU | ✓ | — |
+| Probe SKUs | (all) | PROBE | ✓ | — |
+
+**Afternoon (PM) session** (`--pm` flag): re-scrapes the 6 most price-volatile groups with `force=True` to capture intraday price moves. Does **not** use the progress file — always overwrites morning rows.
 
 **CLI:**
 ```bash
-python3 stic_scraper.py --runall              # all 14 groups, random 0–10 min start delay
+python3 stic_scraper.py --runall              # all 13 groups, random 0–10 min start delay
+python3 stic_scraper.py --pm                  # afternoon: 6 volatile groups only, force=True
 python3 stic_scraper.py --gpus                # GPU groups only (PROD_VIDEO)
 python3 stic_scraper.py --cpus-amd            # AMD CPU groups only
 python3 stic_scraper.py --cpus-intel          # Intel CPU groups only
@@ -423,7 +475,7 @@ python3 stic_scraper.py --group "ASUS GPU"    # single named group, no delay
 python3 stic_scraper.py --rescrape 123456,234567  # re-scrape specific VIP codes
 ```
 
-Groups can also be triggered from the portal: STIC → Scraper → Refresh SKUs.
+Groups can also be triggered from the portal: Catalogue → Scraper → Manual Triggers.
 
 ---
 
@@ -436,11 +488,17 @@ All 8 retailers run simultaneously at 09:30, one session per retailer, each scra
 
 **CLI:**
 ```bash
-python3 retailer_scraper.py --retailer Currys       # single retailer, all products
-python3 retailer_scraper.py --retailer "CCL Online" # (quote names with spaces)
-python3 retailer_scraper.py --discover              # URL discovery only (nightly 01:00)
-python3 retailer_scraper.py --test                  # first 20 products, no retailer filter
+python3 retailer_scraper.py --retailer Currys           # single retailer, all products
+python3 retailer_scraper.py --retailer "CCL Online"     # (quote names with spaces)
+python3 retailer_scraper.py --discover                  # URL discovery only (nightly 01:00)
+python3 retailer_scraper.py --test                      # first 20 products, no retailer filter
+python3 retailer_scraper.py --product 126285            # single product_id, all retailers
+python3 retailer_scraper.py --product 126285 --retailer Amazon  # single product, one retailer
+python3 retailer_scraper.py --mfr ASUS --group PROD_VIDEO       # all ASUS GPUs, all retailers
+python3 retailer_scraper.py --mfr ASUS --group PROD_VIDEO --retailer Scan  # filtered
 ```
+
+Manual triggers for `--product` and `--mfr`/`--group` are also available in the portal: Catalogue → Scraper → Manual Triggers → Retailer Scraper section.
 
 **Discovery** runs nightly at 01:00 as a standalone job — finds product URLs for retailers that use URL-based scraping (AWD-IT, Scan, Box, CCL, Very). After the initial full discovery pass, only new products without URLs are searched so subsequent runs complete in minutes.
 
