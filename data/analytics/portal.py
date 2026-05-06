@@ -723,7 +723,6 @@ HTML = r"""<!DOCTYPE html>
       <div class="sidebar-items">
         <button class="sidebar-btn" onclick="loadRetReport('out_of_stock',this)">Out of Stock Today</button>
         <button class="sidebar-btn" onclick="loadRetReport('back_in_stock',this)">Back in Stock</button>
-        <button class="sidebar-btn" onclick="loadRetReport('never_listed',this)">Never Listed</button>
         <button class="sidebar-btn" onclick="showRetAmazonOos(this)">Amazon OOS</button>
         <button class="sidebar-btn" onclick="showRetMissing(this)">Products Not Linked</button>
       </div>
@@ -6375,7 +6374,6 @@ let _retReportCache = { name: null, rows: [] };
 const RET_REPORT_TITLES = {
   out_of_stock:   'Out of Stock Today',
   back_in_stock:  'Back in Stock',
-  never_listed:   'Never Listed at Any Retailer',
   price_trends:   'Price Trends — Top Movers (14 Days)',
   price_dropping: 'Price Dropping',
   price_rising:   'Price Rising',
@@ -6397,11 +6395,6 @@ const RET_REPORT_HELP = {
     title: 'Back in Stock',
     body: `<p>Products that were <strong>out of stock yesterday but are in stock today</strong> at at least one retailer. One row per SKU/retailer transition.</p>
 <p><strong>How to use:</strong> Fast-moving signal — a SKU becoming available again can indicate a new delivery, re-listing, or end of a promotion that cleared stock. Check the price column to see whether it relisted at a different price point.</p>`
-  },
-  never_listed: {
-    title: 'Never Listed at Any Retailer',
-    body: `<p>Products that have <strong>never had a price or stock record at any retailer</strong> across all dates in the database — the scraper found no data.</p>
-<p><strong>How to use:</strong> These SKUs may be missing retailer IDs (ASIN, SKU codes), may not be stocked by this retail channel, or may be very new. Review the Retailer IDs in the Catalogue tab to see what's missing.</p>`
   },
   price_trends: {
     title: 'Price Trends — Top Movers (14 Days)',
@@ -6563,7 +6556,7 @@ function renderRetReportTable(name, rows) {
 
   // ── All other reports ─────────────────────────────────────────────────────
   const hasRetCol  = ['price_dropping','price_rising','daily_changes','back_in_stock','msrp_gap','price_trends'].includes(name);
-  const hasFilters = !['price_gaps','never_listed'].includes(name);
+  const hasFilters = name !== 'price_gaps';
   const filterBar  = hasFilters ? buildRetFilterBar(_retReportCache.rows, hasRetCol) : '';
 
   let cols, rowFn;
@@ -6690,10 +6683,6 @@ function renderRetReportTable(name, rows) {
         <td>${gap != null ? '£'+gap.toFixed(2) : '—'}</td>
         <td>${badge}</td></tr>`;
     };
-  } else if (name === 'never_listed') {
-    cols = ['Product','Model','Manufacturer','Product Group'];
-    rowFn = r => `<tr class="clickable" onclick="loadRetSku(${r.product_id},'report')">
-      <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer||'—'}</td><td>${r.product_group||'—'}</td></tr>`;
   } else {
     cols = ['Product','Model','Manufacturer'];
     rowFn = r => `<tr class="clickable" onclick="loadRetSku(${r.product_id},'report')">
@@ -8706,15 +8695,6 @@ def retailer_report(name):
                WHERE t.date = ? AND t.in_stock = 1 AND y.in_stock = 0
                ORDER BY t.model_no, t.retailer LIMIT 300""",
             (prev, latest)
-        )
-
-    elif name == "never_listed":
-        rows = qry(
-            """SELECT product_id, model_no, manufacturer, product_group
-               FROM retailer_prices
-               GROUP BY product_id, model_no, manufacturer, product_group
-               HAVING MAX(price) IS NULL
-               ORDER BY model_no LIMIT 300"""
         )
 
     elif name == "price_dropping":
