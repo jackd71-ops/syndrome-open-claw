@@ -95,7 +95,7 @@ try:
         }""")
 
         if result and result.get('oos'):
-            print("NOT_FOUND")
+            print("OUT_OF_STOCK")
         else:
             price = parse_price(result.get('price')) if result else None
             print(price if price is not None else "NOT_FOUND")
