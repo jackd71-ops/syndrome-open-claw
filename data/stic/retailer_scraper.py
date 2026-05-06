@@ -280,24 +280,38 @@ def scrape_currys(page, sku):
             pass
     return None
 
-# ── CCL scraper (direct product URL → JSON-LD price) ─────────────────────────
+# ── CCL scraper (direct product URL → JSON-LD price + availability check) ────
 def scrape_ccl(page, url):
     page.goto(url, wait_until="domcontentloaded", timeout=25000)
     time.sleep(random.uniform(4, 7))
-    price = page.evaluate("""() => {
+    result = page.evaluate("""() => {
+        const IN_STOCK_URLS = ['schema.org/instock', 'schema.org/instock', 'instock'];
+        function availOk(avail) {
+            if (!avail) return true;  // no field = assume ok, let price decide
+            return avail.toLowerCase().includes('instock');
+        }
         for (const s of document.querySelectorAll('script[type="application/ld+json"]')) {
             try {
                 const d = JSON.parse(s.textContent);
-                if (d.offers && d.offers.price) return parseFloat(d.offers.price);
+                if (d.offers && d.offers.price) {
+                    if (!availOk(d.offers.availability)) return {price: null, oos: true};
+                    return {price: parseFloat(d.offers.price), oos: false};
+                }
                 if (d['@graph']) {
                     for (const item of d['@graph']) {
-                        if (item.offers && item.offers.price) return parseFloat(item.offers.price);
+                        if (item.offers && item.offers.price) {
+                            if (!availOk(item.offers.availability)) return {price: null, oos: true};
+                            return {price: parseFloat(item.offers.price), oos: false};
+                        }
                     }
                 }
             } catch(e) {}
         }
-        return null;
+        return {price: null, oos: false};
     }""")
+    if not result or result.get('oos'):
+        return None
+    price = result.get('price')
     return float(price) if price and price > 0 else None
 
 # ── AWD-IT scraper (meta price preferred; JSON-LD fallback) ──────────────────
