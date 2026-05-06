@@ -723,7 +723,7 @@ HTML = r"""<!DOCTYPE html>
       <div class="sidebar-items">
         <button class="sidebar-btn" onclick="loadRetReport('out_of_stock',this)">Out of Stock Today</button>
         <button class="sidebar-btn" onclick="loadRetReport('back_in_stock',this)">Back in Stock</button>
-        <button class="sidebar-btn" onclick="showRetAmazonOos(this)">Amazon OOS</button>
+        <button class="sidebar-btn" onclick="showRetOos(this)">Retailer OOS</button>
         <button class="sidebar-btn" onclick="showRetMissing(this)">Products Not Linked</button>
       </div>
     </div>
@@ -833,18 +833,31 @@ HTML = r"""<!DOCTYPE html>
       <div class="section-title" style="margin-bottom:16px">Scraper Health</div>
       <div id="scraper-health-content"><div class="spinner">Loading…</div></div>
     </div>
-    <!-- Amazon OOS report -->
+    <!-- Retailer OOS report -->
     <div class="content-section" id="ret-amazon-oos">
       <button class="back-btn" onclick="showRetSection('overview')">← Back to Overview</button>
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap">
-        <h3 style="margin:0">Amazon OOS Report</h3>
+        <h3 style="margin:0">Retailer OOS</h3>
         <span id="ret-aoos-date" style="font-size:12px;color:#A19F9D"></span>
-        <select id="ret-aoos-mfr" onchange="loadRetAmazonOos()" style="padding:4px 8px;border:1px solid #C8C6C4;border-radius:2px;background:#fff;font-size:13px">
+        <select id="ret-aoos-retailer" onchange="loadRetOos()" style="padding:4px 8px;border:1px solid #C8C6C4;border-radius:2px;background:#fff;font-size:13px">
+          <option value="">All Retailers</option>
+          <option>Amazon</option>
+          <option>AWD-IT</option>
+          <option>Argos</option>
+          <option>Box</option>
+          <option>CCL Online</option>
+          <option>Currys</option>
+          <option>Overclockers</option>
+          <option>Scan</option>
+          <option>Very</option>
+        </select>
+        <select id="ret-aoos-mfr" onchange="loadRetOos()" style="padding:4px 8px;border:1px solid #C8C6C4;border-radius:2px;background:#fff;font-size:13px">
           <option value="">All Manufacturers</option>
         </select>
-        <span id="ret-aoos-count" style="font-size:12px;color:#A19F9D"></span>
+        <span id="ret-aoos-count" style="font-size:12px;color:#A19F9D;font-weight:600"></span>
+        <button onclick="exportRetOos()" style="padding:4px 12px;border:1px solid #C8C6C4;border-radius:2px;font-size:12px;cursor:pointer;background:#fff">📥 Export Excel</button>
       </div>
-      <p style="font-size:12px;color:#A19F9D;margin:-4px 0 12px">Products where Amazon direct is not selling today. Includes rows where an FBA (3rd-party) seller has the buy box — Amazon themselves are OOS regardless. FBA price shown where captured.</p>
+      <p style="font-size:12px;color:#A19F9D;margin:-4px 0 12px">Products where the retailer's scraper confirmed out of stock today (in_stock=0). Shows last known sell price and retailer reference code.</p>
       <div class="tbl-wrap" id="ret-aoos-tbl"><div class="spinner">Loading…</div></div>
     </div>
     <!-- Products Not Linked report -->
@@ -5961,55 +5974,57 @@ function renderRetMissingByGroup(rows) {
   makeSortableAll(el);
 }
 
-// ── Amazon OOS report ─────────────────────────────────────────────────────────
-let _aaoosMfrsLoaded = false;
+// ── Retailer OOS report ───────────────────────────────────────────────────────
+let _retOosMfrsLoaded = false;
 
-function showRetAmazonOos(btn) {
+function showRetOos(btn) {
   showRetSection('amazon-oos', btn);
-  if (!_aaoosMfrsLoaded) {
-    fetch('/api/retailer/amazon-oos/manufacturers').then(r=>r.json()).then(mfrs => {
+  if (!_retOosMfrsLoaded) {
+    fetch('/api/retailer/oos/manufacturers').then(r=>r.json()).then(mfrs => {
       const sel = document.getElementById('ret-aoos-mfr');
       mfrs.forEach(m => {
         const opt = document.createElement('option');
         opt.value = m; opt.textContent = m;
         sel.appendChild(opt);
       });
-      _aaoosMfrsLoaded = true;
+      _retOosMfrsLoaded = true;
     });
   }
-  loadRetAmazonOos();
+  loadRetOos();
 }
 
-function loadRetAmazonOos() {
-  const mfr = document.getElementById('ret-aoos-mfr').value;
+function loadRetOos() {
+  const retailer = document.getElementById('ret-aoos-retailer').value;
+  const mfr      = document.getElementById('ret-aoos-mfr').value;
   document.getElementById('ret-aoos-tbl').innerHTML = '<div class="spinner">Loading…</div>';
   document.getElementById('ret-aoos-count').textContent = '';
-  fetch('/api/retailer/amazon-oos' + (mfr ? '?mfr=' + encodeURIComponent(mfr) : ''))
+  const params = new URLSearchParams();
+  if (retailer) params.set('retailer', retailer);
+  if (mfr)      params.set('mfr', mfr);
+  fetch('/api/retailer/oos' + (params.toString() ? '?' + params : ''))
     .then(r=>r.json()).then(data => {
       document.getElementById('ret-aoos-date').textContent = data.date ? 'Date: ' + data.date : '';
       const rows = data.rows || [];
       document.getElementById('ret-aoos-count').textContent = rows.length + ' product' + (rows.length!==1?'s':'');
       if (!rows.length) {
-        document.getElementById('ret-aoos-tbl').innerHTML = '<p style="color:#107C10;padding:20px">✓ No Amazon OOS products found for this selection.</p>';
+        document.getElementById('ret-aoos-tbl').innerHTML = '<p style="color:#107C10;padding:20px">✓ No OOS products found for this selection.</p>';
         return;
       }
       let html = '<table><thead><tr>'
-        + '<th>Product</th><th>Model</th><th>Manufacturer</th><th>Description</th>'
-        + '<th>MSRP</th><th>FBA Price Today</th><th>Last Direct Price</th><th>Last Direct Date</th>'
+        + '<th>Product</th><th>Model</th><th>Retailer Code</th><th>Manufacturer</th><th>Description</th>'
+        + '<th>Retailer</th><th>Last Sell Price</th><th>Last Sell Date</th>'
         + '</tr></thead><tbody>';
       rows.forEach(r => {
-        const fbaCell   = (r.seller_type === 'FBA' && r.fba_price != null)
-          ? '<span style="background:#FF9900;color:#fff;border-radius:3px;padding:1px 5px;font-size:11px">FBA</span> £' + r.fba_price.toFixed(2)
-          : '<span style="color:#A19F9D">—</span>';
-        const lastPrice = r.last_direct_price != null ? '£' + r.last_direct_price.toFixed(2) : '<span style="color:#A19F9D">Never direct</span>';
-        const lastDate  = r.last_direct_date  || '<span style="color:#A19F9D">—</span>';
-        html += `<tr class="clickable" onclick="loadRetSku(${r.product_id},'amazon-oos')" title="Click for full SKU detail">
+        const lastPrice = r.last_sell_price != null ? '£' + r.last_sell_price.toFixed(2) : '<span style="color:#A19F9D">Never sold</span>';
+        const lastDate  = r.last_sell_date  || '<span style="color:#A19F9D">—</span>';
+        const retCode   = r.retailer_code   || '<span style="color:#A19F9D">—</span>';
+        html += `<tr class="clickable" onclick="loadRetSku(${r.product_id},'retailer-oos')" title="Click for full SKU detail">
           <td>${r.product_id}</td>
           <td>${r.model_no}</td>
+          <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.retailer_code||''}">${retCode}</td>
           <td>${r.manufacturer}</td>
-          <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.description||''}">${r.description||'—'}</td>
-          <td>${r.msrp ? '£'+r.msrp.toFixed(2) : '—'}</td>
-          <td>${fbaCell}</td>
+          <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.description||''}">${r.description||'—'}</td>
+          <td>${r.retailer}</td>
           <td>${lastPrice}</td>
           <td>${lastDate}</td>
         </tr>`;
@@ -6019,6 +6034,15 @@ function loadRetAmazonOos() {
       el.innerHTML = html;
       makeSortableAll(el);
     });
+}
+
+function exportRetOos() {
+  const retailer = document.getElementById('ret-aoos-retailer').value;
+  const mfr      = document.getElementById('ret-aoos-mfr').value;
+  const params = new URLSearchParams();
+  if (retailer) params.set('retailer', retailer);
+  if (mfr)      params.set('mfr', mfr);
+  window.location = '/api/retailer/oos/export' + (params.toString() ? '?' + params : '');
 }
 
 // ── Retailer search ───────────────────────────────────────────────────────────
@@ -7402,68 +7426,170 @@ def retailer_daily_overview_skus():
     return jsonify(result)
 
 
-@app.route("/api/retailer/amazon-oos/manufacturers")
-def retailer_amazon_oos_manufacturers():
-    """Distinct manufacturers where Amazon is OOS (no direct price) on the latest date.
-    Includes rows where an FBA seller has the buy box."""
+@app.route("/api/retailer/oos/manufacturers")
+def retailer_oos_manufacturers():
+    """Distinct manufacturers that have at least one OOS row today."""
     latest = latest_date("retailer_prices")
     if not latest:
         return jsonify([])
     rows = qry(
         """SELECT DISTINCT manufacturer FROM retailer_prices
-           WHERE date=? AND retailer='Amazon'
-             AND (price IS NULL OR seller_type IS NOT NULL)
+           WHERE date=? AND in_stock=0
            ORDER BY manufacturer""",
         (latest,)
     )
     return jsonify([r["manufacturer"] for r in rows])
 
 
-@app.route("/api/retailer/amazon-oos")
-def retailer_amazon_oos():
-    """Products where Amazon direct is OOS today — includes FBA buy-box rows
-    (Amazon themselves not selling) and null-price rows (no seller at all)."""
-    mfr    = request.args.get("mfr", "").strip()
-    latest = latest_date("retailer_prices")
+@app.route("/api/retailer/oos")
+def retailer_oos():
+    """Products confirmed OOS (in_stock=0) today at each retailer.
+    Optionally filtered by retailer and/or manufacturer."""
+    retailer = request.args.get("retailer", "").strip()
+    mfr      = request.args.get("mfr",      "").strip()
+    latest   = latest_date("retailer_prices")
     if not latest:
         return jsonify({"date": None, "rows": []})
 
-    params      = [latest]
-    mfr_clause  = ""
+    clauses = ["rp.date = ?", "rp.in_stock = 0"]
+    params  = [latest]
+    if retailer:
+        clauses.append("rp.retailer = ?")
+        params.append(retailer)
     if mfr:
-        mfr_clause = "AND rp.manufacturer = ?"
+        clauses.append("rp.manufacturer = ?")
         params.append(mfr)
 
+    where = " AND ".join(clauses)
     rows = qry(
         f"""SELECT
                rp.product_id,
                rp.model_no,
                rp.manufacturer,
                rp.description,
-               rp.msrp,
-               rp.seller_type,
-               rp.price                    AS fba_price,
-               (SELECT MAX(r2.price)
-                FROM retailer_prices r2
-                WHERE r2.product_id  = rp.product_id
-                  AND r2.retailer    = 'Amazon'
-                  AND r2.seller_type IS NULL
-                  AND r2.price IS NOT NULL) AS last_direct_price,
-               (SELECT MAX(r2.date)
-                FROM retailer_prices r2
-                WHERE r2.product_id  = rp.product_id
-                  AND r2.retailer    = 'Amazon'
-                  AND r2.seller_type IS NULL
-                  AND r2.price IS NOT NULL) AS last_direct_date
+               rp.retailer,
+               CASE rp.retailer
+                   WHEN 'Amazon'       THEN ri.amazon_asin
+                   WHEN 'Currys'       THEN ri.currys_sku
+                   WHEN 'Very'         THEN COALESCE(ri.very_sku, ri.very_url)
+                   WHEN 'Argos'        THEN ri.argos_sku
+                   WHEN 'CCL Online'   THEN ri.ccl_url
+                   WHEN 'AWD-IT'       THEN ri.awdit_url
+                   WHEN 'Scan'         THEN COALESCE(ri.scan_url, ri.scan_ln)
+                   WHEN 'Overclockers' THEN ri.ocuk_code
+                   WHEN 'Box'          THEN ri.box_url
+                   ELSE NULL
+               END AS retailer_code,
+               (SELECT r2.price FROM retailer_prices r2
+                WHERE r2.product_id = rp.product_id
+                  AND r2.retailer   = rp.retailer
+                  AND r2.price IS NOT NULL
+                ORDER BY r2.date DESC LIMIT 1) AS last_sell_price,
+               (SELECT r2.date FROM retailer_prices r2
+                WHERE r2.product_id = rp.product_id
+                  AND r2.retailer   = rp.retailer
+                  AND r2.price IS NOT NULL
+                ORDER BY r2.date DESC LIMIT 1) AS last_sell_date
            FROM retailer_prices rp
-           WHERE rp.date     = ?
-             AND rp.retailer = 'Amazon'
-             AND (rp.price IS NULL OR rp.seller_type IS NOT NULL)
-             {mfr_clause}
-           ORDER BY rp.manufacturer, rp.model_no""",
+           LEFT JOIN retailer_ids ri ON ri.product_id = rp.product_id
+           WHERE {where}
+           ORDER BY rp.manufacturer, rp.model_no, rp.retailer""",
         params
     )
     return jsonify({"date": latest, "rows": rows})
+
+
+@app.route("/api/retailer/oos/export")
+def retailer_oos_export():
+    """Export Retailer OOS report as Excel."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from io import BytesIO
+
+    retailer = request.args.get("retailer", "").strip()
+    mfr      = request.args.get("mfr",      "").strip()
+    latest   = latest_date("retailer_prices")
+
+    clauses = ["rp.date = ?", "rp.in_stock = 0"]
+    params  = [latest] if latest else []
+    if retailer:
+        clauses.append("rp.retailer = ?")
+        params.append(retailer)
+    if mfr:
+        clauses.append("rp.manufacturer = ?")
+        params.append(mfr)
+
+    rows = qry(
+        f"""SELECT
+               rp.product_id, rp.model_no, rp.manufacturer, rp.description, rp.retailer,
+               CASE rp.retailer
+                   WHEN 'Amazon'       THEN ri.amazon_asin
+                   WHEN 'Currys'       THEN ri.currys_sku
+                   WHEN 'Very'         THEN COALESCE(ri.very_sku, ri.very_url)
+                   WHEN 'Argos'        THEN ri.argos_sku
+                   WHEN 'CCL Online'   THEN ri.ccl_url
+                   WHEN 'AWD-IT'       THEN ri.awdit_url
+                   WHEN 'Scan'         THEN COALESCE(ri.scan_url, ri.scan_ln)
+                   WHEN 'Overclockers' THEN ri.ocuk_code
+                   WHEN 'Box'          THEN ri.box_url
+                   ELSE NULL
+               END AS retailer_code,
+               (SELECT r2.price FROM retailer_prices r2
+                WHERE r2.product_id=rp.product_id AND r2.retailer=rp.retailer AND r2.price IS NOT NULL
+                ORDER BY r2.date DESC LIMIT 1) AS last_sell_price,
+               (SELECT r2.date FROM retailer_prices r2
+                WHERE r2.product_id=rp.product_id AND r2.retailer=rp.retailer AND r2.price IS NOT NULL
+                ORDER BY r2.date DESC LIMIT 1) AS last_sell_date
+           FROM retailer_prices rp
+           LEFT JOIN retailer_ids ri ON ri.product_id = rp.product_id
+           WHERE {' AND '.join(clauses)}
+           ORDER BY rp.manufacturer, rp.model_no, rp.retailer""",
+        params
+    ) if latest else []
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Retailer OOS"
+
+    hdr_font = Font(bold=True, color="FFFFFF")
+    hdr_fill = PatternFill("solid", fgColor="0078D4")
+    headers  = ["Product ID", "Model", "Retailer Code", "Manufacturer", "Description",
+                "Retailer", "Last Sell Price", "Last Sell Date"]
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=h)
+        cell.font      = hdr_font
+        cell.fill      = hdr_fill
+        cell.alignment = Alignment(horizontal="center")
+
+    for row in rows:
+        ws.append([
+            row["product_id"],
+            row["model_no"],
+            row["retailer_code"] or "",
+            row["manufacturer"]  or "",
+            row["description"]   or "",
+            row["retailer"],
+            row["last_sell_price"],
+            row["last_sell_date"] or "",
+        ])
+
+    col_widths = [10, 28, 36, 18, 36, 14, 16, 14]
+    for i, w in enumerate(col_widths, 1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    fname_parts = []
+    if retailer: fname_parts.append(retailer.replace(" ", "_"))
+    if mfr:      fname_parts.append(mfr.replace(" ", "_"))
+    fname_date  = (latest or "").replace("-", "")
+    fname       = f"retailer_oos_{'_'.join(fname_parts) + '_' if fname_parts else ''}{fname_date}.xlsx"
+
+    from flask import send_file
+    return send_file(buf, as_attachment=True, download_name=fname,
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
 @app.route("/api/scraper/health")
