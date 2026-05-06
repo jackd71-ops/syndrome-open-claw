@@ -265,20 +265,49 @@ def parse_price(text):
 # amazon_scraper.py — see that file for Amazon-specific timing and fingerprinting.
 
 # ── Currys scraper (search by SKU → product page redirect) ───────────────────
+# ── Currys scraper — returns (price, oos) ────────────────────────────────────
 def scrape_currys(page, sku):
     url = f"https://www.currys.co.uk/search?q={sku}"
     page.goto(url, wait_until="domcontentloaded", timeout=25000)
     time.sleep(random.uniform(5, 9))
-    for sel in [".product-price", "[class*='ProductPrice']", "[class*='price']"]:
-        try:
-            el = page.query_selector(sel)
-            if el:
-                p = parse_price(el.inner_text())
-                if p:
-                    return p
-        except Exception:
-            pass
-    return None
+    result = page.evaluate("""() => {
+        // 1. JSON-LD availability check (product pages)
+        for (const s of document.querySelectorAll('script[type="application/ld+json"]')) {
+            try {
+                const d = JSON.parse(s.textContent);
+                const offers = d.offers || (d['@graph'] && d['@graph'].find(i => i.offers)?.offers);
+                if (offers) {
+                    const avail = (offers.availability || '').toLowerCase();
+                    if (avail && !avail.includes('instock')) return {price: null, oos: true};
+                    if (offers.price) return {price: parseFloat(offers.price), oos: false};
+                }
+            } catch(e) {}
+        }
+        // 2. OOS text check — "Out of stock" / "Currently unavailable" / "Notify me"
+        const bodyText = document.body.innerText.toLowerCase();
+        const oosSignals = ['out of stock', 'currently unavailable', 'sorry, this item'];
+        const hasOos = oosSignals.some(s => bodyText.includes(s));
+        // 3. Price element check
+        const priceSelectors = ['.product-price', '[class*="ProductPrice"]', '[class*="price"]'];
+        for (const sel of priceSelectors) {
+            const el = document.querySelector(sel);
+            if (el) {
+                const t = el.innerText.trim();
+                const m = t.replace(/,/g,'').match(/[1-9][\\d]*\\.\\d{2}/);
+                if (m) {
+                    const p = parseFloat(m[0]);
+                    if (p > 0) return {price: p, oos: false};
+                }
+            }
+        }
+        // Price not found — if OOS text was present, signal OOS
+        return {price: null, oos: hasOos};
+    }""")
+    if not result:
+        return None, False
+    price = result.get('price')
+    oos   = result.get('oos', False)
+    return (float(price) if price and price > 0 else None), oos
 
 # ── CCL scraper — returns (price, oos) ───────────────────────────────────────
 # oos=True  → product listed but explicitly Out Of Stock in JSON-LD availability
@@ -506,8 +535,10 @@ def scrape_product(page, product, retailer, id_codes):
 
     try:
         if name == "Currys":
-            price = scrape_currys(page, code)
-            return (price, None, None) if price else (None, "NOT_FOUND", None)
+            price, oos = scrape_currys(page, code)
+            if price:  return price, None, None
+            if oos:    return None, "OUT_OF_STOCK", None
+            return None, "NOT_FOUND", None
         elif name == "Argos":
             price = scrape_argos(code)
             return (price, None, None) if price else (None, "NOT_FOUND", None)
