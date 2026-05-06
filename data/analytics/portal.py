@@ -725,7 +725,7 @@ HTML = r"""<!DOCTYPE html>
         <button class="sidebar-btn" onclick="loadRetReport('back_in_stock',this)">Back in Stock</button>
         <button class="sidebar-btn" onclick="loadRetReport('never_listed',this)">Never Listed</button>
         <button class="sidebar-btn" onclick="showRetAmazonOos(this)">Amazon OOS</button>
-        <button class="sidebar-btn" onclick="showRetMissing(this)">Retailer Missing</button>
+        <button class="sidebar-btn" onclick="showRetMissing(this)">Products Not Linked</button>
       </div>
     </div>
     <div class="sidebar-section">
@@ -848,11 +848,11 @@ HTML = r"""<!DOCTYPE html>
       <p style="font-size:12px;color:#A19F9D;margin:-4px 0 12px">Products where Amazon direct is not selling today. Includes rows where an FBA (3rd-party) seller has the buy box — Amazon themselves are OOS regardless. FBA price shown where captured.</p>
       <div class="tbl-wrap" id="ret-aoos-tbl"><div class="spinner">Loading…</div></div>
     </div>
-    <!-- Retailer Missing report -->
+    <!-- Products Not Linked report -->
     <div class="content-section" id="ret-missing">
       <button class="back-btn" onclick="showRetSection('overview')">← Back to Overview</button>
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap">
-        <h3 style="margin:0">Retailer Missing Results</h3>
+        <h3 style="margin:0">Products Not Linked</h3>
         <!-- Mode toggle -->
         <div style="display:flex;border:1px solid #C8C6C4;border-radius:2px;overflow:hidden">
           <button id="ret-miss-mode-ret" onclick="setRetMissMode('retailer')"
@@ -4259,7 +4259,7 @@ function loadCatMissingUrls(btn) {
   el.innerHTML = `
     <h2 style="margin:0 0 16px">Missing URLs — Import / Export</h2>
     <p style="margin:0 0 16px;font-size:13px;color:#605E5C">
-      Use the <strong>Retailer Missing report</strong> Export button to download a template.<br>
+      Use the <strong>Products Not Linked</strong> Export button to download a template.<br>
       Fill in <em>Retailer Ref</em> (ASIN / SKU / Code), <em>URL</em>, and/or set <em>Not Stocked</em> to TRUE.<br>
       Then upload the completed sheet here to apply all changes in one go.
     </p>
@@ -4483,9 +4483,9 @@ const _HK_TASKS = [
   {
     id:    'retailer-coverage',
     title: 'Review Retailer Coverage',
-    desc:  'Walk through the Retailer Missing report for each retailer. Add codes/URLs where found, mark "Not Stocked" where confirmed absent.',
+    desc:  'Walk through the Products Not Linked report for each retailer. Add codes/URLs where found, mark "Not Stocked" where confirmed absent.',
     link:  () => { showRetSection('missing'); document.querySelector('#layout-retailer')?.querySelector('.sidebar-btn[onclick*="showRetMissing"]')?.click(); },
-    linkLabel: '→ Retailer Missing Report',
+    linkLabel: '→ Products Not Linked',
     warn:  35,
   },
   {
@@ -5727,7 +5727,7 @@ function closeRetCovSku() {
   document.getElementById('ret-cov-sku-panel').style.display = 'none';
 }
 
-// ── Retailer Missing Results ──────────────────────────────────────────────────
+// ── Products Not Linked ───────────────────────────────────────────────────────
 let _retMissMode    = 'retailer';
 let _retMissRetRows = [];
 let _retMissMfrsLoaded = false;
@@ -8067,7 +8067,7 @@ def retailer_purge():
     return jsonify({"deleted_rows": deleted, "product_id": product_id, "retailer": retailer})
 
 
-# ── Retailer Missing Results ──────────────────────────────────────────────────
+# ── Products Not Linked ───────────────────────────────────────────────────────
 DISCOVERY_SEARCHED_COL = {
     "AWD-IT":    "awdit_searched",
     "Scan":      "scan_searched",
