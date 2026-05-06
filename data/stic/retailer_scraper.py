@@ -1265,15 +1265,23 @@ def discover_scan_urls_by_model(page):
 
 # ── Combined pre-flight orchestrator ─────────────────────────────────────────
 def _very_search_url(page, sku):
-    """Search Very's own search box for <sku>; intercept the .prd redirect URL.
-    Works even when Akamai blocks the product page — the redirect URL fires in
-    network traffic before the block page renders."""
-    intercepted = []
+    """Search Very's own search box for <sku>; detect a product redirect.
+
+    Only accepts a .prd URL if the page actually navigated there (i.e. the
+    search found exactly one product and redirected).  Rejects URLs captured
+    only as background/preload traffic — these are unrelated featured products
+    (e.g. iPad promotions) firing in the response stream when no results match.
+    """
+    # Track navigation-level .prd URLs (document requests only, not assets)
+    nav_prd_urls = []
 
     def _on_response(resp):
-        u = resp.url
-        if ".prd" in u and "very.co.uk" in u:
-            intercepted.append(u)
+        try:
+            if ".prd" in resp.url and "very.co.uk" in resp.url:
+                if resp.request.resource_type == "document":
+                    nav_prd_urls.append(resp.url)
+        except Exception:
+            pass
 
     page.on("response", _on_response)
     try:
@@ -1289,21 +1297,17 @@ def _very_search_url(page, sku):
         except Exception:
             pass
 
-    if intercepted:
-        return intercepted[0]
+    # Primary: page actually navigated to a product page
+    current_url = page.url
+    if ".prd" in current_url and "very.co.uk" in current_url:
+        return current_url
 
-    # Fallback: scrape .prd links from page if somehow we landed on a results page
-    try:
-        links = page.evaluate("""() => {
-            return [...document.querySelectorAll('a[href*=".prd"]')]
-                .map(a => a.href)
-                .filter(h => h.includes('very.co.uk'));
-        }""")
-        if links:
-            return links[0]
-    except Exception:
-        pass
+    # Secondary: a document-level .prd response was seen (redirect chain)
+    if nav_prd_urls:
+        return nav_prd_urls[0]
 
+    # Do NOT fall back to scraping .prd links from the page — those include
+    # promoted/featured products unrelated to the search query.
     return None
 
 
@@ -1344,6 +1348,10 @@ def discover_very_urls(page):
     except Exception as e:
         log(f"  [Very] Homepage warm-up error: {e}")
 
+    # Keywords that, if found in the URL slug, indicate an obvious product mismatch
+    MISMATCH_KEYWORDS = ['apple', 'ipad', 'iphone', 'samsung-galaxy', 'airpod',
+                         'macbook', 'playstation', 'xbox', 'nintendo']
+
     found_urls, failed = {}, []
     for i, p in enumerate(needs, 1):
         sku   = p["sku"]
@@ -1353,9 +1361,16 @@ def discover_very_urls(page):
 
         url = _very_search_url(page, sku)
         if url:
-            log(f"  [Very] ✅ {url}")
-            _write_discovered_urls("Very URL", {p["product_id"]: url})
-            found_urls[p["product_id"]] = url
+            url_lower = url.lower()
+            mismatch = any(kw in url_lower for kw in MISMATCH_KEYWORDS)
+            if mismatch:
+                log(f"  [Very] ⚠️  rejected mismatch URL: {url}")
+                failed.append(sku)
+                _mark_searched("very_searched", [p["product_id"]])
+            else:
+                log(f"  [Very] ✅ {url}")
+                _write_discovered_urls("Very URL", {p["product_id"]: url})
+                found_urls[p["product_id"]] = url
         else:
             failed.append(sku)
             log(f"  [Very] ❌ not found")
