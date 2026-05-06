@@ -317,17 +317,16 @@ def scrape_ccl(page, url):
     return (float(price) if price and price > 0 else None), oos
 
 # ── AWD-IT scraper — returns (price, oos) ────────────────────────────────────
-# Checks meta[itemprop="availability"] for OOS signal; meta price avoids stale JSON-LD
+# AWD-IT (Magento): meta[itemprop="availability"] absent; use .stock.unavailable class
 def scrape_awdit(page, url):
     page.goto(url, wait_until="domcontentloaded", timeout=25000)
     time.sleep(random.uniform(4, 7))
     result = page.evaluate("""() => {
-        // Stock status: meta[itemprop="availability"] is reliable on Magento
-        const availMeta = document.querySelector('meta[itemprop="availability"]');
-        const availVal  = availMeta ? availMeta.getAttribute('content') : '';
-        const oos = availVal ? !availVal.toLowerCase().includes('instock') : false;
-
-        if (oos) return {price: null, oos: true};
+        // Stock status via DOM class — reliable on AWD-IT Magento
+        const unavail = document.querySelector('.stock.unavailable');
+        const avail   = document.querySelector('.stock.available');
+        // If explicitly unavailable and not available, it's OOS
+        if (unavail && !avail) return {price: null, oos: true};
 
         // 1. meta[itemprop="price"] — live Magento price, not cached
         const priceMeta = document.querySelector('meta[itemprop="price"]');
