@@ -300,11 +300,24 @@ def scrape_ccl(page, url):
     }""")
     return float(price) if price and price > 0 else None
 
-# ── AWD-IT scraper (direct product URL → JSON-LD price) ──────────────────────
+# ── AWD-IT scraper (meta price preferred; JSON-LD fallback) ──────────────────
 def scrape_awdit(page, url):
     page.goto(url, wait_until="domcontentloaded", timeout=25000)
     time.sleep(random.uniform(4, 7))
     price = page.evaluate("""() => {
+        // 1. meta[itemprop="price"] — reflects live Magento price, not cached
+        const meta = document.querySelector('meta[itemprop="price"]');
+        if (meta) {
+            const v = parseFloat(meta.getAttribute('content'));
+            if (v && v > 0) return v;
+        }
+        // 2. product-info-main price box — first price shown (inc VAT)
+        const mainBox = document.querySelector('.product-info-main .price-box .price');
+        if (mainBox) {
+            const v = parseFloat(mainBox.textContent.replace(/[^0-9.]/g, ''));
+            if (v && v > 0) return v;
+        }
+        // 3. JSON-LD fallback (can be stale on Magento/CDN cached pages)
         for (const s of document.querySelectorAll('script[type="application/ld+json"]')) {
             try {
                 const d = JSON.parse(s.textContent);
