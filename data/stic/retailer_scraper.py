@@ -388,17 +388,20 @@ def scrape_awdit(page, url):
 
 # ── Scan scraper (patchright + Xvfb subprocess) ──────────────────────────────
 def scrape_scan(url):
+    """Returns (price, oos) — price=None + oos=True means confirmed out of stock."""
     try:
         result = subprocess.run(
             ["xvfb-run", "--auto-servernum", "/usr/bin/python3", SCAN_SCRAPE_PATH, url],
             capture_output=True, text=True, timeout=60
         )
         out = result.stdout.strip()
+        if out == "OUT_OF_STOCK":
+            return None, True
         if out and out != "NOT_FOUND":
-            return float(out)
+            return float(out), False
     except (subprocess.TimeoutExpired, ValueError, Exception):
         pass
-    return None
+    return None, False
 
 
 # ── Very scraper (patchright + Xvfb subprocess) ───────────────────────────────
@@ -479,8 +482,10 @@ def scrape_product(page, product, retailer, id_codes):
         if not url:
             return None, "NOT_STOCKED", None
         try:
-            price = scrape_scan(url)
-            return (price, None, None) if price else (None, "NOT_FOUND", None)
+            price, oos = scrape_scan(url)
+            if price:  return price, None, None
+            if oos:    return None, "OUT_OF_STOCK", None
+            return None, "NOT_FOUND", None
         except Exception as e:
             log(f"    [{name}] ERROR: {e}")
             return None, "ERROR", None
