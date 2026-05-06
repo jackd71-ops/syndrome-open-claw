@@ -280,12 +280,13 @@ def scrape_currys(page, sku):
             pass
     return None
 
-# ── CCL scraper (direct product URL → JSON-LD price + availability check) ────
+# ── CCL scraper — returns (price, oos) ───────────────────────────────────────
+# oos=True  → product listed but explicitly Out Of Stock in JSON-LD availability
+# oos=False → product in stock (price present) or simply no data found
 def scrape_ccl(page, url):
     page.goto(url, wait_until="domcontentloaded", timeout=25000)
     time.sleep(random.uniform(4, 7))
     result = page.evaluate("""() => {
-        const IN_STOCK_URLS = ['schema.org/instock', 'schema.org/instock', 'instock'];
         function availOk(avail) {
             if (!avail) return true;  // no field = assume ok, let price decide
             return avail.toLowerCase().includes('instock');
@@ -294,14 +295,14 @@ def scrape_ccl(page, url):
             try {
                 const d = JSON.parse(s.textContent);
                 if (d.offers && d.offers.price) {
-                    if (!availOk(d.offers.availability)) return {price: null, oos: true};
-                    return {price: parseFloat(d.offers.price), oos: false};
+                    const oos = !availOk(d.offers.availability);
+                    return {price: oos ? null : parseFloat(d.offers.price), oos};
                 }
                 if (d['@graph']) {
                     for (const item of d['@graph']) {
                         if (item.offers && item.offers.price) {
-                            if (!availOk(item.offers.availability)) return {price: null, oos: true};
-                            return {price: parseFloat(item.offers.price), oos: false};
+                            const oos = !availOk(item.offers.availability);
+                            return {price: oos ? null : parseFloat(item.offers.price), oos};
                         }
                     }
                 }
@@ -309,40 +310,53 @@ def scrape_ccl(page, url):
         }
         return {price: null, oos: false};
     }""")
-    if not result or result.get('oos'):
-        return None
+    if not result:
+        return None, False
     price = result.get('price')
-    return float(price) if price and price > 0 else None
+    oos   = result.get('oos', False)
+    return (float(price) if price and price > 0 else None), oos
 
-# ── AWD-IT scraper (meta price preferred; JSON-LD fallback) ──────────────────
+# ── AWD-IT scraper — returns (price, oos) ────────────────────────────────────
+# Checks meta[itemprop="availability"] for OOS signal; meta price avoids stale JSON-LD
 def scrape_awdit(page, url):
     page.goto(url, wait_until="domcontentloaded", timeout=25000)
     time.sleep(random.uniform(4, 7))
-    price = page.evaluate("""() => {
-        // 1. meta[itemprop="price"] — reflects live Magento price, not cached
-        const meta = document.querySelector('meta[itemprop="price"]');
-        if (meta) {
-            const v = parseFloat(meta.getAttribute('content'));
-            if (v && v > 0) return v;
+    result = page.evaluate("""() => {
+        // Stock status: meta[itemprop="availability"] is reliable on Magento
+        const availMeta = document.querySelector('meta[itemprop="availability"]');
+        const availVal  = availMeta ? availMeta.getAttribute('content') : '';
+        const oos = availVal ? !availVal.toLowerCase().includes('instock') : false;
+
+        if (oos) return {price: null, oos: true};
+
+        // 1. meta[itemprop="price"] — live Magento price, not cached
+        const priceMeta = document.querySelector('meta[itemprop="price"]');
+        if (priceMeta) {
+            const v = parseFloat(priceMeta.getAttribute('content'));
+            if (v && v > 0) return {price: v, oos: false};
         }
-        // 2. product-info-main price box — first price shown (inc VAT)
+        // 2. product-info-main price box (inc VAT)
         const mainBox = document.querySelector('.product-info-main .price-box .price');
         if (mainBox) {
             const v = parseFloat(mainBox.textContent.replace(/[^0-9.]/g, ''));
-            if (v && v > 0) return v;
+            if (v && v > 0) return {price: v, oos: false};
         }
         // 3. JSON-LD fallback (can be stale on Magento/CDN cached pages)
         for (const s of document.querySelectorAll('script[type="application/ld+json"]')) {
             try {
                 const d = JSON.parse(s.textContent);
                 if (d['@type'] === 'Product' && d.offers && d.offers.price) {
-                    return parseFloat(d.offers.price);
+                    return {price: parseFloat(d.offers.price), oos: false};
                 }
             } catch(e) {}
         }
-        return null;
+        return {price: null, oos: false};
     }""")
-    return float(price) if price and price > 0 else None
+    if not result:
+        return None, False
+    price = result.get('price')
+    oos   = result.get('oos', False)
+    return (float(price) if price and price > 0 else None), oos
 
 # ── Scan scraper (patchright + Xvfb subprocess) ──────────────────────────────
 def scrape_scan(url):
@@ -484,16 +498,22 @@ def scrape_product(page, product, retailer, id_codes):
     try:
         if name == "Currys":
             price = scrape_currys(page, code)
+            return (price, None, None) if price else (None, "NOT_FOUND", None)
         elif name == "Argos":
             price = scrape_argos(code)
+            return (price, None, None) if price else (None, "NOT_FOUND", None)
         elif name == "CCL Online":
-            price = scrape_ccl(page, code)
+            price, oos = scrape_ccl(page, code)
+            if price:   return price, None, None
+            if oos:     return None, "OUT_OF_STOCK", None
+            return None, "NOT_FOUND", None
         elif name == "AWD-IT":
-            price = scrape_awdit(page, code)
+            price, oos = scrape_awdit(page, code)
+            if price:   return price, None, None
+            if oos:     return None, "OUT_OF_STOCK", None
+            return None, "NOT_FOUND", None
         else:
             return None, "NOT_FOUND", None
-
-        return (price, None, None) if price else (None, "NOT_FOUND", None)
 
     except PlaywrightTimeout:
         return None, "TIMEOUT", None
