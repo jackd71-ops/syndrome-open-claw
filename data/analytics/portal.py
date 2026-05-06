@@ -745,7 +745,7 @@ HTML = r"""<!DOCTYPE html>
         MSRP Analysis <span class="arrow">▾</span>
       </div>
       <div class="sidebar-items">
-        <button class="sidebar-btn" onclick="loadRetReport('below_msrp',this)">Below MSRP</button>
+        <button class="sidebar-btn" onclick="loadRetReport('below_msrp',this)">Significantly Below MSRP</button>
         <button class="sidebar-btn" onclick="loadRetReport('above_msrp',this)">All Retailers Above MSRP</button>
         <button class="sidebar-btn" onclick="loadRetReport('msrp_gap',this)">Furthest from MSRP</button>
       </div>
@@ -5046,7 +5046,7 @@ function loadRetailerKpi() {
     const el = document.getElementById('retailer-kpi');
     el.innerHTML = `
       <div class="kpi-card"><div class="label">SKUs Tracked</div><div class="value">${data.total_skus}</div></div>
-      <div class="kpi-card"><div class="label">Below MSRP Today</div><div class="value">${data.below_msrp_today}</div><div class="sub">prices below MSRP</div></div>
+      <div class="kpi-card"><div class="label">Significantly Below MSRP</div><div class="value">${data.below_msrp_today}</div><div class="sub">&gt;3% below MSRP today</div></div>
       <div class="kpi-card"><div class="label">Prices Scraped Today</div><div class="value">${data.prices_today}</div></div>
       <div class="kpi-card"><div class="label">Last Scraped</div><div class="value" style="font-size:16px">${fmtDate(data.latest_date)}</div></div>
     `;
@@ -6098,10 +6098,11 @@ function renderRetSku(data) {
     const ret       = r.retailer;
     const retEsc    = ret.replace(/'/g,"\\'");
     const msrp = info.msrp;
+    // Highlight only if more than 3% below MSRP — minor discounting is within normal tolerance
     const belowBadge = (!r.price || !msrp) ? ''
-      : r.price < msrp  ? '<span class="badge badge-red">Below MSRP</span>'
-      : r.price > msrp  ? '<span class="badge badge-green">Above MSRP</span>'
-      : '<span style="color:#605E5C;font-size:11px">At MSRP</span>';
+      : r.price < msrp * 0.97 ? '<span class="badge badge-red">Below MSRP</span>'
+      : r.price > msrp        ? '<span class="badge badge-green">Above MSRP</span>'
+      : '<span style="color:#605E5C;font-size:11px">Within 3% of MSRP</span>';
     const stockCell  = r.in_stock === 1 ? '<span style="color:#107C10">✓ In Stock</span>'
                      : r.in_stock === 0 ? '<span style="color:#A4262C">✗ OOS</span>' : '—';
     const linkStyle  = _retSkuLinks[ret]
@@ -6430,20 +6431,21 @@ const RET_REPORT_HELP = {
 <p><strong>How to use:</strong> Full activity log for the day. Good for a morning review of what moved overnight before drilling into specific reports. Click any row to open the SKU drill-down and see the full history.</p>`
   },
   below_msrp: {
-    title: 'Below MSRP',
-    body: `<p>Products where <strong>at least one retailer is currently pricing below MSRP</strong>. The <em># Below MSRP</em> column counts how many retailers are under, and the <em>Retailers Below</em> column names them.</p>
-<p><strong>How to use:</strong> MSRP breaches can indicate promotional clearance, aggressive discounting, or an MSRP that needs reviewing. Filter by manufacturer or product group to focus a category review.</p>`
+    title: 'Significantly Below MSRP',
+    body: `<p>Products where <strong>at least one retailer is pricing more than 3% below MSRP</strong>. The <em># Below</em> column counts how many retailers breach the threshold, and the <em>Retailers Below</em> column names them.</p>
+<p><strong>3% tolerance:</strong> Retailers routinely discount marginally vs MSRP — prices within 3% of MSRP are considered normal and are excluded from this report. Only significant breaches (more than 3% below) are flagged.</p>
+<p><strong>How to use:</strong> Significant MSRP breaches can indicate promotional clearance, aggressive discounting, or an MSRP that needs reviewing. Filter by manufacturer or product group to focus a category review.</p>`
   },
   above_msrp: {
     title: 'All Retailers Above MSRP',
-    body: `<p>Products where <strong>every retailer that has a price today is at or above MSRP</strong>. The cheapest price available is shown for reference.</p>
+    body: `<p>Products where <strong>no retailer is more than 3% below MSRP today</strong>. Prices within 3% of MSRP are treated as compliant — only breaches beyond that threshold would move a SKU to the Significantly Below MSRP report.</p>
 <p><strong>How to use:</strong> Confirms which SKUs are holding their recommended price across all of retail. May indicate strong demand, tight supply, or premium positioning. Useful to flag to the brand that pricing is intact.</p>`
   },
   msrp_gap: {
     title: 'Furthest from MSRP',
-    body: `<p>Individual retailer rows sorted by <strong>how far the retail price is from MSRP as a percentage</strong>. Biggest discounts (furthest below MSRP) float to the top.</p>
-<p>Green badge = above MSRP, red badge = below MSRP. The gap % is (price / MSRP − 1) × 100.</p>
-<p><strong>How to use:</strong> The deepest discounts relative to MSRP. These are the retailer/SKU combinations where pricing has moved furthest from recommended. Use alongside the Below MSRP report — this one ranks by severity rather than by count.</p>`
+    body: `<p>Individual retailer rows sorted by <strong>how far the retail price is from MSRP as a percentage</strong>. Rows within the ±3% tolerance band are shown as neutral — only those more than 3% below MSRP are highlighted red.</p>
+<p>Green badge = above MSRP &nbsp;|&nbsp; Red badge = more than 3% below MSRP &nbsp;|&nbsp; Plain = within 3% tolerance. Gap % is (price / MSRP − 1) × 100.</p>
+<p><strong>How to use:</strong> The deepest discounts relative to MSRP. These are the retailer/SKU combinations where pricing has moved significantly below recommended. Use alongside the Significantly Below MSRP report — this one ranks by severity rather than by count.</p>`
   },
 };
 
@@ -6636,8 +6638,12 @@ function renderRetReportTable(name, rows) {
       const gapPct = (gap != null && r.min_price) ? ((gap / r.min_price) * 100).toFixed(1) : '—';
       const msrpPct= (r.msrp && r.min_price) ? (((r.min_price / r.msrp) - 1) * 100).toFixed(1) : '—';
       const gapBadge  = gapPct !== '—' ? `<span class="badge ${parseFloat(gapPct)>10?'badge-red':'badge-green'}">${gapPct}%</span>` : '—';
+      // Red only if more than 3% below MSRP — within-tolerance discounting shown as neutral
+      const _msrpPctVal = parseFloat(msrpPct);
       const msrpBadge = msrpPct !== '—'
-        ? (parseFloat(msrpPct) < 0 ? `<span class="badge badge-red">${msrpPct}%</span>` : `<span class="badge badge-green">+${msrpPct}%</span>`)
+        ? (_msrpPctVal < -3 ? `<span class="badge badge-red">${msrpPct}%</span>`
+          : _msrpPctVal < 0 ? `<span style="color:#605E5C;font-size:11px">${msrpPct}%</span>`
+          : `<span class="badge badge-green">+${msrpPct}%</span>`)
         : '—';
       return `<tr class="clickable" onclick="loadRetSku(${r.product_id},'report')">
         <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer||'—'}</td>
@@ -6670,8 +6676,12 @@ function renderRetReportTable(name, rows) {
     rowFn = r => {
       const gap    = (r.msrp && r.price) ? r.price - r.msrp : null;
       const gapPct = (r.msrp && r.price) ? (((r.price / r.msrp) - 1) * 100).toFixed(1) : '—';
+      // Red only if more than 3% below MSRP — 0 to -3% is within normal tolerance
+      const _gapPctVal = parseFloat(gapPct);
       const badge  = gapPct !== '—'
-        ? (parseFloat(gapPct) < 0 ? `<span class="badge badge-red">${gapPct}%</span>` : `<span class="badge badge-green">+${gapPct}%</span>`)
+        ? (_gapPctVal < -3 ? `<span class="badge badge-red">${gapPct}%</span>`
+          : _gapPctVal < 0 ? `<span style="color:#605E5C;font-size:11px">${gapPct}%</span>`
+          : `<span class="badge badge-green">+${gapPct}%</span>`)
         : '—';
       return `<tr class="clickable" onclick="loadRetSku(${r.product_id},'report')">
         <td>${r.product_id}</td><td>${r.model_no}</td><td>${r.manufacturer||'—'}</td>${retCell(r)}
@@ -7276,7 +7286,8 @@ def retailer_kpi():
 
     total = qry_one("SELECT COUNT(DISTINCT product_id) AS n FROM retailer_prices")["n"]
     below = qry_one(
-        "SELECT COUNT(*) AS n FROM retailer_prices WHERE date=? AND below_msrp=1", (latest,)
+        # Count prices more than 3% below MSRP — minor discounting within tolerance is ignored
+        "SELECT COUNT(*) AS n FROM retailer_prices WHERE date=? AND price IS NOT NULL AND msrp IS NOT NULL AND price < msrp * 0.97", (latest,)
     )["n"]
     prices = qry_one(
         "SELECT COUNT(*) AS n FROM retailer_prices WHERE date=? AND price IS NOT NULL", (latest,)
@@ -7295,7 +7306,7 @@ def retailer_daily_overview():
                COUNT(DISTINCT r.product_group)                              AS group_count,
                COUNT(DISTINCT r.product_id)                                 AS sku_count,
                COUNT(CASE WHEN r.price IS NOT NULL THEN 1 END)              AS prices_today,
-               COUNT(CASE WHEN r.below_msrp=1 THEN 1 END)                  AS below_msrp,
+               COUNT(CASE WHEN r.price IS NOT NULL AND r.msrp IS NOT NULL AND r.price < r.msrp * 0.97 THEN 1 END) AS below_msrp,
                COUNT(DISTINCT CASE WHEN r.price IS NOT NULL THEN r.retailer END) AS retailers_active
            FROM retailer_prices r
            WHERE r.date=?
@@ -7319,7 +7330,7 @@ def retailer_daily_overview_groups():
                r.product_group,
                COUNT(DISTINCT r.product_id)                            AS sku_count,
                COUNT(CASE WHEN r.price IS NOT NULL THEN 1 END)         AS prices_today,
-               COUNT(CASE WHEN r.below_msrp=1 THEN 1 END)             AS below_msrp,
+               COUNT(CASE WHEN r.price IS NOT NULL AND r.msrp IS NOT NULL AND r.price < r.msrp * 0.97 THEN 1 END) AS below_msrp,
                COUNT(CASE WHEN r.in_stock=1 THEN 1 END)               AS in_stock,
                MIN(CASE WHEN r.price IS NOT NULL THEN r.price END)     AS min_price
            FROM retailer_prices r
@@ -7347,7 +7358,7 @@ def retailer_daily_overview_skus():
                r.description,
                r.msrp,
                MIN(CASE WHEN r.price IS NOT NULL THEN r.price END)  AS min_price,
-               MAX(r.below_msrp)                                     AS below_msrp
+               MAX(CASE WHEN r.price IS NOT NULL AND r.msrp IS NOT NULL AND r.price < r.msrp * 0.97 THEN 1 ELSE 0 END) AS below_msrp
            FROM retailer_prices r
            WHERE r.date=? AND r.manufacturer=? AND r.product_group=?
            GROUP BY r.product_id, r.model_no, r.description, r.msrp
@@ -7777,7 +7788,7 @@ def retailer_search():
     rows = qry(
         """SELECT DISTINCT r.product_id, r.model_no, r.manufacturer,
                MIN(CASE WHEN r.price>0 THEN r.price END) AS min_price,
-               SUM(r.below_msrp) AS below_msrp_count
+               SUM(CASE WHEN r.price IS NOT NULL AND r.msrp IS NOT NULL AND r.price < r.msrp * 0.97 THEN 1 ELSE 0 END) AS below_msrp_count
            FROM retailer_prices r
            WHERE r.date=?
              AND (CAST(r.product_id AS TEXT) LIKE ? OR r.model_no LIKE ? OR r.description LIKE ?)
@@ -8817,20 +8828,25 @@ def retailer_report(name):
         )
 
     elif name == "below_msrp":
+        # Threshold: price more than 3% below MSRP — minor discounting is expected
         rows = qry(
             """SELECT r.product_id, r.model_no, r.manufacturer, r.product_group, r.msrp,
                       MIN(CASE WHEN r.price > 0 THEN r.price END) AS min_price,
-                      SUM(CASE WHEN r.below_msrp = 1 THEN 1 ELSE 0 END) AS below_count,
-                      GROUP_CONCAT(CASE WHEN r.below_msrp = 1 THEN r.retailer END) AS retailers_below
+                      SUM(CASE WHEN r.price IS NOT NULL AND r.msrp IS NOT NULL
+                                    AND r.price < r.msrp * 0.97 THEN 1 ELSE 0 END) AS below_count,
+                      GROUP_CONCAT(CASE WHEN r.price IS NOT NULL AND r.msrp IS NOT NULL
+                                             AND r.price < r.msrp * 0.97 THEN r.retailer END) AS retailers_below
                FROM retailer_prices r
                WHERE r.date = ?
                GROUP BY r.product_id, r.model_no, r.manufacturer, r.product_group, r.msrp
-               HAVING SUM(CASE WHEN r.below_msrp = 1 THEN 1 ELSE 0 END) > 0
+               HAVING SUM(CASE WHEN r.price IS NOT NULL AND r.msrp IS NOT NULL
+                                    AND r.price < r.msrp * 0.97 THEN 1 ELSE 0 END) > 0
                ORDER BY below_count DESC, r.model_no LIMIT 300""",
             (latest,)
         )
 
     elif name == "above_msrp":
+        # Above MSRP = no retailer is more than 3% below (within tolerance is fine)
         rows = qry(
             """SELECT r.product_id, r.model_no, r.manufacturer, r.product_group, r.msrp,
                       MIN(CASE WHEN r.price > 0 THEN r.price END) AS min_price,
@@ -8839,18 +8855,21 @@ def retailer_report(name):
                WHERE r.date = ? AND r.msrp IS NOT NULL
                GROUP BY r.product_id, r.model_no, r.manufacturer, r.product_group, r.msrp
                HAVING COUNT(CASE WHEN r.price > 0 THEN 1 END) > 0
-                  AND SUM(CASE WHEN r.below_msrp = 1 THEN 1 ELSE 0 END) = 0
+                  AND SUM(CASE WHEN r.price IS NOT NULL AND r.msrp IS NOT NULL
+                                    AND r.price < r.msrp * 0.97 THEN 1 ELSE 0 END) = 0
                ORDER BY r.model_no LIMIT 300""",
             (latest,)
         )
 
     elif name == "msrp_gap":
+        # Only include rows that are more than 3% below MSRP (above MSRP rows always included)
         rows = qry(
             """SELECT r.product_id, r.model_no, r.manufacturer, r.product_group,
                       r.retailer, r.price, r.msrp
                FROM retailer_prices r
                WHERE r.date = ? AND r.price IS NOT NULL AND r.msrp IS NOT NULL AND r.msrp > 0
-               ORDER BY ABS(r.price - r.msrp) / r.msrp DESC LIMIT 300""",
+                 AND (r.price >= r.msrp OR r.price < r.msrp * 0.97)
+               ORDER BY (r.price - r.msrp) / r.msrp ASC LIMIT 300""",
             (latest,)
         )
 

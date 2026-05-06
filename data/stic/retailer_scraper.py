@@ -524,7 +524,8 @@ def write_to_db(date_str, product, retailer_prices_dict, retailer_in_stock_dict=
             db_retailer = _RETAILER_DB_NAME.get(retailer_name, retailer_name)
             below_msrp = None
             if price is not None and msrp is not None:
-                below_msrp = 1 if price < msrp else 0
+                # Flag only if price is more than 3% below MSRP — minor discounting is normal
+                below_msrp = 1 if price < msrp * 0.97 else 0
             in_stock    = retailer_in_stock_dict.get(retailer_name)
             seller_type = retailer_seller_type_dict.get(retailer_name)
             db.execute(
