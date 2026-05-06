@@ -500,8 +500,9 @@ _RETAILER_DB_NAME = {
     "Very":         "Very",
 }
 
-def write_to_db(date_str, product, retailer_prices_dict, retailer_in_stock_dict=None, retailer_seller_type_dict=None):
-    """Write one row per retailer for this product. Never raises — logs on failure."""
+def write_to_db(date_str, product, retailer_prices_dict, retailer_in_stock_dict=None, retailer_seller_type_dict=None, force=False):
+    """Write one row per retailer for this product. Never raises — logs on failure.
+    force=True replaces any existing row for today (used by manual single-SKU triggers)."""
     try:
         d, m, y = date_str.split("-")
         iso_date = f"{y}-{m}-{d}"
@@ -528,14 +529,24 @@ def write_to_db(date_str, product, retailer_prices_dict, retailer_in_stock_dict=
                 below_msrp = 1 if price < msrp * 0.97 else 0
             in_stock    = retailer_in_stock_dict.get(retailer_name)
             seller_type = retailer_seller_type_dict.get(retailer_name)
-            db.execute(
-                """INSERT OR IGNORE INTO retailer_prices
-                   (date, product_id, model_no, description, manufacturer,
-                    product_group, msrp, retailer, price, below_msrp, in_stock, seller_type)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (iso_date, product_id, model_no, description, manufacturer,
-                 product_group, msrp, db_retailer, price, below_msrp, in_stock, seller_type),
-            )
+            if force:
+                db.execute(
+                    """INSERT OR REPLACE INTO retailer_prices
+                       (date, product_id, model_no, description, manufacturer,
+                        product_group, msrp, retailer, price, below_msrp, in_stock, seller_type)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (iso_date, product_id, model_no, description, manufacturer,
+                     product_group, msrp, db_retailer, price, below_msrp, in_stock, seller_type),
+                )
+            else:
+                db.execute(
+                    """INSERT OR IGNORE INTO retailer_prices
+                       (date, product_id, model_no, description, manufacturer,
+                        product_group, msrp, retailer, price, below_msrp, in_stock, seller_type)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (iso_date, product_id, model_no, description, manufacturer,
+                     product_group, msrp, db_retailer, price, below_msrp, in_stock, seller_type),
+                )
         db.commit()
         db.close()
     except Exception as e:
@@ -1827,13 +1838,14 @@ def run_preflight_discovery():
 
 # ── Main run ──────────────────────────────────────────────────────────────────
 def run(offset=0, limit=None, date_str=None, notify=False, retailer_filter=None,
-        product_ids=None, mfr=None, group=None):
+        product_ids=None, mfr=None, group=None, force=False):
     label = f"[{retailer_filter}]" if retailer_filter else "[ALL]"
-    log(f"Starting retailer scrape: offset={offset}, limit={limit}, date={date_str}, retailer={label}")
+    log(f"Starting retailer scrape: offset={offset}, limit={limit}, date={date_str}, retailer={label}{' [FORCE]' if force else ''}")
 
     id_codes  = load_retailer_ids()
     products  = read_products(offset, limit, product_ids=product_ids, mfr=mfr, group=group)
-    completed = load_progress(date_str, retailer_filter)
+    # force=True (used for manual single-SKU/group triggers) bypasses progress file
+    completed = set() if force else load_progress(date_str, retailer_filter)
 
     active = [r for r in RETAILERS if not r["blocked"]]
     if retailer_filter:
@@ -1923,7 +1935,7 @@ def run(offset=0, limit=None, date_str=None, notify=False, retailer_filter=None,
                 if status != "NOT_STOCKED":
                     time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
 
-            write_to_db(date_str, product, db_prices, db_in_stock, db_seller_type)
+            write_to_db(date_str, product, db_prices, db_in_stock, db_seller_type, force=force)
 
             products_done += 1
             pages_since_restart += 1
@@ -1992,13 +2004,13 @@ if __name__ == "__main__":
     elif args.product is not None:
         log(f"RETAILER SCRAPER — {date_str} [SINGLE PRODUCT {args.product}] retailer={args.retailer or 'ALL'}")
         run(date_str=date_str, notify=False, retailer_filter=args.retailer,
-            product_ids=[args.product])
+            product_ids=[args.product], force=True)
 
     elif args.mfr or args.group:
         desc = f"mfr={args.mfr or '*'} group={args.group or '*'} retailer={args.retailer or 'ALL'}"
         log(f"RETAILER SCRAPER — {date_str} [{desc}]")
         run(date_str=date_str, notify=False, retailer_filter=args.retailer,
-            mfr=args.mfr, group=args.group)
+            mfr=args.mfr, group=args.group, force=True)
 
     elif args.retailer:
         # Single-retailer session — 8 run simultaneously, one per retailer
