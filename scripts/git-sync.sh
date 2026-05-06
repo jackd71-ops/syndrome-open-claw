@@ -16,6 +16,7 @@ echo "[$TIMESTAMP] Starting git sync..." >> "$LOG"
 cp "$LIVE_ANALYTICS/portal.py"        "$DOCS/data/analytics/portal.py"
 cp "$LIVE_STIC/stic_scraper.py"       "$DOCS/data/stic/stic_scraper.py"
 cp "$LIVE_STIC/retailer_scraper.py"   "$DOCS/data/stic/retailer_scraper.py"
+cp "$LIVE_STIC/amazon_scraper.py"     "$DOCS/data/stic/amazon_scraper.py"
 cp "$LIVE_STIC/scan_scrape.py"        "$DOCS/data/stic/scan_scrape.py"
 cp "$LIVE_STIC/very_scrape.py"        "$DOCS/data/stic/very_scrape.py"
 cp "$LIVE_STIC/box_scrape.py"         "$DOCS/data/stic/box_scrape.py"
@@ -31,6 +32,7 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
     git add data/analytics/portal.py \
             data/stic/stic_scraper.py \
             data/stic/retailer_scraper.py \
+            data/stic/amazon_scraper.py \
             data/stic/scan_scrape.py \
             data/stic/very_scrape.py \
             data/stic/box_scrape.py \
@@ -55,6 +57,7 @@ fi
 # ── Copy live source files into the STIC scraper repo ────────────────────────
 cp "$LIVE_STIC/stic_scraper.py"       "$DOCS_STIC/data/stic/stic_scraper.py"
 cp "$LIVE_STIC/retailer_scraper.py"   "$DOCS_STIC/data/stic/retailer_scraper.py"
+cp "$LIVE_STIC/amazon_scraper.py"     "$DOCS_STIC/data/stic/amazon_scraper.py"
 cp "$LIVE_STIC/scan_scrape.py"        "$DOCS_STIC/data/stic/scan_scrape.py"
 cp "$LIVE_STIC/very_scrape.py"        "$DOCS_STIC/data/stic/very_scrape.py"
 cp "$LIVE_STIC/box_scrape.py"         "$DOCS_STIC/data/stic/box_scrape.py"
@@ -67,6 +70,7 @@ cd "$DOCS_STIC" || { echo "[$TIMESTAMP] ERROR: could not cd to $DOCS_STIC" >> "$
 if ! git diff --quiet || ! git diff --cached --quiet; then
     git add data/stic/stic_scraper.py \
             data/stic/retailer_scraper.py \
+            data/stic/amazon_scraper.py \
             data/stic/scan_scrape.py \
             data/stic/very_scrape.py \
             data/stic/box_scrape.py \
