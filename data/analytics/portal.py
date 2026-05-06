@@ -8,6 +8,7 @@ Authentication is handled by Cloudflare Access upstream.
 
 import sqlite3
 import re
+import os
 from datetime import datetime, timedelta
 from flask import Flask, jsonify, request, render_template_string
 
@@ -212,6 +213,25 @@ def _init_products():
         task_id   TEXT PRIMARY KEY,
         last_done TEXT NOT NULL
     )""")
+    db.execute("""CREATE TABLE IF NOT EXISTS feedback_reports (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        report_text     TEXT NOT NULL,
+        screenshot_path TEXT,
+        submitted_by    TEXT,
+        submitted_date  TEXT NOT NULL,
+        actioned        INTEGER NOT NULL DEFAULT 0,
+        action_comment  TEXT,
+        actioned_date   TEXT
+    )""")
+    for col, defn in [
+        ("actioned",       "INTEGER NOT NULL DEFAULT 0"),
+        ("action_comment", "TEXT"),
+        ("actioned_date",  "TEXT"),
+    ]:
+        try:
+            db.execute(f"ALTER TABLE feedback_reports ADD COLUMN {col} {defn}")
+        except Exception:
+            pass
     db.commit()
     db.close()
 
@@ -573,7 +593,6 @@ HTML = r"""<!DOCTYPE html>
         Market Opportunities <span class="arrow">▾</span>
       </div>
       <div class="sidebar-items">
-        <button class="sidebar-btn" onclick="loadReport('never_stocked',this)">No channel stock ever</button>
         <button class="sidebar-btn" onclick="loadReport('price_dropping',this)">Price dropping</button>
         <button class="sidebar-btn" onclick="loadReport('price_rising',this)">Price rising</button>
       </div>
@@ -600,8 +619,15 @@ HTML = r"""<!DOCTYPE html>
         Scraper <span class="arrow">▾</span>
       </div>
       <div class="sidebar-items">
-        <button class="sidebar-btn" onclick="loadMissingResults(this)">❌ Missing Results</button>
         <button class="sidebar-btn" onclick="showSticScraperHealth(this)">🩺 Scraper Health</button>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-header" onclick="toggleSection(this)">
+        Feedback <span class="arrow">▾</span>
+      </div>
+      <div class="sidebar-items">
+        <button class="sidebar-btn" onclick="loadFeedback(this)">📝 Feature / Bug Report</button>
       </div>
     </div>
   </div>
@@ -662,10 +688,6 @@ HTML = r"""<!DOCTYPE html>
     <div class="content-section" id="stic-probe">
       <div id="stic-probe-content"><div class="spinner">Loading…</div></div>
     </div>
-    <!-- Missing Results -->
-    <div class="content-section" id="stic-missing">
-      <div id="stic-missing-content"><div class="spinner">Loading…</div></div>
-    </div>
     <!-- Top Sellers -->
     <div class="content-section" id="stic-top-sellers">
       <div id="stic-top-sellers-content"><div class="spinner">Loading…</div></div>
@@ -673,6 +695,9 @@ HTML = r"""<!DOCTYPE html>
     <!-- Market Share -->
     <div class="content-section" id="stic-market-share">
       <div id="stic-market-share-content"><div class="spinner">Loading…</div></div>
+    </div>
+    <div class="content-section" id="stic-feedback">
+      <div id="stic-feedback-content"></div>
     </div>
   </div>
 </div>
@@ -935,6 +960,14 @@ HTML = r"""<!DOCTYPE html>
     </div>
     <div class="sidebar-section">
       <div class="sidebar-section-header" onclick="toggleSection(this)">
+        STIC <span class="arrow">▾</span>
+      </div>
+      <div class="sidebar-items">
+        <button class="sidebar-btn" onclick="loadCatMissingResults(this)">❌ Missing Results</button>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-header" onclick="toggleSection(this)">
         Admin <span class="arrow">▾</span>
       </div>
       <div class="sidebar-items">
@@ -978,6 +1011,10 @@ HTML = r"""<!DOCTYPE html>
     <!-- Monthly housekeeping -->
     <div class="content-section" id="cat-housekeeping">
       <div id="cat-housekeeping-content"><div class="spinner">Loading…</div></div>
+    </div>
+    <!-- STIC Missing Results -->
+    <div class="content-section" id="cat-stic-missing">
+      <div id="cat-stic-missing-content"><div class="spinner">Loading…</div></div>
     </div>
     <!-- Scraper — Refresh SKUs -->
     <div class="content-section" id="stic-scrape">
@@ -1479,7 +1516,7 @@ function saveSticUrl(pid) {
   }).then(r => r.json()).then(data => {
     if (data.saved) {
       // If we're on the SKU detail page, reload it; if on missing results, just confirm in-place
-      const missingActive = document.getElementById('stic-missing')?.classList.contains('active');
+      const missingActive = document.getElementById('cat-stic-missing')?.classList.contains('active');
       if (missingActive) {
         if (btn) { btn.disabled = false; btn.textContent = '✓ Saved'; btn.style.background='#107C10'; }
       } else {
@@ -1872,7 +1909,10 @@ function doSticSearch() {
 let sticSkuBackSection = 'overview';
 function loadSticSku(productId, backSection) {
   sticSkuBackSection = backSection || 'overview';
-  document.getElementById('stic-sku-back').onclick = () => showSticSection(sticSkuBackSection);
+  document.getElementById('stic-sku-back').onclick = () => {
+    if (sticSkuBackSection === 'report' && _currentReportName) loadReport(_currentReportName, null);
+    else showSticSection(sticSkuBackSection);
+  };
   showSticSection('sku');
   document.getElementById('stic-sku-content').innerHTML = '<div class="spinner">Loading…</div>';
   fetch('/api/stic/sku/' + productId).then(r=>r.json()).then(data => {
@@ -1911,7 +1951,7 @@ function renderSticSku(data) {
       <h3 style="margin:0 0 4px">${info.manufacturer} — ${info.model_no}</h3>
       <p style="color:#605E5C;margin:0;font-size:12px">${metaParts.join(' | ')}</p>
     </div>
-    <button class="back-btn" onclick="showSticSection(sticSkuBackSection)" style="margin-top:2px">← Back</button>
+    <button class="back-btn" onclick="sticSkuBackSection==='report'&&_currentReportName?loadReport(_currentReportName,null):showSticSection(sticSkuBackSection)" style="margin-top:2px">← Back</button>
     ${info.stic_exclude ? `<span style="background:#797673;color:#fff;border-radius:3px;padding:3px 8px;font-size:12px;margin-top:2px" title="Excluded from STIC scraper — retail only">STIC Excluded</span>` : ''}
     <button class="watch-btn" data-watch-pid="${info.product_id}"
       onclick="toggleWatch(${info.product_id},event)"
@@ -2162,9 +2202,11 @@ function renderSticSku(data) {
 
 // ── STIC pre-built reports ────────────────────────────────────────────────────
 let currentSidebarBtn = null;
+let _currentReportName = null;
 function loadReport(name, btn) {
   if (currentSidebarBtn) currentSidebarBtn.classList.remove('active');
   if (btn) { btn.classList.add('active'); currentSidebarBtn = btn; }
+  _currentReportName = name;
   showSticSection('report');
   document.getElementById('stic-report-content').innerHTML = '<div class="spinner">Loading…</div>';
   fetch('/api/stic/report/' + name).then(r=>r.json()).then(data => {
@@ -2181,7 +2223,6 @@ const REPORT_TITLES = {
   vip_static:         'VIP Static — Market Moving',
   vip_exclusive:      'VIP Exclusive',
   vip_price_gap:      'VIP Price Gap',
-  never_stocked:      'No Channel Stock Ever',
   price_dropping:     'Price Dropping',
   price_rising:       'Price Rising',
   daily_changes:      'All Changes Since Yesterday',
@@ -2232,11 +2273,6 @@ const REPORT_HELP = {
     body: `<p>VIP has stock but is priced <strong>above the cheapest in-stock competitor</strong>. Sorted by the <strong>absolute £ gap descending</strong> — the largest price difference is at the top.</p>
 <p>The floor price only includes distributors who actually have stock. Zero-stock listings are excluded so the gap reflects a real alternative a customer could buy today.</p>
 <p><strong>How to use:</strong> Spot where VIP pricing looks most anomalous. A large gap on a high-volume SKU is a strong signal of either an incorrect price loaded in the system or a competitor running a deep promotion. Unlike VIP Out on Price (sorted by VIP stock), this list highlights the SKUs where VIP's price looks most out of line, regardless of how much stock VIP holds.</p>`
-  },
-  never_stocked: {
-    title: 'No Channel Stock Ever',
-    body: `<p>Products that have <strong>never had any distributor price or stock</strong> across all dates in the database. No distributor has ever listed a price for these SKUs.</p>
-<p><strong>How to use:</strong> Potential VIP exclusives or products not yet released into the channel. If VIP holds stock of these products, they may have an exclusive supply arrangement. Worth reviewing against VIP's own stock system to see which of these VIP actually holds — those would be exclusive sales opportunities with no channel competition at all.</p>`
   },
   price_dropping: {
     title: 'Price Dropping',
@@ -3607,14 +3643,14 @@ function _refreshScrapeStatusCards() {
   });
 }
 
-function loadMissingResults(btn) {
+function loadCatMissingResults(btn) {
   if (btn) {
-    document.querySelectorAll('#sidebar-stic .sidebar-btn').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('#sidebar-catalogue .sidebar-btn').forEach(b=>b.classList.remove('active'));
     btn.classList.add('active');
   }
-  document.querySelectorAll('#main-stic .content-section').forEach(s=>s.classList.remove('active'));
-  document.getElementById('stic-missing').classList.add('active');
-  const el = document.getElementById('stic-missing-content');
+  document.querySelectorAll('#main-catalogue .content-section').forEach(s=>s.classList.remove('active'));
+  document.getElementById('cat-stic-missing').classList.add('active');
+  const el = document.getElementById('cat-stic-missing-content');
   el.innerHTML = '<div class="spinner">Loading…</div>';
   fetch('/api/scrape/missing').then(r=>r.json()).then(data => {
     if (!data.length) {
@@ -3747,7 +3783,7 @@ function scrapeMissingGroup(label, btn, _resolveCallback) {
           clearInterval(interval);
           _missingUnlockAll();
           btn.disabled = false; btn.textContent = '▶ Scrape Missing';
-          loadMissingResults(null);
+          loadCatMissingResults(null);
           _refreshScrapeStatusCards();
           if (_resolveCallback) _resolveCallback(true);
         }
@@ -3758,7 +3794,7 @@ function scrapeMissingGroup(label, btn, _resolveCallback) {
       clearInterval(interval);
       _missingUnlockAll();
       btn.disabled = false; btn.textContent = '▶ Scrape Missing';
-      loadMissingResults(null);
+      loadCatMissingResults(null);
       if (_resolveCallback) _resolveCallback(false);
     }, 5400000);
   }).catch(() => {
@@ -5354,6 +5390,173 @@ function showSticScraperHealth(btn) {
   const el = document.getElementById('scraper-health-content-stic');
   _renderScraperHealth(el);
   _startScraperHealthRefresh(el);
+}
+
+// ── Feature / Bug Report ──────────────────────────────────────────────────────
+function loadFeedback(btn) {
+  if (btn) {
+    document.querySelectorAll('#sidebar-stic .sidebar-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+  document.querySelectorAll('#main-stic .content-section').forEach(s => s.classList.remove('active'));
+  document.getElementById('stic-feedback').classList.add('active');
+  _renderFeedbackPage();
+}
+
+function _renderFeedbackPage() {
+  const el = document.getElementById('stic-feedback-content');
+  el.innerHTML = `
+    <h2 style="margin:0 0 16px">Feature / Bug Report</h2>
+    <div style="background:#fff;border:1px solid #EDEBE9;border-radius:3px;padding:20px;max-width:720px;margin-bottom:28px">
+      <div style="margin-bottom:12px">
+        <label style="display:block;font-size:12px;font-weight:600;color:#323130;margin-bottom:4px">Description</label>
+        <textarea id="fb-text" rows="5" placeholder="Describe the feature request or bug…"
+          style="width:100%;box-sizing:border-box;padding:8px;font-size:13px;font-family:inherit;border:1px solid #C8C6C4;border-radius:2px;resize:vertical"></textarea>
+      </div>
+      <div style="margin-bottom:16px">
+        <label style="display:block;font-size:12px;font-weight:600;color:#323130;margin-bottom:4px">Screenshot <span style="font-weight:400;color:#A19F9D">(optional)</span></label>
+        <input id="fb-file" type="file" accept="image/*" style="font-size:12px"/>
+        <div id="fb-preview" style="margin-top:8px"></div>
+      </div>
+      <button onclick="_submitFeedback(this)"
+        style="padding:6px 20px;background:#0078D4;color:#fff;border:none;border-radius:2px;font-size:13px;font-weight:600;cursor:pointer">
+        Save Report
+      </button>
+      <span id="fb-status" style="margin-left:12px;font-size:12px;color:#A19F9D"></span>
+    </div>
+    <div id="fb-list"><div class="spinner">Loading…</div></div>`;
+
+  document.getElementById('fb-file').addEventListener('change', function() {
+    const prev = document.getElementById('fb-preview');
+    if (!this.files[0]) { prev.innerHTML = ''; return; }
+    const url = URL.createObjectURL(this.files[0]);
+    prev.innerHTML = '<img src="' + url + '" style="max-width:100%;max-height:200px;border:1px solid #EDEBE9;border-radius:2px;margin-top:4px">';
+  });
+
+  _loadFeedbackList();
+}
+
+function _submitFeedback(btn) {
+  const text = document.getElementById('fb-text').value.trim();
+  if (!text) { document.getElementById('fb-status').textContent = 'Please enter a description.'; return; }
+  const fd = new FormData();
+  fd.append('report_text', text);
+  const file = document.getElementById('fb-file').files[0];
+  if (file) fd.append('screenshot', file);
+  btn.disabled = true;
+  document.getElementById('fb-status').textContent = 'Saving…';
+  fetch('/api/feedback', { method: 'POST', body: fd }).then(r => r.json()).then(data => {
+    if (data.ok) {
+      document.getElementById('fb-text').value = '';
+      document.getElementById('fb-file').value = '';
+      document.getElementById('fb-preview').innerHTML = '';
+      document.getElementById('fb-status').style.color = '#107C10';
+      document.getElementById('fb-status').textContent = '✓ Saved';
+      setTimeout(() => { document.getElementById('fb-status').textContent = ''; }, 3000);
+      _loadFeedbackList();
+    } else {
+      document.getElementById('fb-status').style.color = '#D13438';
+      document.getElementById('fb-status').textContent = data.error || 'Error saving.';
+    }
+  }).catch(() => {
+    document.getElementById('fb-status').style.color = '#D13438';
+    document.getElementById('fb-status').textContent = 'Network error.';
+  }).finally(() => { btn.disabled = false; });
+}
+
+let _fbShowActioned = false;
+let _fbCanAction = false;
+
+function _loadFeedbackList() {
+  const url = '/api/feedback' + (_fbShowActioned ? '?include_actioned=1' : '');
+  fetch('/api/feedback/can-action').then(r => r.json()).then(perm => {
+    _fbCanAction = perm.allowed;
+  }).catch(() => { _fbCanAction = false; });
+  fetch(url).then(r => r.json()).then(rows => {
+    const el = document.getElementById('fb-list');
+    const toggleLabel = _fbShowActioned ? 'Hide Completed' : 'Show Completed';
+    let html = '<div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">'
+      + '<h3 style="margin:0;font-size:13px;font-weight:600;color:#605E5C">Reports</h3>'
+      + '<button onclick="_fbToggleActioned()" style="padding:3px 12px;font-size:11px;border:1px solid #C8C6C4;border-radius:2px;background:#fff;cursor:pointer;color:#605E5C">' + toggleLabel + '</button>'
+      + '</div>';
+    if (!rows.length) {
+      el.innerHTML = html + '<p style="color:#A19F9D;font-size:13px">No reports submitted yet.</p>';
+      return;
+    }
+    rows.forEach(r => {
+      const img = r.screenshot_path
+        ? '<a href="/api/feedback/screenshot/' + r.screenshot_path + '" target="_blank">'
+          + '<img src="/api/feedback/screenshot/' + r.screenshot_path + '" style="max-width:100%;max-height:300px;border:1px solid #EDEBE9;border-radius:2px;display:block;margin-top:8px">'
+          + '</a>'
+        : '';
+      const noEmail = (!r.submitted_by || r.submitted_by === 'local');
+      const emailNote = noEmail ? ' <span style="color:#A19F9D">(no email — submitted locally)</span>' : '';
+      const actionSection = r.actioned
+        ? '<div style="margin-top:10px;padding:10px;background:#F3F9F1;border:1px solid #BAD9B5;border-radius:2px">'
+          + '<span style="font-size:11px;font-weight:600;color:#107C10">✓ Actioned ' + r.actioned_date + '</span>'
+          + '<p style="margin:6px 0 0;font-size:12px;color:#323130;white-space:pre-wrap">' + r.action_comment.replace(/</g, '&lt;') + '</p>'
+          + '</div>'
+        : _fbCanAction
+          ? '<div style="margin-top:12px">'
+            + '<textarea id="fb-action-' + r.id + '" rows="3" placeholder="Describe what was done or decided…"'
+            + ' style="width:100%;box-sizing:border-box;padding:6px;font-size:12px;font-family:inherit;border:1px solid #C8C6C4;border-radius:2px;resize:vertical"></textarea>'
+            + '<div style="margin-top:6px;display:flex;align-items:center;gap:10px">'
+            + '<button onclick="_actionFeedback(' + r.id + ',this)"'
+            + ' style="padding:4px 14px;font-size:12px;font-weight:600;background:#107C10;color:#fff;border:none;border-radius:2px;cursor:pointer">'
+            + '✓ Mark Complete &amp; Send Email' + emailNote + '</button>'
+            + '<span id="fb-action-status-' + r.id + '" style="font-size:11px;color:#A19F9D"></span>'
+            + '</div></div>'
+          : '<div style="margin-top:8px"><span style="font-size:11px;color:#A19F9D">Pending review</span></div>';
+      html += '<div style="background:#fff;border:1px solid #EDEBE9;border-radius:3px;padding:14px 16px;margin-bottom:10px;max-width:720px">'
+        + '<div style="margin-bottom:8px"><span style="font-size:11px;color:#605E5C">' + (r.submitted_by || 'unknown') + ' &nbsp;&middot;&nbsp; ' + r.submitted_date + '</span></div>'
+        + '<p style="margin:0;font-size:13px;white-space:pre-wrap">' + r.report_text.replace(/</g, '&lt;') + '</p>'
+        + img
+        + actionSection
+        + '</div>';
+    });
+    el.innerHTML = html;
+  });
+}
+
+function _fbToggleActioned() {
+  _fbShowActioned = !_fbShowActioned;
+  _loadFeedbackList();
+}
+
+function _actionFeedback(id, btn) {
+  const comment = document.getElementById('fb-action-' + id).value.trim();
+  if (!comment) { document.getElementById('fb-action-status-' + id).textContent = 'Enter a comment first.'; return; }
+  btn.disabled = true;
+  const statusEl = document.getElementById('fb-action-status-' + id);
+  statusEl.style.color = '#A19F9D';
+  statusEl.textContent = 'Sending…';
+  fetch('/api/feedback/' + id + '/action', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({comment})
+  }).then(r => r.json()).then(data => {
+    if (data.ok) {
+      if (data.email_sent) {
+        statusEl.style.color = '#107C10';
+        statusEl.textContent = '✓ Actioned and email sent';
+      } else if (data.email_error) {
+        statusEl.style.color = '#D13438';
+        statusEl.textContent = 'Actioned but email failed: ' + data.email_error;
+      } else {
+        statusEl.style.color = '#107C10';
+        statusEl.textContent = '✓ Actioned (no email — submitted locally)';
+      }
+      setTimeout(() => _loadFeedbackList(), 1500);
+    } else {
+      btn.disabled = false;
+      statusEl.style.color = '#D13438';
+      statusEl.textContent = data.error || 'Error.';
+    }
+  }).catch(() => {
+    btn.disabled = false;
+    statusEl.style.color = '#D13438';
+    statusEl.textContent = 'Network error.';
+  });
 }
 
 // ── Scraper Coverage report ───────────────────────────────────────────────────
@@ -7002,15 +7205,6 @@ def stic_report(name):
             _gdp2 + _gdp
         )
 
-    elif name == "never_stocked":
-        rows = qry(
-            f"""SELECT product_id, model_no, manufacturer,
-                   0 AS total_stock, NULL AS min_price, NULL AS vip_price
-                FROM stic_prices
-                GROUP BY product_id, model_no, manufacturer
-                HAVING MAX(COALESCE(qty,0)) = 0 AND MAX(price) IS NULL
-                ORDER BY model_no LIMIT 200"""
-        )
 
     elif name == "price_dropping":
         if not prev:
@@ -10857,6 +11051,143 @@ def _init_watchlist():
 
 _init_watchlist()
 _init_products()
+
+# ── Feedback / bug reports ────────────────────────────────────────────────────
+REPORTS_DIR = "/opt/stic-scraper/reports"
+PORTAL_PUBLIC_URL = "https://stic.lokivault.com"
+
+def _load_secret(key):
+    import json as _json
+    try:
+        with open("/opt/stic-scraper/secrets.json") as f:
+            return _json.load(f).get(key)
+    except Exception:
+        return None
+
+def _send_action_email(to_email, original_text, screenshot_path, action_comment, submitted_date):
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+    gmail_user = "jackd71@gmail.com"
+    gmail_pass = (_load_secret("GMAIL_APP_PASSWORD") or "").replace(" ", "")
+    if not gmail_pass:
+        raise RuntimeError("GMAIL_APP_PASSWORD not set in secrets.json")
+    screenshot_line = ""
+    if screenshot_path:
+        url = f"{PORTAL_PUBLIC_URL}/api/feedback/screenshot/{screenshot_path}"
+        screenshot_line = f"\n\nScreenshot you attached:\n{url}"
+    body = (
+        f"Hi,\n\n"
+        f"Your feature/bug report submitted on {submitted_date} has been reviewed and actioned.\n\n"
+        f"{'='*60}\n"
+        f"Your original report:\n\n"
+        f"{original_text}"
+        f"{screenshot_line}\n\n"
+        f"{'='*60}\n"
+        f"Response:\n\n"
+        f"{action_comment}\n\n"
+        f"Thanks,\nDarren"
+    )
+    msg = MIMEMultipart()
+    msg["From"] = gmail_user
+    msg["To"] = to_email
+    msg["Subject"] = "Re: Your STIC Portal feature/bug report"
+    msg.attach(MIMEText(body, "plain"))
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+        smtp.login(gmail_user, gmail_pass)
+        smtp.sendmail(gmail_user, to_email, msg.as_string())
+
+@app.route("/api/feedback", methods=["POST"])
+def feedback_submit():
+    import uuid, base64 as b64
+    email = request.headers.get("Cf-Access-Authenticated-User-Email") or "local"
+    date_str = datetime.now().strftime("%d/%m/%y")
+    report_text = request.form.get("report_text", "").strip()
+    if not report_text:
+        return jsonify({"error": "No text provided"}), 400
+    screenshot_path = None
+    f = request.files.get("screenshot")
+    if f and f.filename:
+        ext = os.path.splitext(f.filename)[1].lower() or ".png"
+        fname = f"{uuid.uuid4().hex}{ext}"
+        fpath = os.path.join(REPORTS_DIR, fname)
+        f.save(fpath)
+        screenshot_path = fname
+    db = get_db()
+    db.execute(
+        "INSERT INTO feedback_reports (report_text, screenshot_path, submitted_by, submitted_date) VALUES (?,?,?,?)",
+        (report_text, screenshot_path, email, date_str)
+    )
+    db.commit()
+    db.close()
+    return jsonify({"ok": True})
+
+@app.route("/api/feedback", methods=["GET"])
+def feedback_list():
+    include_actioned = request.args.get("include_actioned") == "1"
+    db = get_db()
+    where = "" if include_actioned else "WHERE actioned = 0"
+    rows = db.execute(
+        f"SELECT id, report_text, screenshot_path, submitted_by, submitted_date, "
+        f"actioned, action_comment, actioned_date FROM feedback_reports {where} ORDER BY id DESC"
+    ).fetchall()
+    db.close()
+    return jsonify([dict(r) for r in rows])
+
+@app.route("/api/feedback/can-action")
+def feedback_can_action():
+    caller = request.headers.get("Cf-Access-Authenticated-User-Email") or "local"
+    allowed = caller in ("jackd71@gmail.com", "darren.jackson@vip-computers.co.uk")
+    return jsonify({"allowed": allowed})
+
+@app.route("/api/feedback/<int:report_id>/action", methods=["POST"])
+def feedback_action(report_id):
+    caller = request.headers.get("Cf-Access-Authenticated-User-Email") or "local"
+    if caller not in ("jackd71@gmail.com", "darren.jackson@vip-computers.co.uk"):
+        return jsonify({"error": "Not authorised"}), 403
+    data = request.get_json() or {}
+    comment = (data.get("comment") or "").strip()
+    if not comment:
+        return jsonify({"error": "Comment required"}), 400
+    db = get_db()
+    row = db.execute(
+        "SELECT report_text, screenshot_path, submitted_by, submitted_date FROM feedback_reports WHERE id=?",
+        (report_id,)
+    ).fetchone()
+    if not row:
+        db.close()
+        return jsonify({"error": "Not found"}), 404
+    row = dict(row)
+    email_sent = False
+    email_error = None
+    if row["submitted_by"] and row["submitted_by"] != "local":
+        try:
+            _send_action_email(
+                row["submitted_by"], row["report_text"],
+                row["screenshot_path"], comment, row["submitted_date"]
+            )
+            email_sent = True
+        except Exception as e:
+            email_error = str(e)
+    actioned_date = datetime.now().strftime("%d/%m/%y")
+    db.execute(
+        "UPDATE feedback_reports SET actioned=1, action_comment=?, actioned_date=? WHERE id=?",
+        (comment, actioned_date, report_id)
+    )
+    db.commit()
+    db.close()
+    return jsonify({"ok": True, "email_sent": email_sent, "email_error": email_error})
+
+@app.route("/api/feedback/screenshot/<filename>")
+def feedback_screenshot(filename):
+    import re as _re
+    if not _re.match(r'^[a-f0-9]+\.(png|jpg|jpeg|gif|webp)$', filename):
+        return "", 404
+    fpath = os.path.join(REPORTS_DIR, filename)
+    if not os.path.exists(fpath):
+        return "", 404
+    from flask import send_file
+    return send_file(fpath)
 
 if __name__ == "__main__":
     import os
