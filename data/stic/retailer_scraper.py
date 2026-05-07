@@ -763,6 +763,29 @@ _URL_COL_MAP = {
 }
 
 
+def _mark_very_verified(product_id):
+    """Mark a Very URL as verified (SKU confirmed on page) — treated as permanently saved."""
+    con = sqlite3.connect(DB_PATH)
+    cols = [r[1] for r in con.execute("PRAGMA table_info(retailer_ids)").fetchall()]
+    if "very_verified" not in cols:
+        con.execute("ALTER TABLE retailer_ids ADD COLUMN very_verified INTEGER DEFAULT 0")
+    con.execute("UPDATE retailer_ids SET very_verified=1 WHERE product_id=?", (int(product_id),))
+    con.commit()
+    con.close()
+
+
+def _verify_very_page(page, url, sku):
+    """Load a Very product page and confirm the SKU code appears. Returns True/False."""
+    try:
+        resp = page.goto(url, wait_until="domcontentloaded", timeout=25000)
+        if resp and resp.status == 404:
+            return False
+        time.sleep(random.uniform(2, 3))
+        return sku.lower() in page.inner_text("body").lower()
+    except Exception:
+        return False
+
+
 def _mark_searched(col, product_ids):
     """Mark products as searched-not-found for a discovery column (e.g. 'scan_searched')."""
     if not product_ids:
@@ -1324,31 +1347,80 @@ def _very_ensure_homepage(page):
         pass
 
 
+def _google_very_url(page, query, is_sku=True):
+    """Search Google UK for <query> site:very.co.uk; return first .prd URL or None.
+    Bypasses Very's Akamai bot detection by going through Google indexing instead."""
+    encoded    = query.replace(" ", "+")
+    search_url = (
+        f"https://www.google.co.uk/search"
+        f"?q={encoded}+site%3Avery.co.uk&hl=en-GB&gl=GB&num=5"
+    )
+    try:
+        page.goto(search_url, wait_until="domcontentloaded", timeout=20000)
+        time.sleep(random.uniform(3, 5))
+    except Exception as e:
+        log(f"  [Very] Navigation error for '{query}': {e}")
+        return None
+
+    body = page.inner_text("body")[:500].lower()
+    if "before you continue" in body or "i'm not a robot" in body:
+        log(f"  [Very] ⚠️  Google consent/CAPTCHA — pausing 30s")
+        time.sleep(30)
+        return None
+
+    urls = page.evaluate(r"""() => {
+        const found = [];
+        for (const a of document.querySelectorAll('a[href]')) {
+            const h = a.href || '';
+            const m = h.match(/[?&]q=(https?:\/\/(?:www\.)?very\.co\.uk\/[^&]+\.prd[^&]*)/);
+            if (m) { found.push(decodeURIComponent(m[1])); continue; }
+            if (/very\.co\.uk\/.*\.prd/.test(h) && !h.includes('google.'))
+                found.push(h);
+        }
+        return [...new Set(found)];
+    }""")
+
+    if urls:
+        if is_sku:
+            sku_lower = query.lower()
+            for u in urls:
+                if sku_lower in u.lower():
+                    return u
+        return urls[0]
+
+    # Regex fallback on raw page HTML
+    raw     = page.content()
+    matches = re.findall(r'https?://(?:www\.)?very\.co\.uk/[^\s"\'<>]+\.prd[^\s"\'<>]*', raw)
+    if matches:
+        cleaned = [re.sub(r'["\'>\\]+$', '', m) for m in matches]
+        if cleaned:
+            return cleaned[0]
+    return None
+
+
 def discover_very_urls(page):
     """Discover Very product URLs for products that have a Very SKU but no Very URL.
-    Uses Very's own search box + network response interception — works even when
-    Akamai blocks the product page, because the redirect URL fires before the block."""
+    Uses Google UK search (site:very.co.uk + SKU) to bypass Very's Akamai bot detection."""
     needs = load_products_needing_very_url()
     if not needs:
         log("[Discovery] Very: all SKUs already have URLs — skipping.")
         return 0
-    log(f"[Discovery] Very: {len(needs)} products need URLs (searching via Very search box).")
+    log(f"[Discovery] Very: {len(needs)} products need URLs (searching via Google).")
 
-    # Ensure we're on the Very homepage with cookies accepted
+    # Warm up on Google UK first
     try:
-        if "very.co.uk" not in page.url:
-            page.goto("https://www.very.co.uk/", wait_until="domcontentloaded", timeout=25000)
-            time.sleep(4)
-        page.evaluate("""() => {
-            const btn = [...document.querySelectorAll('button')]
-                .find(b => /accept all|allow all|accept cookies/i.test(b.textContent));
-            if (btn) btn.click();
-        }""")
-        time.sleep(2)
+        if "google" not in page.url:
+            page.goto("https://www.google.co.uk/", wait_until="domcontentloaded", timeout=20000)
+            time.sleep(random.uniform(3, 5))
+            page.evaluate("""() => {
+                const btn = [...document.querySelectorAll('button')]
+                    .find(b => /accept all|i agree|agree/i.test(b.textContent));
+                if (btn) btn.click();
+            }""")
+            time.sleep(2)
     except Exception as e:
-        log(f"  [Very] Homepage warm-up error: {e}")
+        log(f"  [Very] Google warm-up error: {e}")
 
-    # Keywords that, if found in the URL slug, indicate an obvious product mismatch
     MISMATCH_KEYWORDS = ['apple', 'ipad', 'iphone', 'samsung-galaxy', 'airpod',
                          'macbook', 'playstation', 'xbox', 'nintendo']
 
@@ -1359,25 +1431,26 @@ def discover_very_urls(page):
         log(f"  [Very] [{i}/{len(needs)}] {sku}  ({model[:40]})")
         time.sleep(random.uniform(GOOGLE_DELAY_MIN, GOOGLE_DELAY_MAX))
 
-        url = _very_search_url(page, sku)
+        url = _google_very_url(page, sku, is_sku=True)
         if url:
             url_lower = url.lower()
-            mismatch = any(kw in url_lower for kw in MISMATCH_KEYWORDS)
-            if mismatch:
+            if any(kw in url_lower for kw in MISMATCH_KEYWORDS):
                 log(f"  [Very] ⚠️  rejected mismatch URL: {url}")
                 failed.append(sku)
                 _mark_searched("very_searched", [p["product_id"]])
-            else:
-                log(f"  [Very] ✅ {url}")
+            elif _verify_very_page(page, url, sku):
+                log(f"  [Very] ✅ {url}  (SKU verified)")
                 _write_discovered_urls("Very URL", {p["product_id"]: url})
+                _mark_very_verified(p["product_id"])
                 found_urls[p["product_id"]] = url
+            else:
+                log(f"  [Very] ❌ SKU not confirmed on page — discarding")
+                failed.append(sku)
+                _mark_searched("very_searched", [p["product_id"]])
         else:
             failed.append(sku)
             log(f"  [Very] ❌ not found")
             _mark_searched("very_searched", [p["product_id"]])
-
-        # Return to homepage between searches so search box is available
-        _very_ensure_homepage(page)
 
     log(f"[Discovery] Very: found {len(found_urls)}/{len(needs)} URLs.")
     if failed:

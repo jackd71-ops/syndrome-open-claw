@@ -772,6 +772,31 @@ HTML = r"""<!DOCTYPE html>
           <div class="tbl-wrap" id="ret-daily-sku-tbl"></div>
         </div>
       </div>
+      <div id="ret-retailer-overview" style="margin-top:16px">
+        <div class="section-title" style="font-size:13px;margin-bottom:8px">Retailer Overview</div>
+        <div class="tbl-wrap" id="ret-rov-retailer-tbl"><div class="spinner">Loading…</div></div>
+        <div id="ret-rov-mfr-panel" style="display:none;margin-top:4px">
+          <div class="drill-header">
+            <span id="ret-rov-mfr-title" class="section-title" style="margin:0"></span>
+            <button class="drill-close" onclick="closeROvMfrDrill()">✕ Close</button>
+          </div>
+          <div class="tbl-wrap" id="ret-rov-mfr-tbl"></div>
+        </div>
+        <div id="ret-rov-grp-panel" style="display:none;margin-top:4px">
+          <div class="drill-header">
+            <span id="ret-rov-grp-title" class="section-title" style="margin:0"></span>
+            <button class="drill-close" onclick="closeROvGrpDrill()">✕ Close</button>
+          </div>
+          <div class="tbl-wrap" id="ret-rov-grp-tbl"></div>
+        </div>
+        <div id="ret-rov-sku-panel" style="display:none;margin-top:4px">
+          <div class="drill-header">
+            <span id="ret-rov-sku-title" class="section-title" style="margin:0"></span>
+            <button class="drill-close" onclick="closeROvSkuDrill()">✕ Close</button>
+          </div>
+          <div class="tbl-wrap" id="ret-rov-sku-tbl"></div>
+        </div>
+      </div>
     </div>
     <!-- Search -->
     <div class="content-section" id="ret-search">
@@ -5063,6 +5088,7 @@ function loadRetailerKpi() {
       <div class="kpi-card"><div class="label">Last Scraped</div><div class="value" style="font-size:16px">${fmtDate(data.latest_date)}</div></div>
     `;
     loadRetDailyOverview();
+    loadRetailerOverview();
   });
 }
 
@@ -5215,6 +5241,191 @@ function closeRetDailySkuDrill() {
   _retDailyGroup = null;
   document.getElementById('ret-daily-sku-drill').style.display = 'none';
   document.querySelectorAll('#ret-daily-group-tbl tr.row-selected').forEach(r => r.classList.remove('row-selected'));
+}
+
+// ── Retailer Overview — 4-tier drill ─────────────────────────────────────────
+let _rovRetailer = null, _rovMfr = null, _rovGroup = null;
+let _rovRetailerRows = [], _rovMfrRows = [], _rovGroupRows = [];
+
+function loadRetailerOverview() {
+  document.getElementById('ret-rov-retailer-tbl').innerHTML = '<div class="spinner">Loading…</div>';
+  fetch('/api/retailer/retailer-overview').then(r=>r.json()).then(rows => {
+    _rovRetailerRows = rows;
+    if (!rows.length) {
+      document.getElementById('ret-rov-retailer-tbl').innerHTML = '<p style="color:#A19F9D;padding:20px">No data available</p>';
+      return;
+    }
+    let html = '<table><thead><tr><th>Retailer</th><th>Linked SKUs</th><th>Prices Found</th><th>Missing</th><th>% Coverage</th><th>In Stock</th></tr></thead><tbody>';
+    rows.forEach((r, i) => {
+      const sel = r.retailer === _rovRetailer ? ' row-selected' : '';
+      const pct = r.universe > 0 ? Math.round(r.scraped / r.universe * 100) : 0;
+      const pctColor = pct >= 90 ? '#107C10' : pct >= 70 ? '#986F0B' : '#A4262C';
+      html += `<tr class="clickable${sel}" data-ri="${i}" title="Click to drill down by manufacturer">
+        <td><strong>${r.retailer}</strong></td>
+        <td>${r.universe}</td>
+        <td>${r.scraped}</td>
+        <td>${r.not_scraped > 0 ? '<span class="badge badge-red">'+r.not_scraped+'</span>' : '0'}</td>
+        <td><span style="color:${pctColor};font-weight:600">${pct}%</span></td>
+        <td>${r.in_stock ?? '—'}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    const el = document.getElementById('ret-rov-retailer-tbl');
+    el.innerHTML = html;
+    makeSortableAll(el);
+    document.querySelectorAll('#ret-rov-retailer-tbl tr[data-ri]').forEach(tr => {
+      tr.addEventListener('click', () => {
+        const row = _rovRetailerRows[+tr.dataset.ri];
+        if (_rovRetailer === row.retailer) { closeROvMfrDrill(); return; }
+        document.querySelectorAll('#ret-rov-retailer-tbl tr.row-selected').forEach(r => r.classList.remove('row-selected'));
+        tr.classList.add('row-selected');
+        _rovRetailer = row.retailer;
+        closeROvGrpDrill();
+        closeROvSkuDrill();
+        loadROvMfrDrill(row.retailer);
+      });
+    });
+    if (_rovRetailer) loadROvMfrDrill(_rovRetailer);
+  });
+}
+
+function loadROvMfrDrill(retailer) {
+  document.getElementById('ret-rov-mfr-panel').style.display = 'block';
+  document.getElementById('ret-rov-mfr-title').textContent = retailer + ' — By Manufacturer';
+  document.getElementById('ret-rov-mfr-tbl').innerHTML = '<div class="spinner">Loading…</div>';
+  fetch('/api/retailer/retailer-overview/manufacturers?retailer=' + encodeURIComponent(retailer))
+    .then(r=>r.json()).then(rows => {
+      _rovMfrRows = rows;
+      if (!rows.length) {
+        document.getElementById('ret-rov-mfr-tbl').innerHTML = '<p style="color:#A19F9D;padding:20px">No data</p>';
+        return;
+      }
+      let html = '<table><thead><tr><th>Manufacturer</th><th>Linked SKUs</th><th>Prices Found</th><th>Missing</th><th>% Coverage</th></tr></thead><tbody>';
+      rows.forEach((r, i) => {
+        const sel = r.manufacturer === _rovMfr ? ' row-selected' : '';
+        const pct = r.universe > 0 ? Math.round(r.scraped / r.universe * 100) : 0;
+        const pctColor = pct >= 90 ? '#107C10' : pct >= 70 ? '#986F0B' : '#A4262C';
+        html += `<tr class="clickable${sel}" data-mi="${i}" title="Click to view product groups">
+          <td><strong>${r.manufacturer}</strong></td>
+          <td>${r.universe}</td>
+          <td>${r.scraped}</td>
+          <td>${r.not_scraped > 0 ? '<span class="badge badge-red">'+r.not_scraped+'</span>' : '0'}</td>
+          <td><span style="color:${pctColor};font-weight:600">${pct}%</span></td>
+        </tr>`;
+      });
+      html += '</tbody></table>';
+      const el = document.getElementById('ret-rov-mfr-tbl');
+      el.innerHTML = html;
+      makeSortableAll(el);
+      document.querySelectorAll('#ret-rov-mfr-tbl tr[data-mi]').forEach(tr => {
+        tr.addEventListener('click', () => {
+          const row = _rovMfrRows[+tr.dataset.mi];
+          if (_rovMfr === row.manufacturer) { closeROvGrpDrill(); return; }
+          document.querySelectorAll('#ret-rov-mfr-tbl tr.row-selected').forEach(r => r.classList.remove('row-selected'));
+          tr.classList.add('row-selected');
+          _rovMfr = row.manufacturer;
+          closeROvSkuDrill();
+          loadROvGrpDrill(_rovRetailer, row.manufacturer);
+        });
+      });
+      if (_rovMfr) loadROvGrpDrill(_rovRetailer, _rovMfr);
+    });
+}
+
+function loadROvGrpDrill(retailer, mfr) {
+  document.getElementById('ret-rov-grp-panel').style.display = 'block';
+  document.getElementById('ret-rov-grp-title').textContent = retailer + ' — ' + mfr + ' — Product Groups';
+  document.getElementById('ret-rov-grp-tbl').innerHTML = '<div class="spinner">Loading…</div>';
+  fetch('/api/retailer/retailer-overview/groups?retailer=' + encodeURIComponent(retailer) + '&mfr=' + encodeURIComponent(mfr))
+    .then(r=>r.json()).then(rows => {
+      _rovGroupRows = rows;
+      if (!rows.length) {
+        document.getElementById('ret-rov-grp-tbl').innerHTML = '<p style="color:#A19F9D;padding:20px">No data</p>';
+        return;
+      }
+      let html = '<table><thead><tr><th>Product Group</th><th>Linked SKUs</th><th>Prices Found</th><th>Missing</th><th>% Coverage</th></tr></thead><tbody>';
+      rows.forEach((r, i) => {
+        const sel = r.product_group === _rovGroup ? ' row-selected' : '';
+        const pct = r.universe > 0 ? Math.round(r.scraped / r.universe * 100) : 0;
+        const pctColor = pct >= 90 ? '#107C10' : pct >= 70 ? '#986F0B' : '#A4262C';
+        html += `<tr class="clickable${sel}" data-gi="${i}" title="Click to view SKUs">
+          <td><strong>${_retGrpLbl(r.product_group)}</strong></td>
+          <td>${r.universe}</td>
+          <td>${r.scraped}</td>
+          <td>${r.not_scraped > 0 ? '<span class="badge badge-red">'+r.not_scraped+'</span>' : '0'}</td>
+          <td><span style="color:${pctColor};font-weight:600">${pct}%</span></td>
+        </tr>`;
+      });
+      html += '</tbody></table>';
+      const el = document.getElementById('ret-rov-grp-tbl');
+      el.innerHTML = html;
+      makeSortableAll(el);
+      document.querySelectorAll('#ret-rov-grp-tbl tr[data-gi]').forEach(tr => {
+        tr.addEventListener('click', () => {
+          const row = _rovGroupRows[+tr.dataset.gi];
+          if (_rovGroup === row.product_group) { closeROvSkuDrill(); return; }
+          document.querySelectorAll('#ret-rov-grp-tbl tr.row-selected').forEach(r => r.classList.remove('row-selected'));
+          tr.classList.add('row-selected');
+          _rovGroup = row.product_group;
+          loadROvSkuDrill(_rovRetailer, mfr, row.product_group);
+        });
+      });
+      if (_rovGroup) loadROvSkuDrill(_rovRetailer, mfr, _rovGroup);
+    });
+}
+
+function loadROvSkuDrill(retailer, mfr, group) {
+  document.getElementById('ret-rov-sku-panel').style.display = 'block';
+  document.getElementById('ret-rov-sku-title').textContent = retailer + ' — ' + mfr + ' ' + _retGrpLbl(group) + ' — SKUs';
+  document.getElementById('ret-rov-sku-tbl').innerHTML = '<div class="spinner">Loading…</div>';
+  fetch('/api/retailer/retailer-overview/skus?retailer=' + encodeURIComponent(retailer) + '&mfr=' + encodeURIComponent(mfr) + '&group=' + encodeURIComponent(group))
+    .then(r=>r.json()).then(rows => {
+      if (!rows.length) {
+        document.getElementById('ret-rov-sku-tbl').innerHTML = '<p style="color:#A19F9D;padding:20px">No SKUs found</p>';
+        return;
+      }
+      let html = '<table><thead><tr><th>Model No</th><th>Description</th><th>Price</th><th>In Stock</th><th>Scraped</th></tr></thead><tbody>';
+      rows.forEach(r => {
+        const stockBadge = r.scraped
+          ? (r.in_stock ? '<span style="color:#107C10">✓ Yes</span>' : '<span style="color:#A4262C">✗ OOS</span>')
+          : '—';
+        const priceFmt = r.price != null ? '£' + r.price.toFixed(2) : '—';
+        const scrapedBadge = r.scraped
+          ? '<span style="color:#107C10">✓</span>'
+          : '<span style="color:#A19F9D">—</span>';
+        html += `<tr>
+          <td><strong>${r.model_no || '—'}</strong></td>
+          <td style="font-size:11px;color:#605E5C">${r.description || '—'}</td>
+          <td>${priceFmt}</td>
+          <td>${stockBadge}</td>
+          <td>${scrapedBadge}</td>
+        </tr>`;
+      });
+      html += '</tbody></table>';
+      const el = document.getElementById('ret-rov-sku-tbl');
+      el.innerHTML = html;
+      makeSortableAll(el);
+    });
+}
+
+function closeROvMfrDrill() {
+  _rovRetailer = null; _rovMfr = null; _rovGroup = null;
+  document.getElementById('ret-rov-mfr-panel').style.display = 'none';
+  document.querySelectorAll('#ret-rov-retailer-tbl tr.row-selected').forEach(r => r.classList.remove('row-selected'));
+  closeROvGrpDrill();
+}
+
+function closeROvGrpDrill() {
+  _rovMfr = null; _rovGroup = null;
+  document.getElementById('ret-rov-grp-panel').style.display = 'none';
+  document.querySelectorAll('#ret-rov-mfr-tbl tr.row-selected').forEach(r => r.classList.remove('row-selected'));
+  closeROvSkuDrill();
+}
+
+function closeROvSkuDrill() {
+  _rovGroup = null;
+  document.getElementById('ret-rov-sku-panel').style.display = 'none';
+  document.querySelectorAll('#ret-rov-grp-tbl tr.row-selected').forEach(r => r.classList.remove('row-selected'));
 }
 
 // ── Scraper Health report ─────────────────────────────────────────────────────
@@ -7424,6 +7635,126 @@ def retailer_daily_overview_skus():
         result.append(row)
     db.close()
     return jsonify(result)
+
+
+# Retailer name → retailer_ids column used to determine the scrape universe
+RETAILER_COL = {name: col for name, col, _ in RETAILER_COVERAGE_MAP}
+
+
+@app.route("/api/retailer/retailer-overview")
+def retailer_retailer_overview():
+    latest = latest_date("retailer_prices")
+    if not latest:
+        return jsonify([])
+    db = get_db()
+    result = []
+    for name, col, _ in RETAILER_COVERAGE_MAP:
+        universe = db.execute(
+            f"SELECT COUNT(*) FROM retailer_ids ri"
+            f" JOIN products p ON p.product_id=ri.product_id"
+            f" WHERE ri.{col} IS NOT NULL AND ri.{col}!='' AND p.eol=0"
+        ).fetchone()[0]
+        scraped = db.execute(
+            "SELECT COUNT(DISTINCT product_id) FROM retailer_prices"
+            " WHERE date=? AND retailer=? AND price IS NOT NULL",
+            (latest, name)
+        ).fetchone()[0]
+        in_stock = db.execute(
+            "SELECT COUNT(*) FROM retailer_prices"
+            " WHERE date=? AND retailer=? AND in_stock=1",
+            (latest, name)
+        ).fetchone()[0]
+        result.append({
+            "retailer": name,
+            "universe": universe,
+            "scraped": scraped,
+            "not_scraped": max(0, universe - scraped),
+            "in_stock": in_stock,
+        })
+    db.close()
+    return jsonify(result)
+
+
+@app.route("/api/retailer/retailer-overview/manufacturers")
+def retailer_overview_manufacturers():
+    retailer = request.args.get("retailer", "").strip()
+    col = RETAILER_COL.get(retailer)
+    if not col:
+        return jsonify([])
+    latest = latest_date("retailer_prices")
+    if not latest:
+        return jsonify([])
+    rows = qry(
+        f"""SELECT p.manufacturer,
+               COUNT(DISTINCT p.product_id) AS universe,
+               COUNT(DISTINCT CASE WHEN rp.price IS NOT NULL THEN rp.product_id END) AS scraped
+           FROM products p
+           JOIN retailer_ids ri ON ri.product_id = p.product_id
+           LEFT JOIN retailer_prices rp
+             ON rp.product_id = p.product_id AND rp.date = ? AND rp.retailer = ?
+           WHERE ri.{col} IS NOT NULL AND ri.{col}!='' AND p.eol = 0
+           GROUP BY p.manufacturer ORDER BY p.manufacturer""",
+        (latest, retailer)
+    )
+    for r in rows:
+        r["not_scraped"] = max(0, r["universe"] - r["scraped"])
+    return jsonify(rows)
+
+
+@app.route("/api/retailer/retailer-overview/groups")
+def retailer_overview_groups():
+    retailer = request.args.get("retailer", "").strip()
+    mfr      = request.args.get("mfr",      "").strip()
+    col = RETAILER_COL.get(retailer)
+    if not col or not mfr:
+        return jsonify([])
+    latest = latest_date("retailer_prices")
+    if not latest:
+        return jsonify([])
+    rows = qry(
+        f"""SELECT p.product_group,
+               COUNT(DISTINCT p.product_id) AS universe,
+               COUNT(DISTINCT CASE WHEN rp.price IS NOT NULL THEN rp.product_id END) AS scraped
+           FROM products p
+           JOIN retailer_ids ri ON ri.product_id = p.product_id
+           LEFT JOIN retailer_prices rp
+             ON rp.product_id = p.product_id AND rp.date = ? AND rp.retailer = ?
+           WHERE ri.{col} IS NOT NULL AND ri.{col}!='' AND p.eol = 0 AND p.manufacturer = ?
+           GROUP BY p.product_group ORDER BY p.product_group""",
+        (latest, retailer, mfr)
+    )
+    for r in rows:
+        r["not_scraped"] = max(0, r["universe"] - r["scraped"])
+    return jsonify(rows)
+
+
+@app.route("/api/retailer/retailer-overview/skus")
+def retailer_overview_skus():
+    retailer = request.args.get("retailer", "").strip()
+    mfr      = request.args.get("mfr",      "").strip()
+    group    = request.args.get("group",    "").strip()
+    col = RETAILER_COL.get(retailer)
+    if not col or not mfr or not group:
+        return jsonify([])
+    latest = latest_date("retailer_prices")
+    if not latest:
+        return jsonify([])
+    rows = qry(
+        f"""SELECT p.product_id, p.model_no, p.description,
+               rp.price, rp.in_stock,
+               CASE WHEN rp.price IS NOT NULL THEN 1 ELSE 0 END AS scraped
+           FROM products p
+           JOIN retailer_ids ri ON ri.product_id = p.product_id
+           LEFT JOIN retailer_prices rp
+             ON rp.product_id = p.product_id AND rp.date = ? AND rp.retailer = ?
+           WHERE ri.{col} IS NOT NULL AND ri.{col}!='' AND p.eol = 0
+             AND p.manufacturer = ? AND p.product_group = ?
+           ORDER BY p.model_no""",
+        (latest, retailer, mfr, group)
+    )
+    for r in rows:
+        r["scraped"] = bool(r["scraped"])
+    return jsonify(rows)
 
 
 @app.route("/api/retailer/oos/manufacturers")
