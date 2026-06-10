@@ -4,8 +4,14 @@ Complete rebuild procedure after total server loss.
 Assumes a fresh Ubuntu install on replacement hardware.
 
 **Recovery sources:**
-- **GitHub** (`syndrome-open-claw`) — all source code, scripts, config structure
-- **TrueNAS** (`192.168.1.158:/mnt/Deep/backups/openclaw/`) — live data, secrets, platform config
+- **GitHub** (`syndrome-open-claw`) — OpenClaw source code, scripts, config structure
+- **GitHub** (`syndrome-stic-scraper`) — STIC scraper source code, portal, docs
+- **TrueNAS** (`192.168.1.158:/mnt/Deep/backups/openclaw/`) — OpenClaw live data, secrets, platform config
+- **TrueNAS** (`192.168.1.158:/mnt/Deep/backups/stic-scraper/`) — STIC prices.db, secrets, progress files
+
+**Two separate projects — two separate git repos:**
+- OpenClaw (AI agent): `/opt/openclaw/` → `syndrome-open-claw`
+- STIC scraper + portal: `/opt/stic-scraper/` → `syndrome-stic-scraper`
 
 ---
 
@@ -64,22 +70,35 @@ python3 -m camoufox fetch
 ## 4. Create Directory Structure
 
 ```bash
-mkdir -p /opt/openclaw/{data/analytics,data/stic,data/general,data/travel,data/finance,data/recipes}
+# OpenClaw
 mkdir -p /opt/openclaw/{config,workspace,workspace-family,workspace-sales}
-mkdir -p /opt/openclaw/{scripts,logs,docs,ha-config,skills}
+mkdir -p /opt/openclaw/{scripts,logs,docs,ha-config}
+mkdir -p /opt/openclaw/data/{travel,finance,recipes}
 chown -R adminclaude:adminclaude /opt/openclaw
+
+# STIC scraper (separate project)
+mkdir -p /opt/stic-scraper/{scraper,analytics,docs,scripts,general,logs,data,reports}
+chown -R adminclaude:adminclaude /opt/stic-scraper
 ```
 
 ---
 
-## 5. Clone GitHub Repo
+## 5. Clone GitHub Repos
 
 ```bash
-# Clone into docs/ — contains source code, scripts, agent config
-cd /opt/openclaw
-git clone https://github.com/jackd71-ops/syndrome-open-claw.git docs
-# Note: you will need to add the GitHub PAT to the remote URL for push access:
-# git -C /opt/openclaw/docs remote set-url origin https://<user>:<PAT>@github.com/jackd71-ops/syndrome-open-claw.git
+# OpenClaw — clone directly into /opt/openclaw (git root is the project root)
+git clone https://github.com/jackd71-ops/syndrome-open-claw.git /opt/openclaw
+# Add PAT to remote for push access:
+# git -C /opt/openclaw remote set-url origin https://<user>:<PAT>@github.com/jackd71-ops/syndrome-open-claw.git
+
+# STIC scraper — separate repo
+git clone https://github.com/jackd71-ops/syndrome-stic-scraper.git /opt/stic-scraper
+# Add PAT to remote for push access:
+# git -C /opt/stic-scraper remote set-url origin https://<user>:<PAT>@github.com/jackd71-ops/syndrome-stic-scraper.git
+
+# Make scripts executable
+chmod +x /opt/openclaw/scripts/*.sh
+chmod +x /opt/stic-scraper/scripts/*.sh
 ```
 
 ---
@@ -90,35 +109,50 @@ SSH into TrueNAS and rsync back, or run from the new server:
 
 ```bash
 # Set up SSH key first (see step 7), then:
+
+# ── Restore OpenClaw runtime data ─────────────────────────────────────────────
 rsync -av \
     -e "ssh -i /home/adminclaude/.ssh/id_ed25519_openclaw" \
     truenas_admin@192.168.1.158:/mnt/Deep/backups/openclaw/ \
     /opt/openclaw/restore-tmp/
 
-# Then copy into place:
-cp -r /opt/openclaw/restore-tmp/config/        /opt/openclaw/config/
-cp -r /opt/openclaw/restore-tmp/workspace/     /opt/openclaw/workspace/
+cp -r /opt/openclaw/restore-tmp/config/           /opt/openclaw/config/
+cp -r /opt/openclaw/restore-tmp/workspace/        /opt/openclaw/workspace/
 cp -r /opt/openclaw/restore-tmp/workspace-family/ /opt/openclaw/workspace-family/
 cp -r /opt/openclaw/restore-tmp/workspace-sales/  /opt/openclaw/workspace-sales/
-cp -r /opt/openclaw/restore-tmp/data/          /opt/openclaw/data/
-cp -r /opt/openclaw/restore-tmp/scripts/       /opt/openclaw/scripts/
-cp -r /opt/openclaw/restore-tmp/ha-config/     /opt/openclaw/ha-config/
-cp    /opt/openclaw/restore-tmp/secrets.json   /opt/openclaw/secrets.json
-cp    /opt/openclaw/restore-tmp/docker-compose.yml /opt/openclaw/docker-compose.yml
-cp    /opt/openclaw/restore-tmp/Dockerfile     /opt/openclaw/Dockerfile
+cp -r /opt/openclaw/restore-tmp/data/             /opt/openclaw/data/
+cp -r /opt/openclaw/restore-tmp/ha-config/        /opt/openclaw/ha-config/
+cp    /opt/openclaw/restore-tmp/secrets.json      /opt/openclaw/secrets.json
 
 chmod +x /opt/openclaw/scripts/*.sh
 chown -R adminclaude:adminclaude /opt/openclaw
+
+# ── Restore STIC runtime data ──────────────────────────────────────────────────
+rsync -av \
+    -e "ssh -i /home/adminclaude/.ssh/id_ed25519_openclaw" \
+    truenas_admin@192.168.1.158:/mnt/Deep/backups/stic-scraper/ \
+    /opt/stic-scraper/restore-tmp/
+
+cp /opt/stic-scraper/restore-tmp/analytics/prices.db  /opt/stic-scraper/analytics/
+cp /opt/stic-scraper/restore-tmp/secrets.json         /opt/stic-scraper/secrets.json
+cp -r /opt/stic-scraper/restore-tmp/data/             /opt/stic-scraper/data/
+
+chmod +x /opt/stic-scraper/scripts/*.sh
+chown -R adminclaude:adminclaude /opt/stic-scraper
 ```
 
 **Key files restored from TrueNAS:**
-- `data/analytics/prices.db` — all STIC + retailer price/stock history (includes products, retailer_ids, retailer_prices)
-- `secrets.json` — Telegram token, STIC login credentials
+
+OpenClaw backup (`/mnt/Deep/backups/openclaw/`):
+- `secrets.json` — Telegram token, OpenClaw credentials
 - `config/` — OpenClaw platform config, manifest DB, credentials
 - `workspace/` — agent memory and session notes
-- `data/general/Retailer_Template.xlsx` — legacy retailer template (used by seed script on first rebuild if prices.db is empty)
 
-> If `prices.db` is restored from backup it will already contain `retailer_ids` and `products.msrp`. Only run `seed_retailer_db.py` if the DB is new/empty and you need to seed from Excel.
+STIC backup (`/mnt/Deep/backups/stic-scraper/`):
+- `analytics/prices.db` — all STIC + retailer price/stock history (products, retailer_ids, retailer_prices, stic_prices)
+- `secrets.json` — Telegram token, STIC login credentials, proxy config
+
+> If `prices.db` is restored from backup it will already contain `retailer_ids` and `products.msrp`. Only run `seed_retailer_db.py` if the DB is new/empty and you need to seed from a legacy Excel file.
 
 ---
 
@@ -269,11 +303,18 @@ curl -s http://localhost:8090/api/stic/kpi | python3 -m json.tool
 # Docker container healthy
 docker ps --format "{{.Names}}: {{.Status}}"
 
-# Scraper dry-run (no write)
-python3 /opt/openclaw/data/stic/stic_scraper.py --help
+# STIC scraper help (confirms Python + dependencies OK)
+python3 /opt/stic-scraper/scraper/stic_scraper.py --help
 
-# Backup reachable
+# Both git repos clean and up to date
+git -C /opt/openclaw status
+git -C /opt/stic-scraper status
+
+# OpenClaw backup reachable
 ssh -i /home/adminclaude/.ssh/id_ed25519_openclaw truenas_admin@192.168.1.158 "ls /mnt/Deep/backups/openclaw/"
+
+# STIC backup reachable
+ssh -i /home/adminclaude/.ssh/id_ed25519_openclaw truenas_admin@192.168.1.158 "ls /mnt/Deep/backups/stic-scraper/"
 ```
 
 ---
@@ -291,12 +332,13 @@ chown -R adminclaude:adminclaude /opt/openclaw
 
 ## Notes
 
-- **prices.db WAL mode** — after restore, run `sqlite3 /opt/stic-scraper/data/prices.db "PRAGMA wal_checkpoint(FULL);"` to ensure DB is clean
+- **prices.db WAL mode** — after restore, run `sqlite3 /opt/stic-scraper/analytics/prices.db "PRAGMA wal_checkpoint(FULL);"` to ensure DB is clean
 - **Portal port** — `portal.py` serves on `:8090`, local network only. This is a **host systemd service** (`openclaw-portal`), not inside Docker. Restart with `sudo systemctl restart openclaw-portal`, not `safe-restart.sh`.
 - **OpenClaw Docker container** — Kevin AI agent only. Ports: 18789 (main), 3000 (internal), 2099 (manifest public). Restart with `bash /opt/openclaw/scripts/safe-restart.sh`.
-- **Scraper files location** — `/opt/stic-scraper/scraper/` (Python scripts), `/opt/stic-scraper/analytics/portal.py` (portal), `/opt/stic-scraper/logs/` (all log files), `/opt/stic-scraper/data/` (DB + progress files)
-- **TrueNAS backup path** — `/mnt/Deep/backups/openclaw/`
-- **GitHub repo** — `jackd71-ops/syndrome-open-claw`
+- **Project separation** — OpenClaw (`/opt/openclaw/`) and STIC scraper (`/opt/stic-scraper/`) are fully separate projects with their own git repos. No shared directories.
+- **STIC scraper files** — `/opt/stic-scraper/scraper/` (Python scripts), `/opt/stic-scraper/analytics/portal.py` (portal), `/opt/stic-scraper/logs/` (all log files), `/opt/stic-scraper/analytics/prices.db` (database)
+- **TrueNAS backup paths** — OpenClaw: `/mnt/Deep/backups/openclaw/` — STIC: `/mnt/Deep/backups/stic-scraper/`
+- **GitHub repos** — OpenClaw: `jackd71-ops/syndrome-open-claw` — STIC: `jackd71-ops/syndrome-stic-scraper`
 - Update this document whenever cron jobs, services, packages, or architecture changes
 
 ---
@@ -358,10 +400,10 @@ PK is `(product_id, retailer)`. Auto-cleared when a code/URL is added for that r
 **On a fresh rebuild**, seed `retailer_ids` and `products.msrp` from the Excel backup:
 
 ```bash
-python3 /opt/openclaw/scripts/seed_retailer_db.py
+python3 /opt/stic-scraper/scripts/seed_retailer_db.py
 ```
 
-This script reads `Retailer_Template.xlsx` from `/opt/openclaw/data/general/` — restore this file from TrueNAS backup first. The seed script is safe to re-run (uses INSERT OR REPLACE).
+This script reads `Retailer_Template.xlsx` from `/opt/stic-scraper/general/` — restore this file from TrueNAS backup first. The seed script is safe to re-run (uses INSERT OR REPLACE).
 
 EOL flag is managed via the portal Catalogue → Update EOL Status tool or ⛔ View EOL SKUs.
 
