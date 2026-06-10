@@ -1,0 +1,141 @@
+# =============================================================================
+# OpenClaw — root .gitignore
+# Git root: /opt/openclaw  →  github.com/jackd71-ops/syndrome-open-claw
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Secrets & credentials — NEVER commit these
+# -----------------------------------------------------------------------------
+.env
+.env.*
+*.env
+secrets.json
+*.secrets
+*.key
+*.pem
+*.p12
+*.pfx
+credentials/
+config/credentials/
+config/ssh/
+
+# -----------------------------------------------------------------------------
+# Runtime databases — large, binary, regenerated at runtime
+# -----------------------------------------------------------------------------
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.db.bak
+*.db.pre-*
+
+# -----------------------------------------------------------------------------
+# OpenClaw runtime config — live state, not source-of-truth
+# These are written by the running container and change constantly
+# -----------------------------------------------------------------------------
+config/agents/
+config/canvas/
+config/completions/
+config/cron/
+config/delivery-queue/
+config/devices/
+config/exec-approvals.json
+config/extensions/
+config/flows/
+config/hooks/
+config/identity/
+config/lcm-files/
+config/lcm.db*
+config/logs/
+config/manifest/
+config/memory/
+config/openclaw.json*
+config/secrets.json
+config/subagents/
+config/tasks/
+config/telegram/
+config/update-check.json
+config/workspace/
+config/workspace-cron/
+config/workspace-family/
+config/workspace-weather/
+
+# Keep these config files (static, hand-edited)
+!config/docker-compose.secureclaw.yml
+
+# -----------------------------------------------------------------------------
+# Runtime data directories
+# -----------------------------------------------------------------------------
+data/
+logs/
+workspace/data/
+workspace/memory/
+workspace/stic-data/
+workspace-family/data/
+
+# -----------------------------------------------------------------------------
+# Temporary / scratch files in workspace root
+# -----------------------------------------------------------------------------
+workspace/archive_old_emails*.py
+workspace/check_email_access.py
+workspace/debug_search.py
+workspace/promo-tracker-*.py
+workspace/test_*.py
+
+# -----------------------------------------------------------------------------
+# Python artifacts
+# -----------------------------------------------------------------------------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# -----------------------------------------------------------------------------
+# Backups
+# -----------------------------------------------------------------------------
+*backup*
+*-backup*
+*.bak
+backups/
+*_OLD/
+
+# -----------------------------------------------------------------------------
+# Logs
+# -----------------------------------------------------------------------------
+*.log
+logs/
+
+# -----------------------------------------------------------------------------
+# OS / editor noise
+# -----------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# STIC scraper — separate GitHub repo, not tracked here
+docs-stic/
+
+# workspace/skills is a duplicate — docs/skills is canonical (docker-mounted)
+workspace/skills/
+
+# workspace runtime state and binaries
+workspace/.bin/
+workspace/.clawhub/
+workspace/.openclaw/
+
+# ha-config — may contain tokens/sensitive state
+ha-config/
+
+# skills/ at root level (stray copy)
+/skills/

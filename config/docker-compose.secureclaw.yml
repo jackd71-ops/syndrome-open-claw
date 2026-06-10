@@ -1,0 +1,33 @@
+{
+  "services": {
+    "openclaw-gateway": {
+      "read_only": true,
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "networks": [
+        "restricted-net"
+      ],
+      "volumes": [
+        "openclaw-data:/app/data"
+      ],
+      "deploy": {
+        "resources": {
+          "limits": {
+            "memory": "2G",
+            "cpus": "2.0"
+          }
+        }
+      }
+    }
+  },
+  "networks": {
+    "restricted-net": {
+      "driver": "bridge",
+      "internal": false
+    }
+  }
+}
