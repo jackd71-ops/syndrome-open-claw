@@ -123,8 +123,11 @@ cp -r /opt/openclaw/restore-tmp/workspace-sales/  /opt/openclaw/workspace-sales/
 cp -r /opt/openclaw/restore-tmp/data/             /opt/openclaw/data/
 cp -r /opt/openclaw/restore-tmp/ha-config/        /opt/openclaw/ha-config/
 cp    /opt/openclaw/restore-tmp/secrets.json      /opt/openclaw/secrets.json
+cp    /opt/openclaw/restore-tmp/.env              /opt/openclaw/.env
+cp    /opt/openclaw/restore-tmp/.env.secrets      /opt/openclaw/.env.secrets
 
 chmod +x /opt/openclaw/scripts/*.sh
+chmod 600 /opt/openclaw/secrets.json /opt/openclaw/.env /opt/openclaw/.env.secrets
 chown -R adminclaude:adminclaude /opt/openclaw
 
 # ── Restore STIC runtime data ──────────────────────────────────────────────────
