@@ -101,6 +101,8 @@ venv/
 # Backups
 # -----------------------------------------------------------------------------
 *backup*
+!scripts/backup.sh
+!docs/scripts/stic-backup.sh
 *-backup*
 *.bak
 backups/
