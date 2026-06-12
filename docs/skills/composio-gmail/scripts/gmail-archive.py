@@ -8,8 +8,60 @@ Usage: python3 gmail-archive.py [--days 7] [--dry-run]
 import subprocess
 import json
 import os
+import sys
 import argparse
+import urllib.request
 from datetime import datetime, timezone
+
+JOB_ID = "c247ae9d-de66-4888-952d-1ac9a9fcf115"
+TELEGRAM_CHAT_ID = "1163684840"
+SECRETS_PATH = "/opt/openclaw/secrets.json"
+
+
+def _load_telegram_token() -> str:
+    for path in [os.path.expanduser("~/.openclaw/secrets.json"), SECRETS_PATH]:
+        try:
+            with open(path) as f:
+                return json.load(f).get("TELEGRAM_TOKEN", "")
+        except Exception:
+            pass
+    return ""
+
+
+def _send_telegram(text: str) -> bool:
+    token = _load_telegram_token()
+    if not token:
+        return False
+    payload = json.dumps({
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": text,
+        "parse_mode": "Markdown",
+        "disable_web_page_preview": True,
+    }).encode()
+    try:
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            result = json.load(resp)
+            return result.get("ok", False)
+    except Exception as e:
+        print(f"Telegram error: {e}", file=sys.stderr)
+        return False
+
+
+def _write_job_status() -> None:
+    path = f"/home/node/.openclaw/workspace/data/job-status/{JOB_ID}.json"
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump({
+            "status": "ok",
+            "job": "Gmail weekly archive",
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+        }, f)
 
 # Archived after N days (age-based, regardless of read status)
 LABELS_TO_ARCHIVE = {
@@ -147,6 +199,21 @@ def main(days=7, dry_run=False):
         print("(DRY RUN — no changes made)")
     if total_errors:
         print(f"Errors: {total_errors}")
+
+    if not dry_run:
+        status = "✅" if not total_errors else "⚠️"
+        msg = (
+            f"{status} *Gmail Weekly Archive*\n\n"
+            f"Archived {total_archived} email(s)"
+            + (f" with {total_errors} error(s)" if total_errors else "")
+            + ".\n\n_(Promo sender report follows)_"
+        )
+        if not _send_telegram(msg):
+            print("TELEGRAM_SEND_FAILED — not writing job status", file=sys.stderr)
+            sys.exit(1)
+        _write_job_status()
+        print("Telegram sent and job status written")
+
     return total_archived
 
 if __name__ == "__main__":

@@ -14,6 +14,7 @@ services:
     volumes:
       - /opt/openclaw/config:/home/node/.openclaw
       - /opt/openclaw/workspace:/home/node/.openclaw/workspace
+      - /opt/openclaw/docs/skills:/home/node/.openclaw/workspace/skills
       - /opt/openclaw/workspace-family:/home/node/.openclaw/workspace-family
       - /opt/openclaw/logs:/tmp/openclaw
       - /opt/openclaw/data:/home/node/.openclaw/workspace/data

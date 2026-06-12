@@ -128,8 +128,6 @@ Thumbs.db
 # STIC scraper — separate GitHub repo, not tracked here
 docs-stic/
 
-# workspace/skills is a duplicate — docs/skills is canonical (docker-mounted)
-workspace/skills/
 
 # workspace runtime state and binaries
 workspace/.bin/

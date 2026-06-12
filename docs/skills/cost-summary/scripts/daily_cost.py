@@ -2,14 +2,13 @@
 """
 OpenClaw Daily Cost Summary
 -----------------------------
-Queries the Manifest SQLite DB for today's and month-to-date token usage
-and cost, broken down by model, then sends a Telegram summary.
-
-Also checks if monthly spend has crossed the 90% alert threshold ($26).
+Queries the Manifest SQLite DB for yesterday's token usage and cost,
+tracks running balances for Anthropic (calculated) and DeepSeek (API),
+and alerts when either drops below $2.
 
 Usage:
-    daily_cost.py --summary          # send daily summary (11pm cron)
-    daily_cost.py --budget-check     # only alert if 90% threshold crossed
+    daily_cost.py --summary          # send daily summary + update balances (05:00 cron)
+    daily_cost.py --budget-check     # only alert if balance < $2 (hourly cron)
     daily_cost.py --print            # print report without sending
 """
 
@@ -26,42 +25,137 @@ import urllib.error
 # Config
 # ---------------------------------------------------------------------------
 DB_PATH = os.environ.get('MANIFEST_DB_PATH', '/opt/openclaw/config/manifest/manifest.db')
-BOT_TOKEN = os.environ.get('TELEGRAM_TOKEN') or os.environ.get('TELEGRAM_BOT_TOKEN', '')
+BALANCE_STATE_PATH = os.environ.get(
+    'BALANCE_STATE_PATH',
+    '/home/node/.openclaw/workspace/data/balances.json',
+)
+ALERT_SENT_FLAG = os.environ.get(
+    'ALERT_SENT_FLAG',
+    '/home/node/.openclaw/workspace/data/cost-alert-sent.json',
+)
+LOW_BALANCE_THRESHOLD = 2.00
+GBP_PER_USD = 0.79
+JOB_ID_SUMMARY = 'cf60889b-2312-470f-9c8e-bd63b69e9792'
+JOB_ID_BUDGET_CHECK = '58570823-38b6-4238-a98b-e3648a2d7ca2'
+
+# Seed: known Anthropic starting balance as of 2026-06-12
+ANTHROPIC_SEED_USD = 6.87
+ANTHROPIC_SEED_DATE = '2026-06-12'
+
+
+def _write_job_status(job_id: str, job_name: str) -> None:
+    path = f'/home/node/.openclaw/workspace/data/job-status/{job_id}.json'
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w') as f:
+        json.dump({
+            'status': 'ok',
+            'job': job_name,
+            'completed_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }, f)
+
+
+def _load_secrets() -> dict:
+    for path in [
+        os.path.expanduser('~/.openclaw/secrets.json'),
+        '/opt/openclaw/secrets.json',
+    ]:
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def _load_token() -> str:
+    token = os.environ.get('TELEGRAM_TOKEN') or os.environ.get('TELEGRAM_BOT_TOKEN', '')
+    if token:
+        return token
+    secrets = _load_secrets()
+    return secrets.get('TELEGRAM_TOKEN', '')
+
+
+BOT_TOKEN = _load_token()
 CHAT_ID = '1163684840'
-MONTHLY_BUDGET_USD = 30.00
-ALERT_THRESHOLD_PCT = 0.90          # alert at 90% = $26
-GBP_PER_USD = 0.79                  # approximate; updated manually or via API
 
-# Month 1 budget is $30; subsequent months also $30 per project memory
-MONTH_1_BUDGET = 30.00
-ONGOING_BUDGET = 30.00
-
-# Model display name mapping (response_model → friendly name)
 MODEL_NAMES = {
-    'deepseek-chat':        'DeepSeek V3.2',
-    'deepseek/deepseek-chat': 'DeepSeek V3.2',
-    'deepseek-reasoner':    'DeepSeek R1',
-    'deepseek/deepseek-reasoner': 'DeepSeek R1',
-    'claude-sonnet-4-6':    'Claude Sonnet',
-    'claude-sonnet-4-5':    'Claude Sonnet',
-    'anthropic/claude-sonnet-4-6': 'Claude Sonnet',
+    'deepseek-chat':                    'DeepSeek V3.2',
+    'deepseek/deepseek-chat':           'DeepSeek V3.2',
+    'deepseek-reasoner':                'DeepSeek R1',
+    'deepseek/deepseek-reasoner':       'DeepSeek R1',
+    'claude-sonnet-4-6':                'Claude Sonnet',
+    'claude-sonnet-4-5':                'Claude Sonnet',
+    'anthropic/claude-sonnet-4-6':      'Claude Sonnet',
 }
 
-# Model costs (USD per token) — used as fallback if DB cost_usd is zero
 MODEL_COSTS = {
-    'deepseek-chat':        {'input': 2.8e-7,  'output': 4.2e-7,  'cache_read': 2.8e-8},
-    'deepseek/deepseek-chat': {'input': 2.8e-7, 'output': 4.2e-7, 'cache_read': 2.8e-8},
-    'deepseek-reasoner':    {'input': 5.5e-7,  'output': 2.19e-6, 'cache_read': 5.5e-8},
-    'deepseek/deepseek-reasoner': {'input': 5.5e-7, 'output': 2.19e-6, 'cache_read': 5.5e-8},
-    'claude-sonnet-4-6':    {'input': 3.0e-6,  'output': 1.5e-5,  'cache_read': 3.0e-7},
-    'anthropic/claude-sonnet-4-6': {'input': 3.0e-6, 'output': 1.5e-5, 'cache_read': 3.0e-7},
+    'deepseek-chat':                    {'input': 2.8e-7,  'output': 4.2e-7,  'cache_read': 2.8e-8},
+    'deepseek/deepseek-chat':           {'input': 2.8e-7,  'output': 4.2e-7,  'cache_read': 2.8e-8},
+    'deepseek-reasoner':                {'input': 5.5e-7,  'output': 2.19e-6, 'cache_read': 5.5e-8},
+    'deepseek/deepseek-reasoner':       {'input': 5.5e-7,  'output': 2.19e-6, 'cache_read': 5.5e-8},
+    'claude-sonnet-4-6':                {'input': 3.0e-6,  'output': 1.5e-5,  'cache_read': 3.0e-7},
+    'anthropic/claude-sonnet-4-6':      {'input': 3.0e-6,  'output': 1.5e-5,  'cache_read': 3.0e-7},
 }
 
-ALERT_SENT_FLAG = '/home/node/.openclaw/workspace/data/cost-alert-sent.json'
+MODEL_ORDER = ['DeepSeek V3.2', 'DeepSeek R1', 'Claude Sonnet']
 
 
 # ---------------------------------------------------------------------------
-# DB helpers
+# Balance state
+# ---------------------------------------------------------------------------
+
+def _load_balances() -> dict:
+    if os.path.exists(BALANCE_STATE_PATH):
+        try:
+            with open(BALANCE_STATE_PATH) as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {
+        'anthropic': {
+            'balance_usd': ANTHROPIC_SEED_USD,
+            'last_deducted_date': ANTHROPIC_SEED_DATE,
+        },
+        'deepseek': {
+            'balance_usd': None,
+            'last_synced': None,
+        },
+    }
+
+
+def _save_balances(state: dict) -> None:
+    os.makedirs(os.path.dirname(BALANCE_STATE_PATH), exist_ok=True)
+    with open(BALANCE_STATE_PATH, 'w') as f:
+        json.dump(state, f, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# DeepSeek balance API
+# ---------------------------------------------------------------------------
+
+def _fetch_deepseek_balance() -> float | None:
+    secrets = _load_secrets()
+    key = secrets.get('DEEPSEEK_KEY', '')
+    if not key:
+        print('[cost-summary] DEEPSEEK_KEY not found in secrets')
+        return None
+    try:
+        req = urllib.request.Request(
+            'https://api.deepseek.com/user/balance',
+            headers={'Accept': 'application/json', 'Authorization': f'Bearer {key}'},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.load(resp)
+        for info in data.get('balance_infos', []):
+            if info.get('currency') == 'USD':
+                return float(info.get('topped_up_balance', 0))
+    except Exception as e:
+        print(f'[cost-summary] DeepSeek balance fetch error: {e}')
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Manifest DB helpers
 # ---------------------------------------------------------------------------
 
 def _connect() -> sqlite3.Connection:
@@ -72,16 +166,7 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
-def _today_range() -> tuple[str, str]:
-    """Return ISO start/end strings for today in UTC."""
-    now = datetime.datetime.now(datetime.timezone.utc)
-    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
-    return start.strftime('%Y-%m-%d %H:%M:%S'), end.strftime('%Y-%m-%d %H:%M:%S')
-
-
 def _yesterday_range() -> tuple[str, str]:
-    """Return ISO start/end strings for yesterday in UTC."""
     now = datetime.datetime.now(datetime.timezone.utc)
     yesterday = now - datetime.timedelta(days=1)
     start = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -90,38 +175,29 @@ def _yesterday_range() -> tuple[str, str]:
 
 
 def _month_range() -> tuple[str, str]:
-    """Return ISO start/end strings for the current calendar month in UTC."""
     now = datetime.datetime.now(datetime.timezone.utc)
     start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    # End of month: first day of next month minus 1 second
     if now.month == 12:
-        end = now.replace(year=now.year + 1, month=1, day=1,
-                          hour=0, minute=0, second=0, microsecond=0)
+        end_base = now.replace(year=now.year + 1, month=1, day=1,
+                               hour=0, minute=0, second=0, microsecond=0)
     else:
-        end = now.replace(month=now.month + 1, day=1,
-                          hour=0, minute=0, second=0, microsecond=0)
-    end = end - datetime.timedelta(seconds=1)
+        end_base = now.replace(month=now.month + 1, day=1,
+                               hour=0, minute=0, second=0, microsecond=0)
+    end = end_base - datetime.timedelta(seconds=1)
     return start.strftime('%Y-%m-%d %H:%M:%S'), end.strftime('%Y-%m-%d %H:%M:%S')
 
 
 def _calc_cost(row_model: str, input_tok: int, output_tok: int, cache_read: int,
                db_cost: float) -> float:
-    """Use DB cost_usd if non-zero, else compute from token prices."""
     if db_cost and db_cost > 0:
         return db_cost
     rates = MODEL_COSTS.get(row_model, {})
-    if not rates:
-        return 0.0
     return (input_tok * rates.get('input', 0) +
             output_tok * rates.get('output', 0) +
             cache_read * rates.get('cache_read', 0))
 
 
 def query_usage(start: str, end: str) -> dict:
-    """
-    Return per-model usage for the given time window.
-    Result: {model_key: {tokens, input_tokens, output_tokens, cost_usd}}
-    """
     conn = _connect()
     cur = conn.cursor()
     cur.execute("""
@@ -136,7 +212,6 @@ def query_usage(start: str, end: str) -> dict:
           AND status = 'ok'
         GROUP BY model
     """, (start, end))
-
     result = {}
     for row in cur.fetchall():
         model = row['model'] or 'unknown'
@@ -157,7 +232,6 @@ def query_usage(start: str, end: str) -> dict:
 
 
 def group_by_friendly(usage: dict) -> dict:
-    """Merge model variants under their friendly display name."""
     out = {}
     for model_key, data in usage.items():
         friendly = MODEL_NAMES.get(model_key, model_key)
@@ -169,14 +243,26 @@ def group_by_friendly(usage: dict) -> dict:
     return out
 
 
+def _is_anthropic_model(model_key: str) -> bool:
+    return 'claude' in model_key.lower()
+
+
+def _anthropic_spend(usage_raw: dict) -> float:
+    """Sum cost_usd for all Anthropic (Claude) models in a raw usage dict."""
+    return sum(v['cost_usd'] for k, v in usage_raw.items() if _is_anthropic_model(k))
+
+
 # ---------------------------------------------------------------------------
-# Alert state (avoid duplicate budget alerts per month)
+# Alert state (avoid duplicate low-balance alerts)
 # ---------------------------------------------------------------------------
 
 def _load_alert_state() -> dict:
     if os.path.exists(ALERT_SENT_FLAG):
-        with open(ALERT_SENT_FLAG) as f:
-            return json.load(f)
+        try:
+            with open(ALERT_SENT_FLAG) as f:
+                return json.load(f)
+        except Exception:
+            pass
     return {}
 
 
@@ -186,15 +272,22 @@ def _save_alert_state(state: dict) -> None:
         json.dump(state, f, indent=2)
 
 
-def _alert_already_sent(month_key: str) -> bool:
-    state = _load_alert_state()
-    return state.get(month_key, False)
+def _alert_already_sent(key: str) -> bool:
+    return _load_alert_state().get(key, False)
 
 
-def _mark_alert_sent(month_key: str) -> None:
+def _mark_alert_sent(key: str) -> None:
     state = _load_alert_state()
-    state[month_key] = True
+    state[key] = True
     _save_alert_state(state)
+
+
+def _clear_alert(key: str) -> None:
+    """Clear an alert flag once balance recovers above threshold."""
+    state = _load_alert_state()
+    if key in state:
+        del state[key]
+        _save_alert_state(state)
 
 
 # ---------------------------------------------------------------------------
@@ -216,7 +309,7 @@ def _telegram_send(text: str) -> bool:
         req = urllib.request.Request(
             url, data=payload,
             headers={'Content-Type': 'application/json'},
-            method='POST'
+            method='POST',
         )
         with urllib.request.urlopen(req, timeout=10) as resp:
             result = json.load(resp)
@@ -227,7 +320,7 @@ def _telegram_send(text: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Report builder
+# Formatting
 # ---------------------------------------------------------------------------
 
 def _fmt_tokens(n: int) -> str:
@@ -238,38 +331,126 @@ def _fmt_tokens(n: int) -> str:
     return str(n)
 
 
-def build_report(send: bool = True, yesterday: bool = False) -> str:
-    if yesterday:
-        today_start, today_end = _yesterday_range()
-        # Use yesterday's date for display and month key
-        report_dt = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=1)
+def _balance_bar(balance: float, capacity: float = 10.0) -> str:
+    """Simple text indicator: ██░░░░░░░░ style."""
+    pct = min(1.0, max(0.0, balance / capacity))
+    filled = round(pct * 10)
+    return '█' * filled + '░' * (10 - filled)
+
+
+# ---------------------------------------------------------------------------
+# Balance update (run once per day in --summary)
+# ---------------------------------------------------------------------------
+
+def update_balances(yesterday_usage_raw: dict) -> dict:
+    """
+    Deduct yesterday's Anthropic spend from running balance,
+    sync DeepSeek balance from API.
+    Returns updated balance state.
+    """
+    state = _load_balances()
+    now_date = datetime.datetime.now(datetime.timezone.utc).date()
+    yesterday_str = (now_date - datetime.timedelta(days=1)).strftime('%Y-%m-%d')
+
+    # Anthropic: deduct yesterday's spend if not already done
+    anthropic_info = state.setdefault('anthropic', {
+        'balance_usd': ANTHROPIC_SEED_USD,
+        'last_deducted_date': ANTHROPIC_SEED_DATE,
+    })
+    if anthropic_info.get('last_deducted_date') != yesterday_str:
+        spend = _anthropic_spend(yesterday_usage_raw)
+        anthropic_info['balance_usd'] = max(0.0, float(anthropic_info.get('balance_usd', 0)) - spend)
+        anthropic_info['last_deducted_date'] = yesterday_str
+        print(f'[cost-summary] Anthropic balance: deducted ${spend:.4f}, now ${anthropic_info["balance_usd"]:.4f}')
     else:
-        today_start, today_end = _today_range()
-        report_dt = datetime.datetime.now(datetime.timezone.utc)
+        print(f'[cost-summary] Anthropic balance already updated for {yesterday_str}')
+
+    # DeepSeek: fetch real balance from API
+    deepseek_info = state.setdefault('deepseek', {'balance_usd': None, 'last_synced': None})
+    ds_balance = _fetch_deepseek_balance()
+    if ds_balance is not None:
+        deepseek_info['balance_usd'] = ds_balance
+        deepseek_info['last_synced'] = now_date.strftime('%Y-%m-%d')
+        print(f'[cost-summary] DeepSeek balance synced: ${ds_balance:.4f}')
+    else:
+        print('[cost-summary] DeepSeek balance sync failed — keeping last known value')
+
+    _save_balances(state)
+    return state
+
+
+# ---------------------------------------------------------------------------
+# Low balance alerts
+# ---------------------------------------------------------------------------
+
+def check_low_balance_alerts(balances: dict, send: bool = True) -> list[str]:
+    """Check both balances and fire alerts if below $2. Returns list of alert messages sent."""
+    alerts_sent = []
+    today_key = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d')
+
+    providers = [
+        ('anthropic', 'Anthropic', balances.get('anthropic', {}).get('balance_usd')),
+        ('deepseek', 'DeepSeek', balances.get('deepseek', {}).get('balance_usd')),
+    ]
+
+    for key, label, balance in providers:
+        if balance is None:
+            continue
+        alert_key = f'low_balance_{key}_{today_key}'
+        if balance < LOW_BALANCE_THRESHOLD:
+            if not _alert_already_sent(alert_key):
+                msg = (
+                    f'⚠️ *{label} Low Balance*\n'
+                    f'Balance: ${balance:.2f} (£{balance * GBP_PER_USD:.2f})\n'
+                    f'Threshold: ${LOW_BALANCE_THRESHOLD:.2f}'
+                )
+                print(f'[cost-summary] LOW BALANCE ALERT: {label} ${balance:.2f}')
+                if send:
+                    if _telegram_send(msg):
+                        _mark_alert_sent(alert_key)
+                alerts_sent.append(msg)
+        else:
+            # Balance recovered — clear the flag so alert fires again if it dips
+            _clear_alert(alert_key)
+
+    return alerts_sent
+
+
+# ---------------------------------------------------------------------------
+# Report builder
+# ---------------------------------------------------------------------------
+
+def build_report(send: bool = True, update_balance: bool = False) -> str:
+    yesterday_start, yesterday_end = _yesterday_range()
     month_start, month_end = _month_range()
     now = datetime.datetime.now(datetime.timezone.utc)
-    date_str = report_dt.strftime('%d %b %Y')
-    month_key = now.strftime('%Y-%m')
+    yesterday_dt = now - datetime.timedelta(days=1)
+    date_str = yesterday_dt.strftime('%d %b %Y')
 
-    # Query
-    today_raw = query_usage(today_start, today_end)
+    yesterday_raw = query_usage(yesterday_start, yesterday_end)
     month_raw = query_usage(month_start, month_end)
 
-    today_by_model = group_by_friendly(today_raw)
+    yesterday_by_model = group_by_friendly(yesterday_raw)
     month_by_model = group_by_friendly(month_raw)
 
-    today_total_usd = sum(v['cost_usd'] for v in today_by_model.values())
+    yesterday_total_usd = sum(v['cost_usd'] for v in yesterday_by_model.values())
     month_total_usd = sum(v['cost_usd'] for v in month_by_model.values())
+    yesterday_total_gbp = yesterday_total_usd * GBP_PER_USD
 
-    today_total_gbp = today_total_usd * GBP_PER_USD
-    month_total_gbp = month_total_usd * GBP_PER_USD
-    remaining_usd = max(0.0, MONTHLY_BUDGET_USD - month_total_usd)
+    # Update balances if this is the daily summary run
+    if update_balance:
+        balances = update_balances(yesterday_raw)
+    else:
+        balances = _load_balances()
 
-    # Format per-model lines (ordered)
-    MODEL_ORDER = ['DeepSeek V3.2', 'DeepSeek R1', 'Claude Sonnet']
+    anthropic_bal = balances.get('anthropic', {}).get('balance_usd', ANTHROPIC_SEED_USD)
+    deepseek_bal = balances.get('deepseek', {}).get('balance_usd')
+    deepseek_synced = balances.get('deepseek', {}).get('last_synced', 'never')
+
+    # Per-model lines for yesterday
     model_lines = []
     for name in MODEL_ORDER:
-        data = today_by_model.get(name, {})
+        data = yesterday_by_model.get(name, {})
         cost = data.get('cost_usd', 0.0)
         toks = data.get('tokens', 0)
         if cost > 0 or toks > 0:
@@ -279,13 +460,31 @@ def build_report(send: bool = True, yesterday: bool = False) -> str:
 
     model_section = '\n'.join(model_lines)
 
+    # Balance lines
+    deepseek_bal_str = (
+        f'${deepseek_bal:.2f} (£{deepseek_bal * GBP_PER_USD:.2f}) — synced {deepseek_synced}'
+        if deepseek_bal is not None else 'unknown'
+    )
+    anthropic_bal_str = f'${anthropic_bal:.2f} (£{anthropic_bal * GBP_PER_USD:.2f}) — calculated'
+
+    # Low balance warnings inline
+    low_warnings = []
+    if anthropic_bal < LOW_BALANCE_THRESHOLD:
+        low_warnings.append(f'⚠️ Anthropic balance low: ${anthropic_bal:.2f}')
+    if deepseek_bal is not None and deepseek_bal < LOW_BALANCE_THRESHOLD:
+        low_warnings.append(f'⚠️ DeepSeek balance low: ${deepseek_bal:.2f}')
+    warning_section = ('\n' + '\n'.join(low_warnings)) if low_warnings else ''
+
     report = (
         f'📊 *Daily AI Cost Summary*\n'
         f'Date: {date_str}\n\n'
         f'{model_section}\n\n'
-        f"Today's total: ${today_total_usd:.4f} (£{today_total_gbp:.2f})\n"
-        f'Month to date: ${month_total_usd:.4f} (£{month_total_gbp:.2f}) of ${MONTHLY_BUDGET_USD:.0f} budget\n'
-        f'Remaining budget: ${remaining_usd:.2f}'
+        f"Yesterday: ${yesterday_total_usd:.4f} (£{yesterday_total_gbp:.2f})\n"
+        f'Month to date: ${month_total_usd:.4f}\n\n'
+        f'💳 *Balances*\n'
+        f'Anthropic: {anthropic_bal_str}\n'
+        f'DeepSeek: {deepseek_bal_str}'
+        f'{warning_section}'
     )
 
     print(report)
@@ -293,54 +492,36 @@ def build_report(send: bool = True, yesterday: bool = False) -> str:
     if send:
         ok = _telegram_send(report)
         print(f'[cost-summary] Daily summary sent: {ok}')
+        if ok:
+            _write_job_status(JOB_ID_SUMMARY, 'Daily Cost Summary')
 
-    # Budget alert check
-    alert_threshold = MONTHLY_BUDGET_USD * ALERT_THRESHOLD_PCT
-    if month_total_usd >= alert_threshold:
-        if not _alert_already_sent(month_key):
-            pct = (month_total_usd / MONTHLY_BUDGET_USD) * 100
-            alert_msg = (
-                f'⚠️ *Budget Alert — {pct:.0f}% used*\n'
-                f'Monthly spend has reached ${month_total_usd:.2f} '
-                f'(£{month_total_gbp:.2f}) of ${MONTHLY_BUDGET_USD:.0f} budget.\n'
-                f'Remaining: ${remaining_usd:.2f}'
-            )
-            print(f'[cost-summary] BUDGET ALERT: {pct:.0f}% used (${month_total_usd:.2f})')
-            if send:
-                _telegram_send(alert_msg)
-                _mark_alert_sent(month_key)
+    if update_balance:
+        check_low_balance_alerts(balances, send=send)
 
     return report
 
 
+# ---------------------------------------------------------------------------
+# Budget check (hourly cron — just check stored balances, no API call)
+# ---------------------------------------------------------------------------
+
 def budget_check_only() -> None:
-    """Just check if alert threshold crossed — no daily summary."""
-    month_start, month_end = _month_range()
-    now = datetime.datetime.now(datetime.timezone.utc)
-    month_key = now.strftime('%Y-%m')
+    balances = _load_balances()
+    anthropic_bal = balances.get('anthropic', {}).get('balance_usd', ANTHROPIC_SEED_USD)
+    deepseek_bal = balances.get('deepseek', {}).get('balance_usd')
 
-    month_raw = query_usage(month_start, month_end)
-    month_total_usd = sum(v['cost_usd'] for v in month_raw.values())
-    month_total_gbp = month_total_usd * GBP_PER_USD
-    remaining_usd = max(0.0, MONTHLY_BUDGET_USD - month_total_usd)
-    alert_threshold = MONTHLY_BUDGET_USD * ALERT_THRESHOLD_PCT
+    print(f'[cost-summary] Anthropic balance: ${anthropic_bal:.4f}')
+    if deepseek_bal is not None:
+        print(f'[cost-summary] DeepSeek balance: ${deepseek_bal:.4f}')
 
-    print(f'[cost-summary] MTD: ${month_total_usd:.4f} / ${MONTHLY_BUDGET_USD:.0f} '
-          f'(threshold: ${alert_threshold:.0f})')
-
-    if month_total_usd >= alert_threshold and not _alert_already_sent(month_key):
-        pct = (month_total_usd / MONTHLY_BUDGET_USD) * 100
-        alert_msg = (
-            f'⚠️ *Budget Alert — {pct:.0f}% used*\n'
-            f'Monthly spend has reached ${month_total_usd:.2f} '
-            f'(£{month_total_gbp:.2f}) of ${MONTHLY_BUDGET_USD:.0f} budget.\n'
-            f'Remaining: ${remaining_usd:.2f}'
-        )
-        _telegram_send(alert_msg)
-        _mark_alert_sent(month_key)
-        print('[cost-summary] Budget alert sent.')
+    alerts = check_low_balance_alerts(balances, send=True)
+    if alerts:
+        print(f'[cost-summary] {len(alerts)} low balance alert(s) sent.')
     else:
-        print('[cost-summary] Under threshold or alert already sent for this month.')
+        print('[cost-summary] Balances OK — no alerts needed.')
+
+    # Budget check success = ran cleanly, regardless of whether an alert was sent
+    _write_job_status(JOB_ID_BUDGET_CHECK, 'Budget Alert Check')
 
 
 # ---------------------------------------------------------------------------
@@ -351,21 +532,19 @@ def main():
     parser = argparse.ArgumentParser(description='OpenClaw Daily Cost Summary')
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument('--summary', action='store_true',
-                       help='Send daily summary via Telegram')
+                       help='Send daily summary via Telegram and update balances')
     group.add_argument('--budget-check', action='store_true',
-                       help='Only send alert if 90%% threshold exceeded')
+                       help='Only send alert if balance < $2 (uses stored values)')
     group.add_argument('--print', action='store_true', dest='print_only',
-                       help='Print report without sending')
-    parser.add_argument('--yesterday', action='store_true',
-                        help='Report on yesterday\'s usage instead of today\'s')
+                       help='Print report without sending or updating balances')
     args = parser.parse_args()
 
     if args.summary:
-        build_report(send=True, yesterday=args.yesterday)
+        build_report(send=True, update_balance=True)
     elif args.budget_check:
         budget_check_only()
     elif args.print_only:
-        build_report(send=False, yesterday=args.yesterday)
+        build_report(send=False, update_balance=False)
 
 
 if __name__ == '__main__':

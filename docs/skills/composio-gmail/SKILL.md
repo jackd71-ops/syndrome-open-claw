@@ -48,6 +48,7 @@ Content-Type: application/json
 **Entity ID:** `default` (maps to the authorised Gmail account)
 
 **Auth Config ID:** `ac_Foq5RfbQ7hud` (Composio-managed OAuth, created 2026-04-08)
+**Active Connection ID:** `ca_wrFuGMSibXrS` (re-authorised 2026-06-12)
 
 ## Check OAuth Connection Status
 

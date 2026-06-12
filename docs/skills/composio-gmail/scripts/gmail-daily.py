@@ -10,10 +10,60 @@ import json
 import os
 import sys
 import argparse
+import urllib.request
 from datetime import datetime, timezone
 
 PROMO_TRACKER = os.path.expanduser(
     "~/.openclaw/workspace/skills/promo-tracker/promo-tracker.py")
+TELEGRAM_CHAT_ID = "1163684840"
+SECRETS_PATH = "/opt/openclaw/secrets.json"
+
+
+def _load_telegram_token() -> str:
+    for path in [os.path.expanduser("~/.openclaw/secrets.json"), SECRETS_PATH]:
+        try:
+            with open(path) as f:
+                return json.load(f).get("TELEGRAM_TOKEN", "")
+        except Exception:
+            pass
+    return ""
+
+
+def _send_telegram(text: str) -> bool:
+    token = _load_telegram_token()
+    if not token:
+        print("TELEGRAM_TOKEN not found", file=sys.stderr)
+        return False
+    payload = json.dumps({
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": text,
+        "parse_mode": "Markdown",
+        "disable_web_page_preview": True,
+    }).encode()
+    try:
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            result = json.load(resp)
+            return result.get("ok", False)
+    except Exception as e:
+        print(f"Telegram error: {e}", file=sys.stderr)
+        return False
+
+
+def _write_job_status(job_id: str, label: str) -> None:
+    path = f"/home/node/.openclaw/workspace/data/job-status/{job_id}.json"
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump({
+            "status": "ok",
+            "job": f"Gmail {label} briefing",
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+        }, f)
 
 BLOCKED_SUBJECTS = [
     'otp','one-time password','2fa','two-factor','verify your email',
@@ -238,7 +288,22 @@ def archive_message(message_id):
     })
     return _check_response("archive_message", message_id, resp)
 
-def main(since_hours=12):
+def _format_telegram_summary(summary: dict, label: str) -> str:
+    prefix = f"📧 *Gmail {label} briefing*\n\n"
+    unlabelled = summary.get("unlabelled", [])
+    if not unlabelled:
+        auto = sum(summary.get("labelled", {}).values())
+        return f"{prefix}Nothing needs your attention.\n_(auto-labelled {auto} emails)_"
+    lines = [f"{len(unlabelled)} email(s) need attention:\n"]
+    for e in unlabelled:
+        lines.append(f"• {e['from']} — {e['subject']}")
+    auto = sum(summary.get("labelled", {}).values())
+    if auto:
+        lines.append(f"\n_(auto-labelled {auto} emails)_")
+    return prefix + "\n".join(lines)
+
+
+def main(since_hours=12, job_id: str = "", label: str = ""):
     print(f"Fetching unread emails from last {since_hours} hours...")
 
     result = composio_call("GMAIL_FETCH_EMAILS", {
@@ -306,24 +371,22 @@ def main(since_hours=12):
             })
             print(f"  [inbox] {sender_name} — {subject[:60]}")
 
-    # Print summary for agent to forward to Telegram
-    print("\n--- SUMMARY ---")
-    print(f"Total processed: {summary['total']}")
-    print(f"Filtered (security): {summary['filtered']}")
-    for label, count in summary["labelled"].items():
-        print(f"  {label}: {count} labelled/archived")
+    print(f"\nTotal processed: {summary['total']}, filtered: {summary['filtered']}")
 
-    if summary["unlabelled"]:
-        print(f"\n{len(summary['unlabelled'])} emails need attention:")
-        for e in summary["unlabelled"]:
-            print(f"  • {e['from']} — {e['subject']}")
-    else:
-        print("Nothing needs your attention.")
+    if job_id:
+        msg = _format_telegram_summary(summary, label or "")
+        if not _send_telegram(msg):
+            print("TELEGRAM_SEND_FAILED — not writing job status", file=sys.stderr)
+            sys.exit(1)
+        _write_job_status(job_id, label or "")
+        print(f"Telegram sent and job status written for {job_id}")
 
     return summary
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--since-hours", type=int, default=12)
+    parser.add_argument("--job-id", default="", help="Job UUID — triggers Telegram send + status write")
+    parser.add_argument("--label", default="", help="morning or evening")
     args = parser.parse_args()
-    main(args.since_hours)
+    main(args.since_hours, job_id=args.job_id, label=args.label)
