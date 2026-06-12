@@ -1,0 +1,18 @@
+# The Dockerfile COPYs nothing from the repo — all plugins are npm-installed at
+# build time. So the build context only needs the Dockerfile itself. Exclude
+# everything heavy/secret to keep the context tiny and avoid leaking secrets.
+.git/
+config/
+workspace/
+workspace-family/
+data/
+logs/
+backups/
+ha-config/
+docs/
+docs-stic/
+secrets.json
+.env
+.env.*
+*.db
+*.log

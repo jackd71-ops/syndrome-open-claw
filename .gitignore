@@ -141,3 +141,9 @@ ha-config/
 
 # skills/ at root level (stray copy)
 /skills/
+
+# Runtime dirs created by 2026.6.5 + upgrade backup (not source-of-truth)
+config/extensions-bak/
+config/plugin-skills/
+config/state/
+config/workspace-attestations/
