@@ -507,20 +507,17 @@ def build_report(send: bool = True, update_balance: bool = False) -> str:
 
 def budget_check_only() -> None:
     balances = _load_balances()
-    anthropic_bal = balances.get('anthropic', {}).get('balance_usd', ANTHROPIC_SEED_USD)
-    deepseek_bal = balances.get('deepseek', {}).get('balance_usd')
-
-    print(f'[cost-summary] Anthropic balance: ${anthropic_bal:.4f}')
-    if deepseek_bal is not None:
-        print(f'[cost-summary] DeepSeek balance: ${deepseek_bal:.4f}')
 
     alerts = check_low_balance_alerts(balances, send=True)
     if alerts:
-        print(f'[cost-summary] {len(alerts)} low balance alert(s) sent.')
-    else:
-        print('[cost-summary] Balances OK — no alerts needed.')
+        # Only print when there is a problem — agent silence on healthy runs
+        anthropic_bal = balances.get('anthropic', {}).get('balance_usd', ANTHROPIC_SEED_USD)
+        deepseek_bal = balances.get('deepseek', {}).get('balance_usd')
+        print(f'[cost-summary] LOW BALANCE — Anthropic: ${anthropic_bal:.4f}', end='')
+        if deepseek_bal is not None:
+            print(f', DeepSeek: ${deepseek_bal:.4f}', end='')
+        print(f' — {len(alerts)} alert(s) sent.')
 
-    # Budget check success = ran cleanly, regardless of whether an alert was sent
     _write_job_status(JOB_ID_BUDGET_CHECK, 'Budget Alert Check')
 
 

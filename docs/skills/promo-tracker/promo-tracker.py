@@ -14,7 +14,7 @@ from datetime import date, timedelta
 from dateutil.relativedelta import relativedelta
 
 TRACKING_FILE = os.path.expanduser("~/.openclaw/workspace/memory/promo-senders.json")
-SECRETS_FILE = "/opt/openclaw/secrets.json"
+SECRETS_FILE = os.path.expanduser("~/.openclaw/secrets.json")
 
 def load_secrets():
     with open(SECRETS_FILE) as f:
