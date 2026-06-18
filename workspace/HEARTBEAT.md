@@ -1,7 +1,5 @@
-# HEARTBEAT.md Template
+# Heartbeat — strict instructions
 
-```markdown
-# Keep this file empty (or with only comments) to skip heartbeat API calls.
+DO NOT check budgets, balances, provider spending, or API costs during heartbeat. This is handled by the daily cron job at 5am, which only messages if there's an issue.
 
-# Add tasks below when you want the agent to check something periodically.
-```
+If nothing urgent: reply HEARTBEAT_OK.
